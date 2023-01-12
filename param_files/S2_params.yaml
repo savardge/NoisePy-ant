@@ -1,0 +1,15 @@
+MAX_MEM: 10.0 # maximum memory allowed per core in GB
+
+# absolute path parameters
+rootpath: '/home/users/s/savardg/scratch/aegansea'  # root path for this data processing
+CCFDIR: '/home/users/s/savardg/scratch/aegansea/CCF_25sps_3c_1bit_acorr_lag60'  # dir where CC data is stored
+STACKDIR: '/home/users/s/savardg/scratch/aegansea/STACK_25sps_3c_1bit_acorr_lag60'  # dir where stacked data is going to
+
+# station info including network,station,channel,latitude,longitude,elevation
+locations: '/home/users/s/savardg/scratch/aegansea/station_locations_noisepy_cleaned_NEZ_wnet.csv'
+
+# define new stacking para
+keep_substack: True  # False                                          # keep all sub-stacks in final ASDF file
+flag: True  # output intermediate args for debugging
+stack_method: 'all'  # linear, pws, robust, nroot, selective, auto_covariance or all
+ncomp: 3
