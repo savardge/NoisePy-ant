@@ -1,14 +1,29 @@
+""" Calculate PPSD for one station for all dates available and optionally make plots.
+Call:
+python ppsd_1sta.py [station] [channel] [config_file]
+
+config_file contains following parameters:
+- datadir
+- figdir
+- npzdir
+- xmlfile
+- smartsolo # Whether we are doing PPSD for smartSolo geophones or not. See gain correction.
+- makefig # Whether to make plots or not
+"""
+
 import sys
 import obspy
 import glob
 import os
 from obspy.signal import PPSD
 from obspy.imaging.cm import pqlx
-
-# ***
 from obspy.imaging.util import _set_xaxis_obspy_dates
 from obspy.imaging.cm import obspy_sequential
 import numpy as np
+import matplotlib.pyplot as plt
+import yaml
+
+
 def plot_spectrogram(self, cmap=obspy_sequential, clim=None, xlims=None, ylims=None, grid=True,
                          filename=None, show=True):
     """
@@ -100,18 +115,32 @@ def plot_spectrogram(self, cmap=obspy_sequential, clim=None, xlims=None, ylims=N
     else:
         plt.draw()
     return fig
+
+
+def fix_trace(tr):
+    """ Fix trace amplitude for SmartSolo geophone"""
+    tr.stats.sampling_rate = 250.0  # Force sampling rate to be exactly 250
+    tr.data /= 1000  # Convert mV to V
+    return tr
+
 # ***
 
-# Input 
-station = sys.argv[1] # "3006977"
-channel = sys.argv[2] # DPZ
+# Input parameters
+station = sys.argv[1]  # "3006977"
+channel = sys.argv[2]  # DPZ
+config_file = sys.argv[3]  # YAML File with parameters (paths and options)
 
 # Paths
-datadir = "/home/share/cdff/riehen/raw_data/"
-figdir = "/home/users/s/savardg/scratch/riehen/ppsd/figures"
-npzdir = "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz"
-inv = obspy.read_inventory("/home/users/s/savardg/riehen/ppsd/riehen_stations.xml")
-smartsolo = True # Whether we are doing PPSD for smartSolo geophones or not
+with open(config_file, "r") as file:
+    config = yaml.safe_load(file)
+print(config)
+datadir = config['datadir']  # "/home/share/cdff/riehen/raw_data/"
+figdir = config["figdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/figures"
+npzdir = config["npzdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz"
+xmlfile = config["stationxml_file"]  # "/home/users/s/savardg/riehen/ppsd/riehen_stations.xml"
+inv = obspy.read_inventory(xmlfile)
+smartsolo = config["smartsolo"]  #True  # Whether we are doing PPSD for smartSolo geophones or not
+makefig = config["makefig"]  # False
 
 # Output files
 npz_filename =  os.path.join(npzdir, f"{station}_{channel}_ppsd.npz")
@@ -119,19 +148,14 @@ outfile1 = os.path.join(figdir, f"{station}_{channel}_ppsd.png")
 outfile2 = os.path.join(figdir, f"{station}_{channel}_temporal.png")
 outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
 
-def fix_trace(tr):
-    ''' Fix trace amplitude for SmartSolo geophone'''
-    tr.stats.sampling_rate = 250.0 # Force sampling rate to be exactly 250
-    tr.data /= 1000 # Convert mV to V
-    return tr
-
 if not os.path.exists(npz_filename):
     # File list
     sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
 
     # Initialize ppsd object
     trace = obspy.read(os.path.join(datadir, station, f"{station}*.1.*{channel}.mseed"), headonly=True)[0]
-    if smartsolo: trace = fix_trace(trace)
+    if smartsolo:
+        trace = fix_trace(trace)
     ppsd = PPSD(trace.stats, metadata=inv)
 
     # Add other files
@@ -151,13 +175,14 @@ if not os.path.exists(npz_filename):
     ppsd.save_npz(npz_filename)
     
 else:
-    print(f"Reading PPSD object from pickle: {npz_filename}")
-    ppsd = PPSD.load_npz(npz_filename)
-    
-makefig = False
-if makefig:
+    if makefig:
+        print(f"Reading PPSD object from pickle: {npz_filename}")
+        ppsd = PPSD.load_npz(npz_filename)
+    else:
+        print(f"PPSD object already created: {npz_filename}.")
+
 # MAKE FIGS
-    import matplotlib.pyplot as plt
+if makefig:
     plt.rcParams["figure.figsize"] = (12,8)
     minT = 0.02
     maxT = 10.0
