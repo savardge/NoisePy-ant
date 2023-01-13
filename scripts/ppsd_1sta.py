@@ -9,6 +9,9 @@ config_file contains following parameters:
 - xmlfile
 - smartsolo # Whether we are doing PPSD for smartSolo geophones or not. See gain correction.
 - makefig # Whether to make plots or not
+
+*** IMPORTANT: Update line 155-156 for path ***
+
 """
 
 import sys
@@ -150,10 +153,11 @@ outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
 
 if not os.path.exists(npz_filename):
     # File list
-    sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
+    # sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
+    sfiles = glob.glob(os.path.join(datadir, station, channel, "*"))
 
     # Initialize ppsd object
-    trace = obspy.read(os.path.join(datadir, station, f"{station}*.1.*{channel}.mseed"), headonly=True)[0]
+    trace = obspy.read(sfiles[0], headonly=True)[0]
     if smartsolo:
         trace = fix_trace(trace)
     ppsd = PPSD(trace.stats, metadata=inv)
