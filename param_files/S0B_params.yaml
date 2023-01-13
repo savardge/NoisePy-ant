@@ -1,0 +1,39 @@
+# absolute path for your project
+rootpath: '/home/users/s/savardg/aargau_ant/'                           
+
+# dir where mseed/SAC files are located
+RAWDATA: '/home/users/s/savardg/scratch/aargau/RAW_DATA' 
+
+# dir where cleaned data in ASDF format are going to be outputted
+DATADIR: '/home/users/s/savardg/scratch/aargau/CLEAN_DATA_CH-AA' #CLEAN_DATA_H5_25sps_3c_netfix'
+
+# station info including network,station,channel,latitude,longitude,elevation
+location: '/home/users/s/savardg/aargau_ant/station_locations_CH-AA.csv' #station_locations_noisepy_cleaned_NEZ.csv'
+
+# useful parameters for cleaning the data
+input_fmt: 'sac'  # input file format between 'sac' and 'mseed' 
+samp_freq: 25     # targeted sampling rate
+stationxml: False   # station.XML file exists or not
+rm_resp: 'no'        # select 'no' to not remove response and use 'inv','spectrum','RESP', or 'polozeros' to remove response
+respdir: '/home/users/s/savardg/aargau_ant/resp' # directory where resp files are located (required if rm_resp is neither 'no' nor 'inv')
+freqmin: 0.2    # pre filtering frequency bandwidth
+freqmax: 14.5    # note this cannot exceed Nquist freq
+flag: True       # print intermediate variables and computing time
+
+# file containing the path+name for all sac/mseed files and its start-end time having this file saves a tons of time: see L95-126 for why
+wiki_file: '/home/users/s/savardg/aargau_ant/allfiles_time_CH-AA.csv' #allfiles_time.csv' 
+
+allfiles_path: '/home/users/s/savardg/scratch/aargau/RAW_DATA/*/*.h5' # make sure all sac/mseed files can be found through this format
+messydata: True # set this to False when daily noise data directory is stored in sub-directory of Event_year_month_day 
+
+ncomp: 3
+
+# targeted time range # Dec 5 2020 to Jan 5 2021
+start_date: ['2020_12_05_0_0_0']                                       # start date of local data
+end_date: ['2021_01_05_0_0_0']                                       # end date of local data
+inc_hours: 8                                                          # sac/mseed file length for a continous recording
+
+# get rough estimate of memory needs to ensure it now below up in S1
+cc_len: 1800                                                        # basic unit of data length for fft (s)
+step: 450                                                         # overlapping between each cc_len (s)
+MAX_MEM: 3.0 
