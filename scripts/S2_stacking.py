@@ -77,6 +77,9 @@ maxlag = fc_para['maxlag']
 substack = fc_para['substack']
 substack_len = fc_para['substack_len']
 
+# Add fc_para to stack_para
+stack_para.update(fc_para)
+
 # cross component info
 if ncomp == 1:
     enz_system = ['ZZ']
@@ -102,7 +105,8 @@ if rank == 0:
 
     # save metadata
     with open(stack_metadata, 'w') as file:
-        yaml.dump_all([stack_para, fc_para], file, sort_keys=False, default_flow_style=False)
+        yaml.dump(stack_para, file, sort_keys=False)
+        # yaml.dump_all([stack_para, fc_para], file, sort_keys=False, default_flow_style=False)
 
     # cross-correlation files
     ccfiles = sorted(glob.glob(os.path.join(CCFDIR, '*.h5')))
