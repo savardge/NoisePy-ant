@@ -7,7 +7,6 @@ config_file contains following parameters:
 - figdir
 - npzdir
 - xmlfile
-- smartsolo # Whether we are doing PPSD for smartSolo geophones or not. See gain correction.
 - makefig # Whether to make plots or not
 
 *** IMPORTANT: Update line 155-156 for path ***
@@ -120,11 +119,11 @@ def plot_spectrogram(self, cmap=obspy_sequential, clim=None, xlims=None, ylims=N
     return fig
 
 
-def fix_trace(tr):
-    """ Fix trace amplitude for SmartSolo geophone"""
-    tr.stats.sampling_rate = 250.0  # Force sampling rate to be exactly 250
-    tr.data /= 1000  # Convert mV to V
-    return tr
+# def fix_trace(tr):
+#     """ Fix trace amplitude for SmartSolo geophone"""
+#     tr.stats.sampling_rate = 250.0  # Force sampling rate to be exactly 250
+#     tr.data /= 1000  # Convert mV to V
+#     return tr
 
 # ***
 
@@ -142,24 +141,25 @@ figdir = config["figdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/figures"
 npzdir = config["npzdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz"
 xmlfile = config["stationxml_file"]  # "/home/users/s/savardg/riehen/ppsd/riehen_stations.xml"
 inv = obspy.read_inventory(xmlfile)
-smartsolo = config["smartsolo"]  #True  # Whether we are doing PPSD for smartSolo geophones or not
+# smartsolo = config["smartsolo"]  #True  # Whether we are doing PPSD for smartSolo geophones or not
 makefig = config["makefig"]  # False
+overwrite = config["overwrite"]  # False
 
 # Output files
-npz_filename =  os.path.join(npzdir, f"{station}_{channel}_ppsd.npz")
+npz_filename = os.path.join(npzdir, f"{station}_{channel}_ppsd.npz")
 outfile1 = os.path.join(figdir, f"{station}_{channel}_ppsd.png")
 outfile2 = os.path.join(figdir, f"{station}_{channel}_temporal.png")
 outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
 
-if not os.path.exists(npz_filename):
+if not os.path.exists(npz_filename) or overwrite:
     # File list
     # sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
     sfiles = glob.glob(os.path.join(datadir, station, channel, "*"))
 
     # Initialize ppsd object
     trace = obspy.read(sfiles[0], headonly=True)[0]
-    if smartsolo:
-        trace = fix_trace(trace)
+    # if smartsolo:
+    #     trace = fix_trace(trace)
     ppsd = PPSD(trace.stats, metadata=inv)
 
     # Add other files
@@ -169,7 +169,7 @@ if not os.path.exists(npz_filename):
         except:
             print(f"ERROR while reading file {sfile}. Skipping")
             continue
-        if smartsolo: trace = fix_trace(trace)
+        # if smartsolo: trace = fix_trace(trace)
         ppsd.add(trace)
 
     print("number of psd segments:", len(ppsd.times_processed))
