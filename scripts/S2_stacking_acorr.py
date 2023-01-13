@@ -28,12 +28,10 @@ Stacking script of NoisePy to:
 
 tt0 = time.time()
 
-########################################
-#########PARAMETER SECTION##############
-########################################
+# PARAMETER SECTION
 
 config_file = sys.argv[1]  # Input parameter file as first argument
-with open('S2_params.yaml', 'r') as file:
+with open(config_file, 'r') as file:
     stack_para = yaml.safe_load(file)
 
 # maximum memory allowed per core in GB
@@ -55,7 +53,6 @@ ncomp = stack_para['ncomp']
 overwrite = stack_para['overwrite']
 
 ##################################################
-# we expect no parameters need to be changed below
 
 # load fc_para parameters from Step1
 fc_metadata = os.path.join(CCFDIR, 'fft_cc_data.yaml')
@@ -80,12 +77,9 @@ else:
     enz_system = ['EE', 'NE', 'NN', 'ZE', 'ZN', 'ZZ']
 
 # save fft metadata for future reference
-
 stack_metadata = os.path.join(STACKDIR, 'stack_data.yaml')
-
-#######################################
-###########PROCESSING SECTION##########
-#######################################
+if os.path.exists(stack_metadata):
+    stack_metadata = stack_metadata.replace(".yaml", "_.yaml")
 
 # --------MPI---------
 comm = MPI.COMM_WORLD

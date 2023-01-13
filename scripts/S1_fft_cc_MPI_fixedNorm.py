@@ -1,3 +1,11 @@
+"""
+This main script of NoisePy:
+    1) read the saved noise data in user-defined chunk of inc_hours, cut them into smaller length segments, do
+    general pre-processing (trend, normalization) and then do FFT;
+    2) save all FFT data of the same time chunk in memory;
+    3) performs cross-correlation for all station pairs in the same time chunk and output the sub-stack (if
+    selected) into ASDF format;
+"""
 import gc
 import sys
 import time
@@ -8,6 +16,7 @@ import numpy as np
 import pandas as pd
 from mpi4py import MPI
 from scipy.fftpack.helper import next_fast_len
+import yaml
 from noisepy import cross_correlation
 
 # ignore warnings
@@ -23,84 +32,65 @@ logging.basicConfig(
 Logger = logging.getLogger(__name__)
 
 
-'''
-This main script of NoisePy:
-    1) read the saved noise data in user-defined chunk of inc_hours, cut them into smaller length segments, do 
-    general pre-processing (trend, normalization) and then do FFT;
-    2) save all FFT data of the same time chunk in memory;
-    3) performs cross-correlation for all station pairs in the same time chunk and output the sub-stack (if 
-    selected) into ASDF format;
 
-Authors: Chengxin Jiang (chengxin_jiang@fas.harvard.edu)
-         Marine Denolle (mdenolle@fas.harvard.edu)
-        
-NOTE:
-    0. MOST occasions you just need to change parameters followed with detailed explanations to run the script. 
-    1. To read SAC/mseed files, we assume the users have sorted the data by the time chunk they prefer (e.g., 1day) 
-        and store them in folders named after the time chunk (e.g, 2010_10_1). modify L135 to find your local data; 
-    2. A script of S0B_to_ASDF.py is provided to help clean messy SAC/MSEED data and convert them into ASDF format.
-        the script takes minor time compared to that for cross-correlation. so we recommend to use S0B script for
-        better NoisePy performance. the downside is that it duplicates the continuous noise data on your machine;
-    3. When "coherency" is preferred, please set "freq_norm" to "rma" and "time_norm" to "no" for better performance.
-'''
 
 tt0 = time.time()
 
-########################################
-#########PARAMETER SECTION##############
-########################################
+# PARAMETER SECTION
+config_file = sys.argv[1]  # Input parameter file as first argument
+with open(config_file, 'r') as file:
+    fc_para = yaml.safe_load(file)
 
 # absolute path parameters
-rootpath = '/home/users/s/savardg/scratch/aargau'  # root path for this data processing
-CCFDIR = os.path.join(rootpath, 'CCF_CH-AA')  # dir to store CC data
-DATADIR = os.path.join(rootpath, 'CLEAN_DATA_CH-AA')  # dir where noise data is located
-local_data_path = None  # absolute dir where SAC files are stored: this para is VERY IMPORTANT and has to be RIGHT if input_fmt is not h5 for asdf!!!
-locations = '/home/users/s/savardg/aargau_ant/station_locations_CH-AA.csv'  # station info including 
-# locations = '/home/users/s/savardg/aargau_ant/station_locations_noisepy_cleaned_NEZ_wnet.csv'  # station info including network,station,channel,latitude,longitude,elevation: only needed when input_fmt is not h5 for asdf
+rootpath = fc_para['rootpath']  # root path for this data processing
+CCFDIR = fc_para['CCFDIR']  # dir to store CC data
+DATADIR = fc_para['DATADIR']  # dir where noise data is located
+local_data_path = fc_para['local_data_path']  # absolute dir where SAC files are stored: this para is VERY IMPORTANT and has to be RIGHT if input_fmt is not h5 for asdf!!!
+locations = fc_para['locations']  # station info including
 
 # some control parameters
-input_fmt = 'h5'  # string: 'h5', 'sac','mseed'
-freq_norm = 'rma'  # 'no' for no whitening, or 'rma' for running-mean average, 'phase_only' for sign-bit normalization in freq domain.
-time_norm = 'no'  # 'no' for no normalization, or 'rma', 'one_bit' for normalization in time domain
-cc_method = 'xcorr'  # 'xcorr' for pure cross correlation, 'deconv' for deconvolution; FOR "COHERENCY" PLEASE set freq_norm to "rma", time_norm to "no" and cc_method to "xcorr"
-flag = False  # print intermediate variables and computing time for debugging purpose
-acorr_only = False # only perform auto-correlation
-#xcorr_only = True  # only perform cross-correlation or not (this parameter is not used!)
-ncomp = 3  # 1 or 3 component data (needed to decide whether do rotation)
+input_fmt = fc_para['h5']  # string: 'h5', 'sac','mseed'
+freq_norm = fc_para['freq_norm']  # 'no' for no whitening, or 'rma' for running-mean average, 'phase_only' for sign-bit normalization in freq domain.
+time_norm = fc_para['time_norm']  # 'no' for no normalization, or 'rma', 'one_bit' for normalization in time domain
+cc_method = fc_para['cc_method']  # 'xcorr' for pure cross correlation, 'deconv' for deconvolution; FOR "COHERENCY" PLEASE set freq_norm to "rma", time_norm to "no" and cc_method to "xcorr"
+flag = fc_para['flag']  # print intermediate variables and computing time for debugging purpose
+acorr_only = fc_para['acorr_only'] # only perform auto-correlation
+ncomp = fc_para['ncomp']  # 1 or 3 component data (needed to decide whether do rotation)
 
 # station/instrument info for input_fmt=='sac' or 'mseed'
-stationxml = False  # station.XML file used to remove instrument response for SAC/miniseed data
-rm_resp = 'no'  # select 'no' to not remove response and use 'inv','spectrum','RESP', or 'polozeros' to remove response
-respdir = None  # directory where resp files are located (required if rm_resp is neither 'no' nor 'inv')
+stationxml = fc_para['stationxml']  # station.XML file used to remove instrument response for SAC/miniseed data
+rm_resp = fc_para['rm_resp']  # select 'no' to not remove response and use 'inv','spectrum','RESP', or 'polozeros' to remove response
+respdir = fc_para['respdir']  # directory where resp files are located (required if rm_resp is neither 'no' nor 'inv')
+
 # read station list
 if input_fmt != 'h5':
     if not os.path.isfile(locations):
         raise ValueError('Abort! station info is needed for this script')
     locs = pd.read_csv(locations)
 
-# pre-processing parameters 
-cc_len = 1800  # basic unit of data length for fft (sec)
-step = 450  # time step (sec). Overlap between each cc_len is cc_len-step
-smooth_N = 20  # moving window length for time/freq domain normalization if selected (points)
+# pre-processing parameters
+cc_len = fc_para['cc_len']  # basic unit of data length for fft (sec)
+step = fc_para['step']  # time step (sec). Overlap between each cc_len is cc_len-step
+smooth_N = fc_para['smooth_N']  # moving window length for time/freq domain normalization if selected (points)
 
 # cross-correlation parameters
-maxlag = 180  # lags of cross-correlation to save (sec)
-substack = True  # True = smaller stacks within the time chunk. False: it will stack over inc_hours
+maxlag = fc_para['maxlag']  # lags of cross-correlation to save (sec)
+substack = fc_para['substack']  # True = smaller stacks within the time chunk. False: it will stack over inc_hours
 # for instance: substack=True, substack_len=cc_len means that you keep ALL of the correlations
 # if substack=True, substack_len=2*cc_len, then you pre-stack every 2 correlation windows.
-substack_len = 8 * cc_len  # how long to stack over (for monitoring purpose): need to be multiples of cc_len
-smoothspect_N = 20  # moving window length to smooth spectrum amplitude (points)
+substack_len = fc_para['substack_len']  # how long to stack over (for monitoring purpose): need to be multiples of cc_len
+smoothspect_N = fc_para['smoothspect_N']   # moving window length to smooth spectrum amplitude (points)
 
 # criteria for data selection
-max_over_std = 10  # threshold to remove window of bad signals: set it to 10*9 if prefer not to remove them
+max_over_std = fc_para['max_over_std']  # threshold to remove window of bad signals: set it to 10*9 if prefer not to remove them
 
 # maximum memory allowed per core in GB
-MAX_MEM = 20.0
+MAX_MEM = fc_para["MAX_MEM"]
 
 # load useful download info if start from ASDF
-
 dfile = os.path.join(DATADIR, 'download_info.txt')
-down_info = eval(open(dfile).read())
+with open(dfile, "r") as file:
+    down_info = yaml.safe_load(file)
 samp_freq = down_info['samp_freq']
 freqmin = down_info['freqmin']
 freqmax = down_info['freqmax']
@@ -109,43 +99,16 @@ end_date = down_info['end_date']
 inc_hours = down_info['inc_hours']
 ncomp = down_info['ncomp']
 
+# Add down_info parameters to fc_para
+fc_para.update(down_info)
+
 dt = 1 / samp_freq
 
 ##################################################
-# we expect no parameters need to be changed below
-
-# make a dictionary to store all variables: also for later cc
-fc_para = {'samp_freq': samp_freq,
-           'dt': dt,
-           'cc_len': cc_len,
-           'step': step,
-           'freqmin': freqmin,
-           'freqmax': freqmax,
-           'freq_norm': freq_norm,
-           'time_norm': time_norm,
-           'cc_method': cc_method,
-           'smooth_N': smooth_N,
-           'rootpath': rootpath,
-           'CCFDIR': CCFDIR,
-           'start_date': start_date[0],
-           'end_date': end_date[0],
-           'inc_hours': inc_hours,
-           'substack': substack,
-           'substack_len': substack_len,
-           'smoothspect_N': smoothspect_N,
-           'maxlag': maxlag,
-           'max_over_std': max_over_std,
-           'ncomp': ncomp,
-           'stationxml': stationxml,
-           'rm_resp': rm_resp,
-           'respdir': respdir,
-           'input_fmt': input_fmt}
 # save fft metadata for future reference
-fc_metadata = os.path.join(CCFDIR, 'fft_cc_data.txt')
-
-#######################################
-###########PROCESSING SECTION##########
-#######################################
+fc_metadata = os.path.join(CCFDIR, 'fft_cc_data.yaml')
+if os.path.exists(fc_metadata):
+    fc_metadata = fc_metadata.replace(".yaml", "_.yaml")
 
 # --------MPI---------
 comm = MPI.COMM_WORLD
@@ -155,10 +118,9 @@ size = comm.Get_size()
 if rank == 0:
     if not os.path.isdir(CCFDIR): os.mkdir(CCFDIR)
 
-    # save metadata 
-    fout = open(fc_metadata, 'w')
-    fout.write(str(fc_para));
-    fout.close()
+    # save metadata
+    with open(fc_metadata, 'w') as file:
+        yaml.dump(fc_para, file, sort_keys=False)
 
     # set variables to broadcast
     tdir = sorted(glob.glob(os.path.join(DATADIR, '*.h5')))

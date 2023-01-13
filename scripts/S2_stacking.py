@@ -30,7 +30,7 @@ tt0 = time.time()
 # PARAMETER SECTION
 
 config_file = sys.argv[1]  # Input parameter file as first argument
-with open('S2_params.yaml', 'r') as file:
+with open(config_file, 'r') as file:
     stack_para = yaml.safe_load(file)
 
 # maximum memory allowed per core in GB
@@ -87,6 +87,8 @@ rtz_components = ['ZR', 'ZT', 'ZZ', 'RR', 'RT', 'RZ', 'TR', 'TT', 'TZ']
 
 # save fft metadata for future reference
 stack_metadata = os.path.join(STACKDIR, 'stack_data.yaml')
+if os.path.exists(stack_metadata):
+    stack_metadata = stack_metadata.replace(".yaml", "_.yaml")
 
 # --------MPI---------
 comm = MPI.COMM_WORLD
