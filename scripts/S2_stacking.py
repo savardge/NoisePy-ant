@@ -1,8 +1,16 @@
+"""
+Cross-correlation stacking script of NoisePy to:
+    1) load cross-correlation data for sub-stacking (if needed) and all-time average;
+    2) stack data with either linear or phase weighted stacking (pws) methods (or both);
+    3) save outputs in ASDF or SAC format depend on user's choice (for latter option, find the script of write_sac
+       in the folder of application_modules;
+    4) rotate from a E-N-Z to R-T-Z system if needed.
+"""
 import sys
 import time
-import obspy
 import pyasdf
-import os, glob
+import os
+import glob
 import datetime
 import numpy as np
 import pandas as pd
@@ -12,20 +20,15 @@ from noisepy import stacking
 
 if not sys.warnoptions:
     import warnings
-
     warnings.simplefilter("ignore")
 
-'''
-Stacking script of NoisePy to:
-    1) load cross-correlation data for sub-stacking (if needed) and all-time average;
-    2) stack data with either linear or phase weighted stacking (pws) methods (or both);
-    3) save outputs in ASDF or SAC format depend on user's choice (for latter option, find the script of write_sac
-       in the folder of application_modules;
-    4) rotate from a E-N-Z to R-T-Z system if needed.
-'''
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
+Logger = logging.getLogger(__name__)
 
 tt0 = time.time()
-
 
 # PARAMETER SECTION
 
@@ -106,7 +109,6 @@ if rank == 0:
     # save metadata
     with open(stack_metadata, 'w') as file:
         yaml.dump(stack_para, file, sort_keys=False)
-        # yaml.dump_all([stack_para, fc_para], file, sort_keys=False, default_flow_style=False)
 
     # cross-correlation files
     ccfiles = sorted(glob.glob(os.path.join(CCFDIR, '*.h5')))
@@ -119,8 +121,9 @@ if rank == 0:
     print(sta)
     for ii in range(len(sta)):
         tmp = os.path.join(STACKDIR, sta[ii])
-        print(f"%s: Creating directory {tmp}" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        if not os.path.isdir(tmp): os.mkdir(tmp)
+        if not os.path.isdir(tmp):
+            if flag: Logger.info(f"Creating directory {tmp}")
+            os.mkdir(tmp)
 
     # station-pairs
     pairs_all = []
@@ -144,28 +147,25 @@ pairs_all = comm.bcast(pairs_all, root=0)
 for ipair in range(rank, splits, size):
     t0 = time.time()
 
-    if flag: print(f"%s: {ipair}th path for station-pair {pairs_all[ipair]}" % datetime.datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"))
+    if flag: Logger.info(f"{ipair}th path for station-pair {pairs_all[ipair]}")
     # source folder
     ttr = pairs_all[ipair].split('_')
     snet, ssta = ttr[0].split('.')
-    # ssta = ttr[0] # GS
     rnet, rsta = ttr[1].split('.')
-    # rsta = ttr[1] # GS
     idir = ttr[0]
-
     # check if it is auto-correlation
     if ssta == rsta and snet == rnet:
-        if flag: print("autocorrelation!")
-        continue
+        continue # Skip auto-correlation
 
     # continue when file is done
     toutfn = os.path.join(STACKDIR, idir + '/' + pairs_all[ipair] + '.tmp')
     if os.path.isfile(toutfn) and not overwrite:
-        print(f"%s: tmp file {toutfn} already processed. Next." % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        Logger.info(f"tmp file {toutfn} already processed. Next.")
         continue
 
-        # crude estimation on memory needs (assume float32)
+    if flag: Logger.info(f"{ipair}th path for station-pair {pairs_all[ipair]}")
+
+    # crude estimation on memory needs (assume float32)
     nccomp = ncomp * ncomp
     num_chunck = len(ccfiles) * nccomp
     num_segmts = 1
@@ -205,12 +205,12 @@ for ipair in range(rank, splits, size):
 
         # check number of components
         if ncomp == 3 and len(path_list) < 9:
-            if flag: print('continue! not enough cross components for cross-correlation %s in %s' % (dtype, ifile))
+            if flag:
+                Logger.warning('continue! not enough cross components for cross-correlation %s in %s' % (dtype, ifile))
             continue
-
         if len(path_list) > 9:
             # raise ValueError('more than 9 cross-component exists for %s %s! please double check'%(ifile,dtype))
-            print(
+            Logger.warning(
                 'more than 9 cross-component exists for %s %s! Removing redundant cross-components...' % (ifile, dtype))
             premove = []
             for path in path_list:
@@ -220,9 +220,9 @@ for ipair in range(rank, splits, size):
                 elif dum1[0] == "B" or dum2[0] == "B":  # Favor HHx component over BHx
                     premove.append(path)
             path_list = [p for p in path_list if p not in premove]
-            if flag: print("New path_list is:", path_list)
+            if flag: Logger.warning("New path_list is:", path_list)
 
-        if flag: print("All checks passed. Now starting loading of 9-component data from H5 file")
+        if flag: Logger.info(f"All checks passed for number of components. Now starting loading of 9-component data from {ifile}")
 
         # load the 9-component data, which is in order in the ASDF
         for tpath in path_list:
@@ -250,14 +250,17 @@ for ipair in range(rank, splits, size):
                 iseg += 1
 
     t1 = time.time()
-    if flag: print('loading CCF data takes %6.2fs' % (t1 - t0))
+    if flag: Logger.info(f"loading CCF data from {ifile} takes {t1-t0:.2f} s")
 
     # continue when there is no data or for auto-correlation
     if iseg <= 1:
-        if flag: print(f"Stop! Not processing this pair because iseg <= 1 ({iseg}).")
+        if flag: Logger.warning(f"Stop! Not processing this pair because no data in file {ifile}.")
         continue
+
+    # Output file
     outfn = pairs_all[ipair] + '.h5'
-    if flag: print('ready to output to %s' % outfn)
+    stack_h5 = os.path.join(STACKDIR, idir + '/' + outfn)
+    if flag: Logger.info(f"Stack output file: {stack_h5}")
 
     # matrix used for rotation
     if rotation:
@@ -269,10 +272,6 @@ for ipair in range(rank, splits, size):
         bigstack4 = np.zeros(shape=(9, npts_segmt), dtype=np.float32)
 
     # loop through cross-component for stacking
-    stack_h5 = os.path.join(STACKDIR, idir + '/' + outfn)
-    if flag: print(f"Stack output file: {stack_h5}")
-    # if os.path.exists(stack_h5): # GS
-    #    os.remove(stack_h5)
     iflag = 1
     for icomp in range(nccomp):
         comp = enz_system[icomp]
@@ -280,16 +279,18 @@ for ipair in range(rank, splits, size):
 
         # jump if there are not enough data
         if len(indx) < 2:
-            print(comp, "Not enough matching components?")
+            Logger.warning(f"Not enough matching components for {comp} were loaded from {ifile}?")
             iflag = 0
-            break
+            continue  # or break??
 
         t2 = time.time()
 
         # output stacked data
         cc_final, ngood_final, stamps_final, allstacks1, allstacks2, allstacks3, allstacks4, allstacks5, nstacks = stacking.stacking(
             cc_array[indx], cc_time[indx], cc_ngood[indx], stack_para)  # GS
-        if not len(allstacks1): continue
+        if not len(allstacks1):
+            Logger.warning(f"returned empty stack for {ssta}.{comp}")
+            continue
         if rotation:
             bigstack[icomp] = allstacks1
             if stack_method == 'all':
@@ -343,8 +344,11 @@ for ipair in range(rank, splits, size):
                                           path=comp,
                                           parameters=tparameters)
 
+        Logger.info(f"Wrote component {comp} to output file: {stack_h5}")
+
         t3 = time.time()
-        if flag: print('takes %6.2fs to stack one component with %s stacking method' % (t3 - t1, stack_method))
+        if flag:
+            Logger.info('takes %6.2fs to stack one component with %s stacking method' % (t3 - t1, stack_method))
 
     # do rotation if needed
     if rotation and iflag:
@@ -400,7 +404,7 @@ for ipair in range(rank, splits, size):
                                            parameters=tparameters)
                     # print(ds2.auxiliary_data['Allstack_linear'].list())
     t4 = time.time()
-    if flag: print('takes %6.2fs to stack/rotate all station pairs %s' % (t4 - t1, pairs_all[ipair]))
+    Logger.info('takes %6.2fs to stack/rotate all station pairs %s' % (t4 - t1, pairs_all[ipair]))
 
     # write file stamps 
     ftmp = open(toutfn, 'w')
@@ -408,7 +412,7 @@ for ipair in range(rank, splits, size):
     ftmp.close()
 
 tt1 = time.time()
-print('it takes %6.2fs to process step 2 in total' % (tt1 - tt0))
+Logger.info('it takes %6.2fs to process step 2 in total' % (tt1 - tt0))
 comm.barrier()
 
 # merge all path_array and output
