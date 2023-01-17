@@ -323,7 +323,8 @@ for ick in range(rank, splits, size):
         # -----------now loop III for each receiver B----------
         for iiR in range(istart, iend):
             if acorr_only:
-                if station[iiR] != station[iiS]: continue
+                if station[iiR] != station[iiS]:
+                    continue
             if flag: Logger.info('receiver: %s %s %s' % (station[iiR], network[iiR], channel[iiR]))
             if not fft_flag[iiR]: continue
 

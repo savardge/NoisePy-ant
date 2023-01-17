@@ -76,8 +76,8 @@ stack_para.update(fc_para)
 if ncomp == 1:
     enz_system = ['ZZ']
 else:
-    # enz_system = ['EE','EN','EZ','NN','NZ','ZZ']
-    enz_system = ['EE', 'NE', 'NN', 'ZE', 'ZN', 'ZZ']
+    enz_system = ['EE','EN','EZ','NN','NZ','ZZ']
+    # enz_system = ['EE', 'NE', 'NN', 'ZE', 'ZN', 'ZZ']
 
 # save fft metadata for future reference
 stack_metadata = os.path.join(STACKDIR, 'stack_data.yaml')
