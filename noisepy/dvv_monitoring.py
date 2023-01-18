@@ -64,7 +64,6 @@ def stretching(ref, cur, dv_range, nbtrial, para):
     tmax = np.max(twin)
     fmin = np.min(freq)
     fmax = np.max(freq)
-    #tvec = np.arange(tmin, tmax, dt)
     itvec = np.arange(np.int((tmin - t.min()) / dt) + 1, np.int((tmax - t.min()) / dt) + 1)
     tvec = t[itvec]
 

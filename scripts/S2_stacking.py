@@ -303,6 +303,7 @@ for ipair in range(rank, splits, size):
         with pyasdf.ASDFDataSet(stack_h5, mpi=False) as ds:
             tparameters['time'] = stamps_final[0]
             tparameters['ngood'] = nstacks
+            tparameters['comp'] = comp
             if stack_method != 'all':
                 data_type = 'Allstack_' + stack_method
                 ds.add_auxiliary_data(data=allstacks1,
@@ -338,6 +339,7 @@ for ipair in range(rank, splits, size):
                 with pyasdf.ASDFDataSet(stack_h5, mpi=False) as ds:
                     tparameters['time'] = stamps_final[ii]
                     tparameters['ngood'] = ngood_final[ii]
+                    tparameters['comp'] = comp
                     data_type = 'T' + str(int(stamps_final[ii]))
                     ds.add_auxiliary_data(data=cc_final[ii],
                                           data_type=data_type,

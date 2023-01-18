@@ -1,0 +1,21 @@
+STACK_DIR: "/Users/genevieve/aegansea/STACK_rma2_normz_xcorr"
+fs: 25.0
+stacsv: "/Users/genevieve/aegansea/stations.csv"
+comp: "ZZ"
+stack_type: "Allstack_linear"
+
+# For grid:
+min_lat: 39.2114
+max_lat: 41.14503
+min_lon: 23.9791
+max_lon: 26.888
+R_earth: 6371 # Earth's radius for coordinate transformation
+
+# output path
+output_folder: "/Users/genevieve/aegansea/mat_files"
+
+# CC processing info
+freq_norm: 'rma'
+time_norm: 'rma'
+cc_method: 'xcorr'
+normz: True
