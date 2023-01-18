@@ -135,9 +135,10 @@ for ss in range(nb_stat):
     for rr in range(nb_stat):
 
         stat_rec = stat_list[rr]
+        Logger.info(f"Processing pair {stat_src}_{stat_rec}.")
         sfile = [f for f in stackfiles if stat_src in os.path.split(f)[1].split("_")[0] and stat_rec in os.path.split(f)[1].split("_")[1]]
         if len(sfile) == 0:
-            # Logger.info(f"Could not find stack file for pair {stat_src}_{stat_rec}.")
+            Logger.info(f"Could not find stack file for pair {stat_src}_{stat_rec}.")
             continue
         elif len(sfile) == 1:
             sfile = sfile[0]
