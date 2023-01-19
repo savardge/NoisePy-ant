@@ -52,6 +52,7 @@ flag = stack_para['flag']  # output intermediate args for debugging
 stack_method = stack_para['stack_method']  # linear, pws, robust, nroot, selective, auto_covariance or all
 ncomp = stack_para['ncomp']
 overwrite = stack_para['overwrite']
+enz_system_option = stack_para['enz_system_option']
 
 ##################################################
 
@@ -69,7 +70,6 @@ step = fc_para['step']
 maxlag = fc_para['maxlag']
 substack = fc_para['substack']
 substack_len = fc_para['substack_len']
-enz_system_option = fc_para['enz_system_option']
 
 # Add fc_para to stack_para
 stack_para.update(fc_para)
