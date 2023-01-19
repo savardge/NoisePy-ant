@@ -153,7 +153,7 @@ for ipair in range(rank, splits, size):
 
     # continue when file is done
     toutfn = os.path.join(STACKDIR, idir + '/' + pairs_all[ipair] + '.tmp')
-    if os.path.isfile(toutfn) and not overwite:
+    if os.path.isfile(toutfn) and not overwrite:
         Logger.info(f"tmp file {toutfn} already processed. Next.")
         continue
 
