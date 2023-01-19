@@ -219,7 +219,7 @@ for ick in range(rank, splits, size):
                 pass
 
         with pyasdf.ASDFDataSet(ff, mpi=False, compression="gzip-3", mode='a') as ds:
-            # add the inventory for all components + all time of this tation         
+            # add the inventory for all components + all time of this station
             try:
                 ds.add_stationxml(inv1)
             except Exception:
