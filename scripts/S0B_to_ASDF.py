@@ -49,7 +49,7 @@ with open(config_file, 'r') as file:
 
 # data/file paths
 rootpath = prepro_para['rootpath']   # absolute path for your project
-RAWDATA = prepro_para['RAW_DATA']  # os.path.join(rootpath,'RAW_DATA')                           # dir where mseed/SAC files are located
+RAWDATA = prepro_para['RAWDATA']  # os.path.join(rootpath,'RAW_DATA')                           # dir where mseed/SAC files are located
 DATADIR = prepro_para['DATADIR']  # dir where cleaned data in ASDF format are going to be outputted
 locations = prepro_para['locations'] # station info including network,station,channel,latitude,longitude,elevation
 
