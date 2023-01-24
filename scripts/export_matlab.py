@@ -51,11 +51,14 @@ for f in stackfiles:
     sta2 = ff.split(".h5")[0].split("_")[1].split(".")[1]
     if sta2 not in stalst_h5:
         stalst_h5.append(sta2)
+Logger.info(f"Number of stations from stack H5 files: {len(stalst_h5)}")
 
 # Read station csv file used for noisepy
 stadf = pd.read_csv(stacsv)
 stadf = stadf.drop(columns="channel").drop_duplicates() # remove duplicate rows
+Logger.info(f"Number of stations from csv station file: {stadf.shape[0]}")
 stadf = stadf[stadf['station'].isin(stalst_h5)] # Keep station actually used for stacking
+Logger.info(f"Number of stations after merge: {stadf.shape[0]}")
 stat_list = stadf["station"].values
 stat_lat = stadf["latitude"].values
 stat_lon = stadf["longitude"].values
