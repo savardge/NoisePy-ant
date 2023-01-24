@@ -131,13 +131,12 @@ with pyasdf.ASDFDataSet(stackfiles[0], mode="r") as ds:
 
 STACK_full = np.zeros(shape=(nb_samp_CCF, nb_stat, nb_stat)) # full CCFs
 STACK = np.zeros(shape=(nb_samp_avg, nb_stat, nb_stat)) # symmetric CCFs
-
+Nadded = 0
 for ss in range(nb_stat):
-
     stat_src = stat_list[ss]
-
-    for rr in range(nb_stat):
-
+    for rr in np.arange(ss+1, nb_stat):
+        if ss == rr:
+            continue
         stat_rec = stat_list[rr]
         Logger.info(f"Processing pair {stat_src}_{stat_rec}.")
         sfile = [f for f in stackfiles if stat_src in os.path.split(f)[1].split("_")[0] and stat_rec in os.path.split(f)[1].split("_")[1]]
@@ -157,12 +156,12 @@ for ss in range(nb_stat):
                     tdata_sym = (tdata[nb_samp_avg-1:] + tdata[:nb_samp_avg]) / 2
                     STACK_full[:, ss, rr] = tdata
                     STACK[:, ss, rr] = tdata_sym
-
+                    Nadded += 1
                 else:
                     Logger.info(f"Component {comp} not found for {stack_type} and pair {stat_src}_{stat_rec}.")
             else:
                 Logger.info(f"Stack type {stack_type} not found for pair {stat_src}_{stat_rec}.")
-
+Logger.info(f"Read in {Nadded} CCFs out of {len(stackfiles)} stack files.")
 mdict = {
     'stat_list_merged': stat_list,
     'STACK_full': STACK_full,
