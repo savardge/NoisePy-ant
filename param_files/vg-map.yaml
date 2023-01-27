@@ -1,28 +1,30 @@
-# YAML param file:
-# -----------------------------------------------------
 
-STACK_DIR = "/home/users/s/savardg/scratch/riehen/STACK_CHRI_normZ"
-fs = 25.0
-stacsv = "/home/users/s/savardg/riehen/noisepy-nodes/stations_nodes_sed_noisepy_ingrid.csv"
-comp = "ZZ"
-stack_type = "Allstack_pws"
+# Informations from the noisepy stack results
+nccf:
+  STACK_DIR: "/home/users/s/savardg/scratch/riehen/STACK_CHRI_normZ"
+  fs: 25.0
+  comp: "ZZ"
+  stack_type: "Allstack_pws"
+  freq_norm: 'rma'
+  time_norm: 'no'
+  cc_method: 'xcorr'
+  normz: True
 
-# For grid :
-# SW corner = 7.529569, 47.481325
-# NE corner = 7.813906, 47.663001
-min_lat = 47.481325
-max_lat = 47.663001
-min_lon = 7.529569
-max_lon = 7.813906
-R_earth = 6371 # Earth's radius for coordinate transformation
-dx_grid = .5 # Spacing in x in km
-dy_grid = .5 # Spacing in y in km
+# Station info path  
+station_csv_file: "/home/users/s/savardg/riehen/noisepy-nodes/stations_nodes_sed_noisepy_ingrid.csv"
+
+# Grid params for Riehen:
+# SW corner: 7.529569, 47.481325
+# NE corner: 7.813906, 47.663001
+map_grid:
+  min_lat: 47.481325
+  max_lat: 47.663001
+  min_lon: 7.529569
+  max_lon: 7.813906
+  R_earth: 6371 # Earth's radius for coordinate transformation
+  dx_grid: .5 # Spacing in x in km
+  dy_grid: .5 # Spacing in y in km
 
 # output path
-output_folder = "/home/users/s/savardg/riehen/vg_maps"
+output_folder: "/home/users/s/savardg/riehen/vg_maps"
 
-# CC processing info
-freq_norm = 'rma'
-time_norm = 'no'
-cc_method = 'xcorr'
-normz = True
