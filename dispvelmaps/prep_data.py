@@ -417,11 +417,11 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
 
     mdict = {'PICK_CELL': PICK_CELL}
     if save_mat:
-        fname = os.path.join(output_folder, f"all_picks_{comp}_lamb15.mat")
+        fname = os.path.join(output_folder, f"all_picks_{comp}_lamb{d_lambda_thresh}.mat")
         savemat(fname, mdict=mdict)
         Logger.info(f"Wrote file {fname}")
     if save_python:
-        fname = os.path.join(output_folder, f"all_picks_{comp}_lamb15.pkl")
+        fname = os.path.join(output_folder, f"all_picks_{comp}_lamb{d_lambda_thresh}.pkl")
         with open(fname, 'wb') as output:
             # Pickle dictionary using protocol 0.
             pickle.dump(PICK_CELL, output)
