@@ -40,11 +40,14 @@ def make_stat_list(STACK_DIR, station_file, fs, output_folder, save_mat=True, sa
         sta2 = ff.split(".h5")[0].split("_")[1].split(".")[1]
         if sta2 not in stalst_h5:
             stalst_h5.append(sta2)
+    Logger.info(f"Number of stations in H5 stack files: {len(stalst_h5)}")
 
     # Read station csv file used for noisepy
     stadf = pd.read_csv(station_file)
     stadf = stadf.drop(columns="channel").drop_duplicates()  # remove duplicate rows
+    Logger.info(f"Number of stations in CSV station file: {len(stadf.station.values)}")
     stadf = stadf[stadf['station'].isin(stalst_h5)]  # Keep station actually used for stacking
+    Logger.info(f"Number of stations in common: {len(stadf.station.values)}")
     net_list = stadf["network"].values
     stat_list = stadf["station"].values
     stat_lat = stadf["latitude"].values
