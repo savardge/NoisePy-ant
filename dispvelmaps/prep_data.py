@@ -156,7 +156,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
     return mdict
 
 
-def make_stat_grid(dist_stat, output_folder, make_plot=True, save_mat=True, save_python=True):
+def make_stat_grid(dist_stat, dx_grid, dy_grid, output_folder, make_plot=True, save_mat=True, save_python=True):
     """
     Make stat_grid.mat file
     Args:
@@ -173,8 +173,6 @@ def make_stat_grid(dist_stat, output_folder, make_plot=True, save_mat=True, save
     # -----------------------------------------------------
     x_max = dist_stat['x_max']
     y_max = dist_stat['y_max']
-    dx_grid = dist_stat['dx_grid']
-    dy_grid = dist_stat['dy_grid']
     x_stat = dist_stat['x_stat']
     y_stat = dist_stat['y_stat']
 
