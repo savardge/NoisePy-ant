@@ -44,6 +44,7 @@ def make_stat_list(STACK_DIR, station_file, fs, output_folder, save_mat=True, sa
 
     # Read station csv file used for noisepy
     stadf = pd.read_csv(station_file)
+    stadf.station = stadf.station.astype(str)
     stadf = stadf.drop(columns="channel").drop_duplicates()  # remove duplicate rows
     Logger.info(f"Number of stations in CSV station file: {len(stadf.station.values)}")
     stadf = stadf[stadf['station'].isin(stalst_h5)]  # Keep station actually used for stacking
