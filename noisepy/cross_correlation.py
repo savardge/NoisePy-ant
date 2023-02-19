@@ -4,7 +4,7 @@ import numpy as np
 from numba import jit
 from scipy.fftpack import fft, ifft, next_fast_len
 from obspy.core.util.base import _get_function_from_entry_point
-from stacking import robust_stack, selective_stack, pws
+from noisepy.stacking import robust_stack, selective_stack, pws
 import logging
 
 Logger = logging.getLogger(__name__)
