@@ -481,6 +481,7 @@ def make_data_kernels(dist_stat, kernel, pick_cell, Tc_list, output_dir_kern, pl
                 # Get pick data for pair
                 try:
                     T_list, V_list = PICK_CELL[ssta][rsta]
+                    V_list /= 1e3  # Need km (ref. Thomas' codes)
                 except KeyError:  # no data for this pair
                     bool_nodata[cpl] = 1
                     cpl += 1
