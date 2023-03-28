@@ -6,6 +6,7 @@ import glob
 import numpy as np
 import pickle
 import logging
+import yaml
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,6 +97,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
     """
 
     stat_list = stainfo['stat_list']
+    net_list = stainfo['net_list']
     stat_lat = stainfo['stat_lat']
     stat_lon = stainfo['stat_lon']
     nb_stat = len(stat_list)
@@ -108,7 +110,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
     SE_corner = [min_lat, max_lon]
     NW_corner = [max_lat, min_lon]
     NE_corner = [max_lat, max_lon]
-    ref_lat_glob = min_lat * np.ones(shape=stat_lat.shape)  # south west corner chosen as grid origin
+    ref_lat_glob = min_lat * np.ones(shape=stat_lat.shape)  # southwest corner chosen as grid origin
     ref_lon_glob = min_lon * np.ones(shape=stat_lon.shape)
 
     # Transform lat,long to x,y
@@ -131,6 +133,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
         'x_stat': x_stat,
         'y_stat': y_stat,
         'stat_list': stat_list,
+        'net_list': net_list,
         'x_max': x_max,
         'y_max': y_max,
         'SW_corner': SW_corner,
@@ -149,6 +152,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
                  x_stat=x_stat,
                  y_stat=y_stat,
                  stat_list=stat_list,
+                 net_list=net_list,
                  x_max=x_max,
                  y_max=y_max,
                  SW_corner=SW_corner,
@@ -194,7 +198,8 @@ def make_stat_grid(dist_stat, dx_grid, dy_grid, output_folder, make_plot=True, s
         'dy_grid': dy_grid,
         'x_max': x_max,
         'y_max': y_max,
-        'stat_list': dist_stat['stat_list']
+        'stat_list': dist_stat['stat_list'],
+        'net_list': dist_stat['net_list']
     }
     if save_mat:
         fname = os.path.join(output_folder, "stat_grid.mat")
@@ -204,6 +209,7 @@ def make_stat_grid(dist_stat, dx_grid, dy_grid, output_folder, make_plot=True, s
         fname = os.path.join(output_folder, "stat_grid.npz")
         np.savez(fname,
                  stat_list=dist_stat['stat_list'],
+                 net_list=dist_stat['net_list'],
                  X_GRID=X_GRID,
                  Y_GRID=Y_GRID,
                  x_stat=x_stat,
@@ -254,6 +260,7 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
     X_GRID = stat_grid['X_GRID']
     Y_GRID = stat_grid['Y_GRID']
     stat_list = stat_grid['stat_list']
+    net_list = stat_grid['net_list']
     nb_stat = len(x_stat)
     nb_cell = int(X_GRID.size)
     nb_ray = int(nb_stat * (nb_stat - 1) / 2)
@@ -271,23 +278,28 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
     for s1 in range(nb_stat - 1):
         if s1 % 10 == 0: print(f"{s1}/{nb_stat}")
         ssta = stat_list[s1]
-        ray_mat[ssta] = {}
+        snet = net_list[s1]
+        skey = f"{snet}_{ssta}"  # dictionary key for source station
+        ray_mat[skey] = {}
         for s2 in np.arange(s1 + 1, nb_stat):
             rsta = stat_list[s2]
+            rnet = net_list[s2]
+            rkey = f"{rnet}_{rsta}"  # dictionary key for source station
+
             delta_x = x_stat[s2] - x_stat[s1]
             delta_y = y_stat[s2] - y_stat[s1]
             dist = np.sqrt(delta_x ** 2 + delta_y ** 2)
             ux_ray, uy_ray = delta_x / dist, delta_y / dist
             ray_x = x_stat[s1] + np.arange(0, dist, dl) * ux_ray
             ray_y = y_stat[s1] + np.arange(0, dist, dl) * uy_ray
-            ray_mat[ssta][rsta] = np.vstack([ray_x, ray_y])
+            ray_mat[skey][rkey] = np.vstack([ray_x, ray_y])
 
             # G_mat
             IND_S1[ind_ray], IND_S2[ind_ray] = s1, s2  # to retrieve station from ray index
             x_ind = np.int16(
-                np.floor((ray_x - x_grid[0]) / dx_grid))  # x ind of cell it falls on (if always positive values?)
+                np.floor((ray_x - x_grid[0]) / dx_grid))  # x index of cell it falls on (if always positive values?)
             y_ind = np.int16(
-                np.floor((ray_y - y_grid[0]) / dy_grid))  # y ind of cell it falls on (if always positive values?)
+                np.floor((ray_y - y_grid[0]) / dy_grid))  # y index of cell it falls on (if always positive values?)
 
             for rr in range(len(ray_x)):  # points along the ray
                 G_mat[ind_ray][IND_LIN_GRID[x_ind[rr], y_ind[rr]]] += dl
@@ -342,7 +354,9 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
         # Plot a few random kernels
         for ray in np.random.randint(0, nb_ray, size=plot_random_kernels):
             s1, s2 = IND_S1[ray], IND_S2[ray]
-            x_ray_vec, y_ray_vec = ray_mat[stat_list[s1]][stat_list[s2]]
+            skey = f"{net_list[s1]}_{stat_list[s1]}"
+            rkey = f"{net_list[s2]}_{stat_list[s2]}"
+            x_ray_vec, y_ray_vec = ray_mat[skey][rkey]
 
             G_slice = np.reshape(G_mat[ray, :], (len(x_grid), len(y_grid)), order='F')
 
@@ -377,7 +391,7 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
         lag: type of lay (default sym)
         comp: component (default ZZ)
         topology: if using topology method for picking
-        snr_nbG_thresh: Threshold on SNR calculated with narrow-band gaussian filter
+        snr_nbG_thresh: Threshold on SNR calculated with narrowband gaussian filter
         d_lambda_thresh: Threshold on ratio of distance/wavelength
         save_mat: for to matlab format
         save_python: Save to pickle format
@@ -387,20 +401,22 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
     """
 
     fname = os.path.join(output_folder, "stat_list_merged.npz")
-    npzfile = np.load(fname)
+    npzfile = np.load(fname, allow_pickle=True)
     stat_list = npzfile['stat_list_merged']
     net_list = npzfile['net_list_merged']
     nb_stat = len(stat_list)
 
     PICK_CELL = {}
-    for ss in range(nb_stat - 1):
+    for ss in range(nb_stat - 1):  # Iterate over virtual sources
         if ss % 50 == 0: print(f"{ss}/{nb_stat}")
-        snet = net_list[ss]
-        ssta = stat_list[ss]
-        PICK_CELL[ssta] = {}
-        for rr in np.arange(ss + 1, nb_stat):
+        snet = net_list[ss]  # network for source station
+        ssta = stat_list[ss]  # source station name
+        skey = f"{snet}_{ssta}"  # key name for source station
+        PICK_CELL[skey] = {}
+        for rr in np.arange(ss + 1, nb_stat):  # Iterate over virtual receivers
             rnet = net_list[rr]
             rsta = stat_list[rr]
+            rkey = f"{rnet}.{rsta}"
             dispfile = os.path.join(disp_dir, f"{snet}.{ssta}",
                                     f"{snet}.{ssta}_{rnet}.{rsta}_group_{comp}_lag{lag}.csv")
             if os.path.exists(dispfile):
@@ -408,12 +424,12 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
                 # Apply QC criteria
                 if topology:
                     picks = picks.loc[(picks.score == 1.0) & (picks.snr_nbG > snr_nbG_thresh) & (
-                                picks.ratio_d_lambda > d_lambda_thresh), :]
+                            picks.ratio_d_lambda > d_lambda_thresh), :]
                 else:
                     picks = picks.loc[(picks.snr_nbG > snr_nbG_thresh) & (picks.ratio_d_lambda > d_lambda_thresh), :]
                 if len(picks.inst_period.values) > 0:
                     data = np.float32(np.vstack([picks.inst_period.values, picks.group_velocity.values]))
-                    PICK_CELL[ssta][rsta] = data
+                    PICK_CELL[skey][rkey] = data
 
     mdict = {'PICK_CELL': PICK_CELL}
     if save_mat:
@@ -425,6 +441,7 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
         with open(fname, 'wb') as output:
             # Pickle dictionary using protocol 0.
             pickle.dump(PICK_CELL, output)
+        Logger.info(f"Wrote file {fname}")
     return mdict
 
 
@@ -451,6 +468,7 @@ def make_data_kernels(dist_stat, kernel, pick_cell, Tc_list, output_dir_kern, pl
 
     DIST_mat = dist_stat['DIST_mat']
     stat_list = dist_stat['stat_list']
+    net_list = dist_stat['net_list']
     nb_stat = len(stat_list)
     G_mat = kernel['G_mat']
     nb_cpl = G_mat.shape[0]  # number of station pairs (= # of rays)
@@ -475,12 +493,15 @@ def make_data_kernels(dist_stat, kernel, pick_cell, Tc_list, output_dir_kern, pl
         N = 0
         for ss in range(nb_stat - 1):
             ssta = stat_list[ss]
+            snet = net_list[ss]
+            skey = f"{snet}_{ssta}"  # key name for virtual source
             for rr in np.arange(ss + 1, nb_stat):
                 rsta = stat_list[rr]
-
+                rnet = net_list[rr]
+                rkey = f"{rnet}_{rsta}"  # key name for virtual receiver
                 # Get pick data for pair
                 try:
-                    T_list, V_list = PICK_CELL[ssta][rsta]
+                    T_list, V_list = PICK_CELL[skey][rkey]
                     V_list /= 1e3  # Need km (ref. Thomas' codes)
                 except KeyError:  # no data for this pair
                     bool_nodata[cpl] = 1
@@ -552,3 +573,89 @@ def make_data_kernels(dist_stat, kernel, pick_cell, Tc_list, output_dir_kern, pl
         ax.set_xlabel("Period [s]")
         plt.savefig(os.path.join(output_dir_kern, "num_picks_per_period.png"))
         plt.close()
+
+
+def prep_all(config_file, ccomp_list, method="pws", save_mat=True, save_python=True):
+    """
+    Prepare station list, inversion grid, and pick data for group velocity map inversion
+    Args:
+        config_file: YAML parameter file
+        ccomp_list: List of cross-component for which to extract picks
+        method: stack method used for the picks. Used to get path to dispersion pick files
+        save_mat: save outputs to matlab variable files
+        save_python: save outputs to numpy pickle files
+
+    Returns:
+
+    """
+    # Extract parameters
+    with open(config_file, 'r') as file:
+        params = yaml.safe_load(file)
+    Logger.info(f"Parameters read from file {config_file}")
+
+    # Make stat_list_merged.mat:
+    Logger.info("Making stat_list_merged.mat")
+    stat_list_merged = make_stat_list(params["nccf"]["STACK_DIR"],
+                                      params["station_csv_file"],
+                                      params["nccf"]["fs"],
+                                      params["output_folder"],
+                                      save_mat=save_mat,
+                                      save_python=save_python
+                                      )
+
+    # Make dist_stat.mat
+    Logger.info("Making dist_stat.mat")
+    bounds = {
+        "min_lat": params["map_grid"]["min_lat"],
+        "max_lat": params["map_grid"]["max_lat"],
+        "min_lon": params["map_grid"]["min_lon"],
+        "max_lon": params["map_grid"]["max_lon"]
+    }
+    stainfo = {
+        "stat_list": stat_list_merged["stat_list_merged"],
+        "net_list": stat_list_merged["net_list_merged"],
+        "stat_lat": stat_list_merged["lat_merged"],
+        "stat_lon": stat_list_merged["lon_merged"]
+    }
+    dist_stat = make_dist_stat(bounds,
+                               stainfo,
+                               params["output_folder"],
+                               save_mat=save_mat,
+                               save_python=save_python
+                               )
+
+    # Make stat_grid.mat
+    Logger.info("Making stat_grid.mat")
+    dgrid = make_stat_grid(dist_stat,
+                           dx_grid=params["map_grid"]["dx_grid"],
+                           dy_grid=params["map_grid"]["dy_grid"],
+                           output_folder=params["output_folder"],
+                           make_plot=True,
+                           save_mat=save_mat,
+                           save_python=save_python
+                           )
+
+    # Make kernel.mat
+    Logger.info("Making kernel.mat")
+    _ = make_kernel(dgrid,
+                    output_folder=params["output_folder"],
+                    dl=0.005,  # minimum distance for the ray to travel in a cell in km to count the cell
+                    plot_random_kernels=3,
+                    save_mat=save_mat,
+                    save_python=save_python
+                    )
+
+    # Make PICK_CELL
+    for comp in ccomp_list:
+        disp_dir = os.path.join(params["nccf"]["STACK_DIR"], "dispersion", f"vg_{comp}")
+        Logger.info(f"Extracting picks for component {comp} from directory {disp_dir}")
+        dpicks = make_pick_cell(disp_dir,
+                                output_folder=params["output_folder"],
+                                lag=params["picks"]["lag"],
+                                comp=comp,
+                                topology=params["picks"]["topology"],
+                                snr_nbG_thresh=params["picks"]["snr_nbG_thresh"],
+                                d_lambda_thresh=params["picks"]["d_lambda_thresh"],
+                                save_mat=save_mat,
+                                save_python=save_python
+                                )

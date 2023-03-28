@@ -1,0 +1,35 @@
+
+# Information from the noisepy stack results
+nccf:
+  STACK_DIR: "/media/genevieve/sandisk4TB/aargau-data/STACK_CHAA_normZ"
+  fs: 25.0
+  comp: "ZZ"
+  stack_type: "Allstack_pws"
+  freq_norm: 'rma'
+  time_norm: 'no'
+  cc_method: 'xcorr'
+  normz: False
+
+# Station info path  
+station_csv_file: "/media/genevieve/sandisk4TB/aargau-data/vg-maps/aargau_stations_AA_NEZ.csv"
+
+# Grid params
+map_grid:
+  min_lat: 47.368042
+  max_lat: 47.623637
+  min_lon: 8.043180
+  max_lon: 8.404102
+  R_earth: 6371 # Earth's radius for coordinate transformation
+  dx_grid: 1. # Spacing in x in km
+  dy_grid: 1. # Spacing in y in km
+
+# output path
+output_folder: "/media/genevieve/sandisk4TB/aargau-data/vg-maps"
+
+# Dispersion curve pick selection params
+picks:
+  method: "pws"
+  lag: "sym"
+  topology: False
+  snr_nbG_thresh: 5.
+  d_lambda_thresh: 1.5
