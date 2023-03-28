@@ -405,8 +405,10 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
     stat_list = npzfile['stat_list_merged']
     net_list = npzfile['net_list_merged']
     nb_stat = len(stat_list)
+    Logger.info(f"Number of stations: {nb_stat}")
 
     PICK_CELL = {}
+    Ntot = 0
     for ss in range(nb_stat - 1):  # Iterate over virtual sources
         if ss % 50 == 0: print(f"{ss}/{nb_stat}")
         snet = net_list[ss]  # network for source station
@@ -416,7 +418,7 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
         for rr in np.arange(ss + 1, nb_stat):  # Iterate over virtual receivers
             rnet = net_list[rr]
             rsta = stat_list[rr]
-            rkey = f"{rnet}.{rsta}"
+            rkey = f"{rnet}_{rsta}"
             dispfile = os.path.join(disp_dir, f"{snet}.{ssta}",
                                     f"{snet}.{ssta}_{rnet}.{rsta}_group_{comp}_lag{lag}.csv")
             if os.path.exists(dispfile):
@@ -428,9 +430,10 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
                 else:
                     picks = picks.loc[(picks.snr_nbG > snr_nbG_thresh) & (picks.ratio_d_lambda > d_lambda_thresh), :]
                 if len(picks.inst_period.values) > 0:
+                    Ntot += len(picks.inst_period.values)
                     data = np.float32(np.vstack([picks.inst_period.values, picks.group_velocity.values]))
                     PICK_CELL[skey][rkey] = data
-
+    Logger.info(f"Number of picks added: {Ntot}")
     mdict = {'PICK_CELL': PICK_CELL}
     if save_mat:
         fname = os.path.join(output_folder, f"all_picks_{comp}_lamb{d_lambda_thresh}.mat")
