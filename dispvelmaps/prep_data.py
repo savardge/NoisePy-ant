@@ -381,7 +381,7 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
 
 
 def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False, snr_nbG_thresh=5.,
-                   d_lambda_thresh=1.5, save_mat=True, save_python=True):
+                   d_lambda_thresh=1.5, topologyMinScore=0.5, save_mat=True, save_python=True):
     """
     Extract picks and make PICK_CELL
     Args:
@@ -393,6 +393,7 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
         topology: if using topology method for picking
         snr_nbG_thresh: Threshold on SNR calculated with narrowband gaussian filter
         d_lambda_thresh: Threshold on ratio of distance/wavelength
+        topologyMinScore: Minimum score of peaks retained for the topology peak detection method
         save_mat: for to matlab format
         save_python: Save to pickle format
 
@@ -425,7 +426,7 @@ def make_pick_cell(disp_dir, output_folder, lag="sym", comp="ZZ", topology=False
                 picks = pd.read_csv(dispfile)
                 # Apply QC criteria
                 if topology:
-                    picks = picks.loc[(picks.score == 1.0) & (picks.snr_nbG > snr_nbG_thresh) & (
+                    picks = picks.loc[(picks.score >= topologyMinScore) & (picks.snr_nbG > snr_nbG_thresh) & (
                             picks.ratio_d_lambda > d_lambda_thresh), :]
                 else:
                     picks = picks.loc[(picks.snr_nbG > snr_nbG_thresh) & (picks.ratio_d_lambda > d_lambda_thresh), :]

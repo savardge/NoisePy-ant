@@ -2,7 +2,7 @@
 
 import numpy as np
 import logging
-from findpeaks import findpeaks
+from findpeaks import findpeaks  # https://github.com/erdogant/findpeaks
 Logger = logging.getLogger(__name__)
 
 
