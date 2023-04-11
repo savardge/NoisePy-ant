@@ -14,7 +14,15 @@ freqmax = 1.0
 
 t1 = time.time()
 print(f"cross-component {ccomp}, bandpass filter: {freqmin}-{freqmax} Hz, distance increment: {dist_inc} km")
-plotting_modules.plot_all_moveout(sfiles,'Allstack_auto_covariance',freqmin=freqmin,freqmax=freqmax,ccomp=ccomp,dist_inc=dist_inc,disp_lag=disp_lag,savefig=savefig,sdir=figdir) 
+plotting_modules.plot_all_moveout(sfiles,
+                                  'Allstack_auto_covariance',
+                                  freqmin=freqmin,
+                                  freqmax=freqmax,
+                                  ccomp=ccomp,
+                                  dist_inc=dist_inc,
+                                  disp_lag=disp_lag,
+                                  savefig=savefig,
+                                  sdir=figdir)
 
 #plotting_modules.plot_all_moveout(sfiles,'Allstack_pws',freqmin=freqmin,freqmax=freqmax,ccomp=ccomp,dist_inc=dist_inc,disp_lag=disp_lag,savefig=savefig,sdir=figdir)
 #plotting_modules.plot_all_moveout(sfiles,'Allstack_linear',freqmin=freqmin,freqmax=freqmax,ccomp=ccomp,dist_inc=dist_inc,disp_lag=disp_lag,savefig=savefig,sdir=figdir) 
