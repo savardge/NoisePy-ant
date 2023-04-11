@@ -366,15 +366,21 @@ def fk_filtering_then_plot(ncts_binned, edges, t, dt=0.04, dr=0.150, cmin=0.7, c
     return D_filt, fk_filt
 
 
-def plot_fk_comp(ncts_binned, dt, dr, ax, title):
+def fk_decomposition_pos(ncts_binned, dt, dr, plot=False, ax=None, title=None):
     """
     Plot the FK decomposition with positive frequencies and wavenumbers (fold the quadrants with negative values)
     Args:
         ncts_binned: Binned stack
         dt: Sampling time interval [s]
         dr: Distance bin interval [km]
+        plot: Whether to plot of not [bool]
         ax: Matplotlib.pyplot axes where to plot
         title: Plot title
+    Returns:
+        newf: Frequency array (Hz)
+        newk_km: Wavenumber array (km)
+        fk_pos: 2D array of FK decomposition
+        fk_pos_dB: 2D array of FK decomposition with amplitude in dB
 
     """
     # Get FK
@@ -404,15 +410,18 @@ def plot_fk_comp(ncts_binned, dt, dr, ax, title):
         fkp1 = np.abs(fk[n1:, n2:])  # Q1
         fkp2 = np.fliplr(np.abs(fk[n1:, :n2]))  # Q2
     fk_pos = 0.25 * (fkp1 + fkp2 + fkp3 + fkp4)  # Mean of 4 quadrants
-    fk_pos_dB = 20 * np.log(np.abs(fk_pos)) # convert amplitude to decibels
+    fk_pos_dB = 20 * np.log(np.abs(fk_pos))  # convert amplitude to decibels
 
     # Plot
-    # ax.pcolormesh(newom,newk,np.abs(fk_pos),cmap='jet')
-    # ax.set_xlabel(r'$\omega$ (rad/s)')
-    # ax.set_ylabel('k (rad/km)')
-    fk_pos /= np.max(fk_pos.flatten()) # Normalize amplitudes
-    ax.pcolormesh(newf, newk_km, fk_pos, cmap='jet')
-    ax.set_xlabel(r'Frequency (Hz)')
-    ax.set_ylabel(r'Wavenumber (1/km)')
-    ax.set_title(title)
-    ax.grid(c="w", ls=":", lw=.5)
+    if plot:
+        # ax.pcolormesh(newom,newk,np.abs(fk_pos),cmap='jet')
+        # ax.set_xlabel(r'$\omega$ (rad/s)')
+        # ax.set_ylabel('k (rad/km)')
+        fk_pos /= np.max(fk_pos.flatten())  # Normalize amplitudes
+        ax.pcolormesh(newf, newk_km, fk_pos, cmap='jet')
+        ax.set_xlabel(r'Frequency (Hz)')
+        ax.set_ylabel(r'Wavenumber (1/km)')
+        ax.set_title(title)
+        ax.grid(c="w", ls=":", lw=.5)
+
+    return newf, newk_km, fk_pos, fk_pos_dB
