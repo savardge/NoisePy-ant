@@ -9,6 +9,7 @@ from noisepy import binstack
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+
 matplotlib.rcParams.update({'font.size': 24})
 
 # If starting from H5 stack file list
@@ -22,7 +23,7 @@ dr = 150
 # List of components to extract
 components = ["ZZ", "RR", "TT", "ZR", "RZ"]  # "RT",  "TR", "TZ", "ZR", "ZT"]
 Dlist = []  # Hold the binned stack for each component
-Dfiltlist = [] # Binned stacks but with filtering
+Dfiltlist = []  # Binned stacks but with filtering
 for i, comp in enumerate(components):
     irow = i // 3
     icol = i % 3
@@ -32,7 +33,7 @@ for i, comp in enumerate(components):
         # If starting from the H5 stack files (very very slow!!!):
         t_start = time.time()
         _, r, f, ncts, t, dt, _, _ = binstack.get_stack_gather(sfiles, stack_method="Allstack_pws", comp="ZZ")
-        print(f"Took {time.time()-t_start:.1f} seconds to extract CCF data from stack files")
+        print(f"Took {time.time() - t_start:.1f} seconds to extract CCF data from stack files")
         # r = r * 1e3  # Inter-station distances in m
     else:
         # If extract_ncts was run previously, use the produced files with stacks as numpy arrays
@@ -40,7 +41,7 @@ for i, comp in enumerate(components):
         data = np.load(glob.glob(os.path.join("/home/users/s/savardg/scratch/extract_ncfs", "aargau",
                                               f"aargau_ncfs_wCH_Allstack_pws_{comp}.npz"))[0])
         ncts = data['ncts']
-        r = data['r'] #*1e3 # Inter-station distances in m
+        r = data['r']  # *1e3 # Inter-station distances in m
         t = data['t']
         dt = data['dt']
 
@@ -63,29 +64,35 @@ for i, comp in enumerate(components):
     Dlist.append(D)
     # Dfiltlist.append(D_filt)
 
-# PLOT FK
+# Get FK
 ZZ = Dlist[0]
 RR = Dlist[1]
 TT = Dlist[2]
 ZR = Dlist[3]
 RZ = Dlist[4]
-ZRpRZ = (ZR + RZ) * 0.5  # This enhances P-waves (c.f. Takagi, 2015)
-ZRmRZ = (ZR - RZ) * 0.5  # This enhances Rayleigh waves (c.f. Takagi, 2015)
-
-fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(15, 15))
+ZRpRZ = (ZR + RZ) * 0.5
+ZRmRZ = (ZR - RZ) * 0.5
 f, k, fkZZ, _ = binstack.fk_decomposition_pos(ZZ, dt=dt, dr=dr)
-axs[0][0].pcolormesh(f, k, fkZZ, cmap='jet')
-axs[0][0].set_title("ZZ")
-f, k, fkZZ, _ = binstack.fk_decomposition_pos(ZRpRZ, dt=dt, dr=dr)
-axs[0][1].pcolormesh(f, k, fkZZ, cmap='jet')
-axs[0][1].set_title("(ZR + RZ)/ 2")
-f, k, fkZZ, _ = binstack.fk_decomposition_pos(ZRmRZ, dt=dt, dr=dr)
-axs[1][0].pcolormesh(f, k, fkZZ, cmap='jet')
-axs[1][0].set_title("(ZR - RZ)/ 2")
-f, k, fkZZ, _ = binstack.fk_decomposition_pos(TT, dt=dt, dr=dr)
-axs[1][1].pcolormesh(f, k, fkZZ, cmap='jet')
-axs[1][1].set_title("TT")
+f, k, fkZRpRZ, _ = binstack.fk_decomposition_pos(ZRpRZ, dt=dt, dr=dr)
+f, k, fkZRmRZ, _ = binstack.fk_decomposition_pos(ZRmRZ, dt=dt, dr=dr)
+f, k, fkTT, _ = binstack.fk_decomposition_pos(TT, dt=dt, dr=dr)
 
+# Plotting limits
+fmax = 3  # Hz
+indf = max(np.argwhere(f < fmax))[0]
+kmax = 3  # 1/km
+indk = max(np.argwhere(k < kmax))[0]
+
+# Plot
+fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(15, 15))
+axs[0][0].pcolormesh(f[:indf], k[:indk], fkZZ[:indk, :indf], cmap='jet', shading='auto')
+axs[0][0].set_title("ZZ")
+axs[0][1].pcolormesh(f[:indf], k[:indk], fkZRpRZ[:indk, :indf], cmap='jet', shading='auto')
+axs[0][1].set_title("(ZR + RZ)/ 2")
+axs[1][0].pcolormesh(f[:indf], k[:indk], fkZRmRZ[:indk, :indf], cmap='jet', shading='auto')
+axs[1][0].set_title("(ZR - RZ)/ 2")
+axs[1][1].pcolormesh(f[:indf], k[:indk], fkTT[:indk, :indf], cmap='jet', shading='auto')
+axs[1][1].set_title("TT")
 for ax in axs.ravel():
     ax.set_xlabel(r'Frequency (Hz)')
     ax.set_ylabel(r'Wavenumber (1/km)')
