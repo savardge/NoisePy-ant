@@ -271,7 +271,7 @@ def fk_decomposition(ncts_binned, dt=0.04, dr=0.150, plot=True, title=None, kmax
 
     omega0 = np.fft.fftfreq(fk.shape[1], d=dt) * 2 * np.pi  # omega in rad/s
     omega = np.fft.fftshift(omega0)
-    k0 = np.fft.fftfreq(fk.shape[0], d=0.150) * 2 * np.pi  # k in rad/km
+    k0 = np.fft.fftfreq(fk.shape[0], d=dr) * 2 * np.pi  # k in rad/km
     k = np.fft.fftshift(k0)
 
     if plot:
