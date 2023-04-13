@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.fftpack import fft, ifft, next_fast_len
 import scipy
 import time
-from obspy.signal.filter import lowpass, bandpass
+from .filter import lowpass, bandpass
 import scipy.fftpack as sfft
 from numpy import matlib as mb
 
