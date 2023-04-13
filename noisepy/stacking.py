@@ -371,7 +371,7 @@ def selective_stack(cc_array, epsilon, cc_th=0.8):
     newstack: numpy vector contains the stacked cross correlation
     nstep: np.int, total number of iterations for the stacking
 
-    Originally ritten by Marine Denolle
+    Originally written by Marine Denolle
     Modified by Chengxin Jiang @Harvard (Oct2020)
     '''
     if cc_array.ndim == 1:
@@ -401,13 +401,14 @@ def selective_stack(cc_array, epsilon, cc_th=0.8):
 
 
 # Rotation
-def rotation(bigstack, parameters, locs, flag):
+def rotation(bigstack, parameters, locs):
     '''
     this function transfers the Green's tensor from a E-N-Z system into a R-T-Z one
 
     PARAMETERS:
     -------------------
-    bigstack:   9 component Green's tensor in E-N-Z system
+    bigstack:   9 component Green's tensor in E-N-Z system.
+                order: ['EE', 'EN', 'EZ', 'NE', 'NN', 'NZ', 'ZE', 'ZN', 'ZZ']
     parameters: dict containing all parameters saved in ASDF file
     locs:       dict containing station angle info for correction purpose
     RETURNS:
@@ -423,10 +424,10 @@ def rotation(bigstack, parameters, locs, flag):
         Logger.warning('crap did not get enough components')
         tcorr = []
         return tcorr
-    staS = parameters['station_source']
-    staR = parameters['station_receiver']
 
     if len(locs):
+        staS = parameters['station_source']
+        staR = parameters['station_receiver']
         sta_list = list(locs['station'])
         angles = list(locs['angle'])
         # get station info from the name of ASDF file
