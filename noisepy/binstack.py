@@ -126,13 +126,13 @@ def symmetric_stack_time(ncts, t, r, plot=True, tmaxplot=20):
 
     if plot:
         fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-        ax[0].pcolormesh(t, trace_num, Mp, cmap='gray', vmin=-1, vmax=1)
+        ax[0].pcolormesh(t, trace_num, Mp, cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[0].set_title("Causal and acausal")
         ax[0].set_ylabel('trace #')
         ax[0].set_xlabel('Time (s)')
         ax[0].set_xlim((-tmaxplot, tmaxplot))
 
-        ax[1].pcolormesh(t[imid:], trace_num, Msym, cmap='gray', vmin=-1, vmax=1)
+        ax[1].pcolormesh(t[imid:], trace_num, Msym, cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[1].set_title("Symmetric CCF")
         ax[1].set_ylabel('trace #')
         ax[1].set_xlabel('Time (s)')
@@ -213,7 +213,7 @@ def binned_stack_time(M, Msym, dt, t, r, dr=150, plot=True, tmaxplot=20, dmaxplo
     if plot:
         fig, ax = plt.subplots(1, 3, figsize=(15, 6), sharex=True, sharey=True)
 
-        ax[0].pcolormesh(time, distances, ncts_sym_binned_nonan, cmap='gray', vmin=-1, vmax=1)
+        ax[0].pcolormesh(time, distances, ncts_sym_binned_nonan, cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[0].plot(time, time * 5000, c="b", lw=2, ls=":")
         ax[0].plot(time, time * 3000, c="r", lw=2, ls=":")
         ax[0].plot(time, time * 1200, c="g", lw=2, ls=":")
@@ -229,13 +229,13 @@ def binned_stack_time(M, Msym, dt, t, r, dr=150, plot=True, tmaxplot=20, dmaxplo
 
         D = ncts_sym_binned_nonan
         D1 = bandpass(D.copy(), freqmin=0.2, freqmax=1, df=int(1 / dt), corners=1, zerophase=True)
-        ax[1].pcolormesh(time, distances, D1 / np.max(np.abs(D1)), cmap='gray', vmin=-1, vmax=1)
+        ax[1].pcolormesh(time, distances, D1 / np.max(np.abs(D1)), cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[1].plot(time, time * 5000, c="b", lw=2, ls=":")
         ax[1].plot(time, time * 3000, c="r", lw=2, ls=":")
         ax[1].plot(time, time * 1200, c="g", lw=2, ls=":")
         ax[1].set_title("0.2 - 1 Hz")
         D2 = bandpass(D.copy(), freqmin=.6, freqmax=3.5, df=int(1 / dt), corners=1, zerophase=True)
-        ax[2].pcolormesh(time, distances, D2 / np.max(np.abs(D2)), cmap='gray', vmin=-1, vmax=1)
+        ax[2].pcolormesh(time, distances, D2 / np.max(np.abs(D2)), cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[2].set_title("0.6 - 3.5 Hz")
         ax[2].plot(time, time * 5000, c="b", lw=2, ls=":")
         ax[2].plot(time, time * 3000, c="r", lw=2, ls=":")
@@ -279,7 +279,7 @@ def fk_decomposition(ncts_binned, dt=0.04, dr=0.150, plot=True, title=None, kmax
 
     if plot:
         fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-        ax.pcolormesh(omega, k, np.abs(fk_shift), cmap='jet')
+        ax.pcolormesh(omega, k, np.abs(fk_shift), cmap='jet', shading="auto")
         ax.set_xlabel(r'$\omega$ (rad/s)')
         ax.set_ylabel('k (rad/km)')
         ax.set_ylim((-kmaxplot, kmaxplot))
@@ -350,7 +350,7 @@ def fk_filtering_then_plot(ncts_binned, edges, t, dt=0.04, dr=0.150, cmin=0.7, c
     if plot:
         distances = edges.copy() * 1e-3
         fig, ax = plt.subplots(2, 1, figsize=(12, 12), sharex=True, sharey=True)
-        ax[0].pcolormesh(t, distances, ncts_binned, cmap='gray', vmin=-1, vmax=1)
+        ax[0].pcolormesh(t, distances, ncts_binned, cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[0].set_title("Before f-k filtering -- Broadband")
         ax[0].set_xlim(-30, 30)
         ax[0].set_xlabel("lag time (s)")
@@ -359,7 +359,7 @@ def fk_filtering_then_plot(ncts_binned, edges, t, dt=0.04, dr=0.150, cmin=0.7, c
         #     D2_filt = bandpass(D_filt.copy(),freqmin=.2,freqmax=3.5,df=int(1/dt),corners=4, zerophase=True)
         #     ax[1].pcolormesh(t,distances,np.real(D2_filt),cmap='gray', vmin=-1, vmax=1)
         #     ax[1].set_title("After f-k filtering -- Filtered between 0.2 - 3.5 Hz")
-        ax[1].pcolormesh(t, distances, np.real(D_filt), cmap='gray', vmin=-1, vmax=1)
+        ax[1].pcolormesh(t, distances, np.real(D_filt), cmap='gray', vmin=-1, vmax=1, shading="auto")
         ax[1].set_title("After f-k filtering")
         ax[1].set_xlabel("lag time (s)")
         ax[1].set_ylabel("distance (km)")
@@ -417,11 +417,11 @@ def fk_decomposition_pos(ncts_binned, dt, dr, plot=False, ax=None, title=None):
 
     # Plot
     if plot:
-        # ax.pcolormesh(newom,newk,np.abs(fk_pos),cmap='jet')
+        # ax.pcolormesh(newom,newk,np.abs(fk_pos),cmap='jet', shading="auto")
         # ax.set_xlabel(r'$\omega$ (rad/s)')
         # ax.set_ylabel('k (rad/km)')
         fk_pos /= np.max(fk_pos.flatten())  # Normalize amplitudes
-        ax.pcolormesh(newf, newk_km, fk_pos, cmap='jet')
+        ax.pcolormesh(newf, newk_km, fk_pos, cmap='jet', shading="auto")
         ax.set_xlabel(r'Frequency (Hz)')
         ax.set_ylabel(r'Wavenumber (1/km)')
         ax.set_title(title)
