@@ -228,10 +228,13 @@ def binned_stack_time(M, Msym, dt, t, r, dr=150, plot=True, tmaxplot=20, dmaxplo
         # ax[0].set_ylim((0,16000))
 
         D = ncts_sym_binned_nonan
-        D1 = bandpass(D.copy(), freqmin=0.2, freqmax=1, df=int(1 / dt), corners=4, zerophase=True)
+        D1 = bandpass(D.copy(), freqmin=0.2, freqmax=1, df=int(1 / dt), corners=1, zerophase=True)
         ax[1].pcolormesh(time, distances, D1 / np.max(np.abs(D1)), cmap='gray', vmin=-1, vmax=1)
+        ax[1].plot(time, time * 5000, c="b", lw=2, ls=":")
+        ax[1].plot(time, time * 3000, c="r", lw=2, ls=":")
+        ax[1].plot(time, time * 1200, c="g", lw=2, ls=":")
         ax[1].set_title("0.2 - 1 Hz")
-        D2 = bandpass(D.copy(), freqmin=.6, freqmax=3.5, df=int(1 / dt), corners=4, zerophase=True)
+        D2 = bandpass(D.copy(), freqmin=.6, freqmax=3.5, df=int(1 / dt), corners=1, zerophase=True)
         ax[2].pcolormesh(time, distances, D2 / np.max(np.abs(D2)), cmap='gray', vmin=-1, vmax=1)
         ax[2].set_title("0.6 - 3.5 Hz")
         ax[2].plot(time, time * 5000, c="b", lw=2, ls=":")
