@@ -13,10 +13,13 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     """ Get dispersion image wtih CWT """
 
     # basic parameters for wavelet transform
-    dj = 1 / 12
-    s0 = -1
-    J = -1
-    wvn = 'morlet'
+    dj = 1 / 12  # Spacing between discrete scales. Default is Twelve sub-octaves per octaves.
+    # Smaller values will result in better scale resolution, but slower calculation and plot.
+    s0 = -1  # Smallest scale of the wavelet. Default value [-1] is 2*dt.
+    J = -1   # Number of scales less one.
+    # Scales range from s0 up to s0 * 2**(J * dj), which gives a total of (J + 1) scales.
+    # Default [-1] is J = (log2(N * dt / so)) / dj.
+    wvn = 'morlet'  # type of wavelet to use
 
     # Get period and velocity ranges
     Tmax = dist / 1.0
