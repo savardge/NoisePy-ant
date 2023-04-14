@@ -1,9 +1,78 @@
 """ DISPERSION FUNCTIONS"""
 
 import numpy as np
-import logging
+import pycwt
 from findpeaks import findpeaks  # https://github.com/erdogant/findpeaks
+import scipy
+import logging
 Logger = logging.getLogger(__name__)
+import matplotlib.pyplot as plt
+
+
+def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True):
+    """ Get dispersion image wtih CWT """
+
+    # basic parameters for wavelet transform
+    dj = 1 / 12
+    s0 = -1
+    J = -1
+    wvn = 'morlet'
+
+    # Get period and velocity ranges
+    Tmax = dist / 1.0
+    fmin = 1 / Tmax
+    fmax = 1 / Tmin
+    per = np.arange(Tmin, Tmax, dT)
+    vel = np.arange(vmin, vmax, dvel)
+
+    # trim the data according to velocity window vmin-vmax
+    npts = ccf.shape[0]
+    pt1 = int(dist / vmax / dt)
+    pt2 = int(dist / vmin / dt)
+    if pt1 == 0:
+        pt1 = 10
+    if pt2 > (npts // 2):
+        pt2 = npts // 2
+    indx = np.arange(pt1, pt2)
+    tvec = indx * dt
+    ccf = ccf[indx]
+
+    # wavelet transformation
+    cwt, sj, freq, coi, _, _ = pycwt.cwt(ccf, dt, dj, s0, J, wvn)
+
+    # do filtering here
+    if (fmax > np.max(freq)) | (fmax <= fmin):
+        raise ValueError('Abort: frequency out of limits!')
+    freq_ind = np.where((freq >= fmin) & (freq <= fmax))[0]
+    cwt = cwt[freq_ind]
+    freq = freq[freq_ind]
+
+    # use amplitude of the cwt
+    period = 1 / freq
+    rcwt, pcwt = np.abs(cwt) ** 2, np.angle(cwt)
+
+    # interpolation to grids of freq-vel
+    fc = scipy.interpolate.interp2d(dist / tvec, period, rcwt)
+    rcwt_new = fc(vel, per)
+
+    # do normalization for each frequency
+    for ii in range(len(per)):
+        rcwt_new[ii] /= np.max(rcwt_new[ii])
+
+    if plot:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 3))
+        ax.imshow(np.transpose(rcwt_new),
+                  cmap='jet',
+                  extent=[per[0], per[-1], vel[0], vel[-1]],
+                  aspect='auto',
+                  origin='lower')
+        ax.set(xlabel='Period [s]', ylabel='Vg [km/s]', xlim=(Tmin, Tmax), ylim=(vmin, vmax))
+        ax.set_title('Inter-station distance: %5.2f km' % dist)
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    return rcwt_new, per, vel
 
 
 # function to extract the dispersion from the image
