@@ -9,7 +9,7 @@ Logger = logging.getLogger(__name__)
 import matplotlib.pyplot as plt
 
 
-def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True):
+def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14,6)):
     """ Get dispersion image wtih CWT """
 
     # basic parameters for wavelet transform
@@ -60,7 +60,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
         rcwt_new[ii] /= np.max(rcwt_new[ii])
 
     if plot:
-        fig, ax = plt.subplots(1, 1, figsize=(4, 3))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         ax.imshow(np.transpose(rcwt_new),
                   cmap='jet',
                   extent=[per[0], per[-1], vel[0], vel[-1]],
