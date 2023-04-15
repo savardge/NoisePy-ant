@@ -22,7 +22,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     wvn = 'morlet'  # type of wavelet to use
 
     # Get period and velocity ranges
-    Tmax = dist / 1.0
+    Tmax = dist / 3.0
     fmin = 1 / Tmax
     fmax = 1 / Tmin
     per = np.arange(Tmin, Tmax, dT)
