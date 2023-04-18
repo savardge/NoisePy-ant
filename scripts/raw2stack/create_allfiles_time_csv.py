@@ -5,7 +5,7 @@ import obspy
 import pandas as pd
 import os
 
-RAWDATA   = '/home/users/s/savardg/scratch/aargau_broadband/RAW_DATA_MSEED'
+RAWDATA = '/home/users/s/savardg/scratch/aargau_broadband/RAW_DATA_MSEED'
 
 tmpfname = "allfiles_time_temp_SED.csv"
 fname = "allfiles_time_SED.csv"

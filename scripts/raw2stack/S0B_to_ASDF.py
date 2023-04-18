@@ -140,6 +140,11 @@ locs = comm.bcast(locs, root=0)
 
 # MPI: loop through each time-chunk
 for ick in range(rank, splits, size):
+    # Check if already processed
+    ff = os.path.join(DATADIR, all_chunk[ick] + 'T' + all_chunk[ick + 1] + '.h5') # output file
+    if os.path.isfile(ff):  # Skip if processed
+        continue
+
     t0 = time.time()
 
     # time window defining the time-chunk
