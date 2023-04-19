@@ -12,7 +12,7 @@ quick index of dv/v methods:
 7) wdw_dvv (Wavelet Dynamic Warping; Yuan et al., in prep)
 
 """
-
+import pyasdf
 import scipy
 import pycwt
 import numpy as np
@@ -20,7 +20,10 @@ from scipy.signal import hilbert
 from obspy.signal.invsim import cosine_taper
 from scipy.fftpack import fft
 from obspy.signal.regression import linear_regression
+from obspy import UTCDateTime
 import logging
+from stacking import pws, adaptive_filter, robust_stack, nroot_stack, selective_stack
+import matplotlib.pyplot as plt
 
 Logger = logging.getLogger(__name__)
 
@@ -1252,3 +1255,151 @@ def wct_modified(y1, y2, dt, dj=1 / 12, s0=-1, J=-1, sig=True, significance_leve
         sig = np.asarray([0])
 
     return WCT, aWCT, coi, freq, sig
+
+
+def get_stacks(sfile, ccomp, stack_method):
+    # load stacked and sub-stacked waveforms
+    dtype = 'Allstack_' + stack_method
+    with pyasdf.ASDFDataSet(sfile, mode='r') as ds:
+
+        if dtype not in ds.auxiliary_data.list():
+            print(f"Stack method {dtype} not found.")
+            print([dum for dum in ds.auxiliary_data.list() if dum[0] == "A"])
+            return None, None, None, None
+
+        # print(ds.auxiliary_data[dtype].list())
+
+        if ccomp not in ds.auxiliary_data[dtype].list():
+            print(f"Component {ccomp} not found")
+            return None, None, None, None
+
+        para = ds.auxiliary_data[dtype][ccomp].parameters
+
+        refstack = ds.auxiliary_data[dtype][ccomp].data[:]  # reference stack
+        npts = refstack.shape[0]
+
+        substacks0 = ds.auxiliary_data.list()
+        num_allstack = len([s for s in substacks0 if s[0] == "A"])
+        substacks = [s for s in substacks0 if s[0] == "T"]
+        substacks = substacks[num_allstack:]  # Remove the "Allstack"
+        nwin = len(substacks)
+
+        # Read substacks and their timestamp
+        timestamp = np.empty(nwin, dtype='datetime64[s]')
+        ndata = np.zeros(shape=(nwin, npts), dtype=np.float32)
+        ifail = []
+        for ii in range(nwin):
+            ss = substacks[ii]
+            timestamp[ii] = UTCDateTime(int(ss.split('T')[-1]))
+            # print(ds.auxiliary_data[ss].list())
+            try:
+                ndata[ii] = ds.auxiliary_data[ss][ccomp].data[:]
+            except:
+                ifail.append(ii)
+                continue
+        print(f"{len(ifail)} substacks couldn't be read.")
+        timestamp = np.delete(timestamp, ifail, axis=0)  # remove failed substacks
+        ndata = np.delete(ndata, ifail, axis=0)  # remove failed substacks
+
+    return timestamp, ndata, refstack, para
+
+
+def change_substack_length(timestamp, ndata, stacklen_new, step, dt, stack_method="linear"):
+    """
+    Do new substacks with new moving window length and
+    step equal to previous substack window length
+    stacklen_new and step are numpy Timedelta64 time
+    e.g. stacklen_new = np.timedelta64(10,"D")
+
+    Args:
+        timestamp: obspy UTCDateTime array
+        ndata: 2D CCF substacks (start timestamp of substack, time lag)
+        stacklen_new: New substack length (numpy.timedelta64)
+        step: step between new substacks  (numpy.timedelta64)
+        dt: sampling interval of time lags (s)
+        stack_method: "linear" [default], "pws", "robust", "adaptive", "nroot" or "selective"
+                *** check default params in script for adaptive, robust and selective
+
+    Returns:
+        new timestamps
+        new CCF data matrix
+    """
+
+    # Get new timestamp array
+    num_splits = int((timestamp[-1] - timestamp[0]) / step)
+    timestamp_start = timestamp[0] + stacklen_new
+    timestamp2 = [timestamp_start + k * step for k in range(num_splits)]
+    nwin2 = len(timestamp2)
+
+    # Make new substacks
+    npts = ndata.shape[1]
+    ndata2 = np.zeros(shape=(nwin2, npts), dtype=np.float32)
+    for ii in range(nwin2):
+        t = timestamp2[ii]
+        indx = np.where((timestamp <= t) & (timestamp >= t - stacklen_new))[0]
+        ind = []
+        for idx in indx:
+            if np.sum(np.abs(ndata[idx, :])) > 0:
+                ind.append(idx)
+                # print(t, len(ind))
+        # print(t - stacklen_new, t)
+        # do stacking to see their waveforms
+        if stack_method == "linear":
+            ndata2[ii] = np.mean(ndata[ind, :], axis=0)
+        elif stack_method == "pws":
+            ndata2[ii] = pws(ndata[ind, :], int(1 / dt))
+        elif stack_method == "robust":
+            srobust, ww, nstep = robust_stack(ndata[ind, :], 0.001)
+            ndata2[ii] = srobust
+        elif stack_method == "adaptive":
+            ndata2[ii] = adaptive_filter(ndata[ind, :], 1)
+        elif stack_method == "nroot":
+            ndata2[ii] = nroot_stack(ndata[ind, :], 2)
+        elif stack_method == "selective":
+            sstack0, nstep = selective_stack(ndata[ind, :], 0.001, 0.01)
+            ndata2[ii] = sstack0
+
+    return timestamp2, ndata2
+
+
+def plot_substacks(timestamp, ndata, lag, title=None, normalize=True, vscale=1, figfile=None):
+    '''Plot substacks'''
+
+    nwin = len(timestamp)
+
+    if normalize:
+        ndata /= np.max(np.abs(ndata), axis=1, keepdims=True)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    ax.matshow(ndata, cmap='seismic', extent=[-lag, lag, nwin, 0], aspect='auto', vmin=-vscale, vmax=vscale)
+    # y axis
+    if nwin > 10:
+        tick_inc = int(nwin / 10)
+    else:
+        tick_inc = 2
+    ax.set_yticks(np.arange(0, nwin - 1, step=tick_inc))
+    labels = [timestamp[k] for k in np.arange(0, nwin - 1, step=tick_inc)]
+    ax.set_yticklabels(labels)
+
+    #     ieq = np.argmin(np.abs((timestamp - np.datetime64('2014-05-10T09:00:00'))// np.timedelta64(1, 's'))) # Mw 6.9 Aegan Sea
+    #     if ieq > 0:
+    #         ax.axhline(ieq, lw=3, c="k", ls="--")
+
+    #     ieq = np.argmin(np.abs((timestamp - np.datetime64('2013-01-08 14:16:08.0'))// np.timedelta64(1, 's'))) # Mw 5.7 Aegan Sea
+    #     if ieq > 0:
+    #         ax.axhline(ieq, lw=3, c="gray", ls="--")
+    # ieq = np.argmin(np.abs((timestamp - np.datetime64('2014-05-24 09:31:18.8'))// np.timedelta64(1, 's'))) # Mb 5.0 Aegan Sea
+    # if ieq > 0:
+    #     ax.axhline(ieq, lw=3, c="gray", ls="--")
+    # xaxis
+    ax.set_xlabel('time [s]')
+    ax.xaxis.set_ticks_position('bottom')
+
+    if title:
+        ax.set_title(title)
+
+    if figfile is not None:
+        plt.savefig(figfile, format="PNG")
+    # else:
+    plt.show()
+    plt.close()

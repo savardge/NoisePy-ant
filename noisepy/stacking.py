@@ -217,6 +217,7 @@ def pws(arr, sampling_rate, power=2, pws_timegate=5.):
     '''
 
     if arr.ndim == 1:
+        print('2D matrix is needed for pws')
         return arr
     N, M = arr.shape
 
@@ -289,6 +290,7 @@ def adaptive_filter(arr, g):
     narr: numpy vector contains the stacked cross correlation function
     '''
     if arr.ndim == 1:
+        print('2D matrix is needed for adaptive filtering')
         return arr
     N, M = arr.shape
     Nfft = next_fast_len(M)
