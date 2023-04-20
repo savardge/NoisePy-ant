@@ -134,6 +134,9 @@ for fname in flist:
 #     plt.tight_layout()
 #     plt.show()
 #     plt.close()
+
+    # Alternative way: iteratively eliminate measurements outside 2 standard deviation
+    dfa = pd.DataFrame({"period": np.array(Tall), "HV": np.array(HVall)})
     periods = x
     HV_periods = []
     HV_median = []
@@ -142,12 +145,12 @@ for fname in flist:
     HV_count = []
     min_measurements = 50
     for per in x:
-        hv = df.loc[df.period == per, "HV"].values
+        hv = dfa.loc[dfa.period == per, "HV"].values
         irem = ([0],)
         while len(irem) == 0:
             hvmean = np.mean(hv)
             hvstd = np.std(hv)
-            irem = np.where( (hv < hvmean - 2 * hvstd) & (hv > hvmean + 2 * hvstd))
+            irem = np.where((hv < hvmean - 2 * hvstd) | (hv > hvmean + 2 * hvstd))
             hv = np.delete(hv, irem)
         if len(hv) < min_measurements:
             continue
@@ -156,11 +159,11 @@ for fname in flist:
         HV_mean.append(np.mean(hv))
         HV_std.append(np.std(hv))
         HV_count.append(len(hv))
-    df = pd.DataFrame({
+    dfout = pd.DataFrame({
         "period": HV_periods,
         "HV_median": HV_median,
         "HV_mean": HV_mean,
         "HV_std": HV_std,
         "HV_count": HV_count
     })
-    dfsum.to_csv(fname.replace("HV_pws.csv", "HV_pws_combined_2sigma.csv"))
+    dfout.to_csv(fname.replace("HV_pws.csv", "HV_pws_combined_2sigma.csv"))
