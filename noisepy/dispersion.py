@@ -79,7 +79,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
 
 
 # function to extract the dispersion from the image
-def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=5, minlambda=1.5):
+def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     '''
     this function takes the dispersion image from CWT as input, tracks the global maxinum on
     the wavelet spectrum amplitude and extract the sections with continous and high quality data
