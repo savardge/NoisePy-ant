@@ -1,13 +1,14 @@
-""" DISPERSION FUNCTIONS"""
-
+""" DISPERSION PICKING FUNCTIONS"""
 import numpy as np
 import pycwt
 from findpeaks import findpeaks  # https://github.com/erdogant/findpeaks
 import scipy
+import matplotlib.pyplot as plt
+from scipy import fft
+from scipy import interpolate
+from scipy.signal import hilbert
 import logging
 Logger = logging.getLogger(__name__)
-import matplotlib.pyplot as plt
-
 
 def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14,6)):
     """ Get dispersion image wtih CWT """
@@ -205,3 +206,66 @@ def extract_curves_topology(amp, per, vel, limit=0.1):
     pick_sco = [tup[2] for tup in peaks]
 
     return pick_per, pick_vel, pick_sco
+
+
+def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
+    """
+    Narrowband Gaussian filtering to get SNR at each frequency
+    Args:
+        ccf: Cross-correlation function
+        dt: sampling interval [s]
+        fn_array: Numpy array of frequencies
+        dist: distance between stations [km]
+        alpha: Gaussian window parameter
+        vmin: Minimum group velocity to determine signal window
+        vmax: Maximum group velocity to determine signal window
+
+    Returns:
+
+    """
+    # Define signal and noise windows
+    signal_win = np.arange(int(dist / vmax / dt), int(dist / vmin / dt))
+    noise_istart = len(ccf) - 2 * len(signal_win)
+    noise_win = np.arange(noise_istart, noise_istart + len(signal_win))
+    noise_rms = np.sqrt(np.sum(ccf[noise_win] ** 2) / len(noise_win))
+    snr_bb = np.max(np.abs(ccf[signal_win])) / noise_rms  # broadband snr
+
+    # Narrowband filtering with Gaussian
+    omgn_array = 2 * np.pi * fn_array
+
+    # Transform ccf to frequency domain
+    Nfft = fft.next_fast_len(len(ccf))
+    ccf_freq = fft.fft(ccf, n=Nfft)
+    freq_samp = 2 * np.pi * abs(fft.fftfreq(Nfft, dt))
+
+    # Narrowband filtering
+    # ccf_time_nbG = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
+    # ccf_time_nbG_env = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
+    snr_nbG = np.zeros(shape=(len(omgn_array),), dtype=np.float32)
+    for iomgn, omgn in enumerate(omgn_array):
+        # Gaussian kernel
+        GaussFilt = np.exp(-alpha * ((freq_samp - omgn) / omgn) ** 2)
+
+        # Apply filter
+        ccf_freq_nbG = ccf_freq * GaussFilt
+        tmp = fft.ifft(ccf_freq_nbG, n=Nfft).real
+
+        # Transform to the time domain
+        ccftnbg = tmp[:len(ccf)]
+        # ccf_time_nbG[iomgn, :] = ccftnbg
+
+        # Get envelope
+        analytic_signal = hilbert(ccftnbg)
+        amplitude_envelope = np.abs(analytic_signal)
+        # ccf_time_nbG_env[iomgn, :] = amplitude_envelope
+
+        # SNR
+        # check if max is at edge of lag time limits
+        isnr = np.argmax(amplitude_envelope)
+        if isnr == 0 or isnr == len(amplitude_envelope) - 1:
+            snr_nbG[iomgn] = 0
+        else:
+            noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
+            snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
+
+    return snr_nbG, snr_bb  # ccf_time_nbG , ccf_time_nbG_env, snr_nbG
