@@ -188,18 +188,32 @@ def extract_dispersion_simple(amp, per, vel):
 
 
 def extract_curves_topology(amp, per, vel, limit=0.1):
+    """
+    Pick dispersion curves using the topology method (c.f. https://github.com/erdogant/findpeaks)
+    Args:
+        amp: FTAN image
+        per: periods
+        vel: velocities
+        limit: Minimum score
+
+    Returns:
+
+    """
     # Get peak for each period
     fp = findpeaks(method='topology', verbose=0, limit=limit)
     peaks = []
     for iT in range(amp.shape[0]):
         X = amp[iT, :]
-        results = fp.fit(X)
-        imax = results["persistence"]["y"]
-        scores = results["persistence"]["score"]
-        for p, score in zip(imax, scores):
-            if p == 0 or p == amp.shape[1] - 1:  # Skip pick at edge of image
-                continue
-            peaks.append((per[iT], vel[p], score))
+        try:
+            results = fp.fit(X)
+            imax = results["persistence"]["y"]
+            scores = results["persistence"]["score"]
+            for p, score in zip(imax, scores):
+                if p == 0 or p == amp.shape[1] - 1:  # Skip pick at edge of image
+                    continue
+                peaks.append((per[iT], vel[p], score))
+        except:
+            pass
 
     pick_vel = [tup[1] for tup in peaks]
     pick_per = [tup[0] for tup in peaks]
