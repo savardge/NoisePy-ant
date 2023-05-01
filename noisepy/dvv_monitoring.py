@@ -671,11 +671,11 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
     """
     # common variables
     # t = para['t']
-    twin = para['twin']
+    # twin = para['twin']
     freq = para['freq']
     dt = para['dt']
-    tmin = np.min(twin)
-    tmax = np.max(twin)
+    # tmin = np.min(twin)
+    # tmax = np.max(twin)
     fmin = np.min(freq)
     fmax = np.max(freq)
     # itvec = np.arange(np.int((tmin - t.min()) / dt) + 1, np.int((tmax - t.min()) / dt) + 1)
