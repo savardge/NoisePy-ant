@@ -358,7 +358,7 @@ for ipair in range(rank, splits, size):
         tparameters['station_source'] = ssta
         tparameters['station_receiver'] = rsta
         if stack_method != 'all':
-            bigstack_rotated = stacking.rotation(bigstack, tparameters, locs, flag)
+            bigstack_rotated = stacking.rotation(bigstack, tparameters, locs)
 
             # write to file
             for icomp in range(nccomp):
@@ -372,11 +372,11 @@ for ipair in range(rank, splits, size):
                                            path=comp,
                                            parameters=tparameters)
         else:
-            bigstack_rotated = stacking.rotation(bigstack, tparameters, locs, flag)
-            bigstack_rotated1 = stacking.rotation(bigstack1, tparameters, locs, flag)
-            bigstack_rotated2 = stacking.rotation(bigstack2, tparameters, locs, flag)
-            bigstack_rotated3 = stacking.rotation(bigstack3, tparameters, locs, flag)
-            bigstack_rotated4 = stacking.rotation(bigstack4, tparameters, locs, flag)
+            bigstack_rotated = stacking.rotation(bigstack, tparameters, locs)
+            bigstack_rotated1 = stacking.rotation(bigstack1, tparameters, locs)
+            bigstack_rotated2 = stacking.rotation(bigstack2, tparameters, locs)
+            bigstack_rotated3 = stacking.rotation(bigstack3, tparameters, locs)
+            bigstack_rotated4 = stacking.rotation(bigstack4, tparameters, locs)
 
             # write to file
             for icomp in range(nccomp):
