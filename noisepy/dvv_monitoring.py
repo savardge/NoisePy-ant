@@ -670,7 +670,7 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
     Written by Congcong Yuan (30 Jun, 2019)
     """
     # common variables
-    t = para['t']
+    # t = para['t']
     twin = para['twin']
     freq = para['freq']
     dt = para['dt']
@@ -678,8 +678,8 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
     tmax = np.max(twin)
     fmin = np.min(freq)
     fmax = np.max(freq)
-    itvec = np.arange(np.int((tmin - t.min()) / dt) + 1, np.int((tmax - t.min()) / dt) + 1)
-    tvec = t[itvec]
+    # itvec = np.arange(np.int((tmin - t.min()) / dt) + 1, np.int((tmax - t.min()) / dt) + 1)
+    # tvec = t[itvec]
     #tvec = np.arange(tmin, tmax, dt)
 
     # apply cwt on two traces
@@ -716,8 +716,8 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
         # run stretching
         #dvv, err, cc, cdp = stretching(ncwt2, ncwt1, dv_range, nbtrial, para)
         #dvv, err, cc, cdp = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
-        dvv, err, cc, cdp = stretching_vect(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
-        return dvv, err, cc, cdp
+        dvv, err, cc, cdp = stretching_vect(ncwt2, ncwt1, dv_range, nbtrial, para)
+        return None, dvv, err, cc, cdp
 
         # directly take advantage of the real-valued parts of wavelet transforms
     else:
@@ -744,8 +744,8 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
 
             # run stretching
             #dv, error, c1, c2 = stretching(ncwt2, ncwt1, dv_range, nbtrial, para)
+            #dv, error, c1, c2 = stretching_vect(ncwt2, ncwt1, dv_range, nbtrial, para)
             dv, error, c1, c2 = stretching_vect(ncwt2, ncwt1, dv_range, nbtrial, para)
-            #dv, error, c1, c2 = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
             dvv[ii], cc[ii], cdp[ii], err[ii] = dv, c1, c2, error
 
         return freq[freq_indin], dvv, err, cc, cdp
