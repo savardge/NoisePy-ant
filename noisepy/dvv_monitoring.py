@@ -22,7 +22,7 @@ from scipy.fftpack import fft
 from obspy.signal.regression import linear_regression
 from obspy import UTCDateTime
 import logging
-from stacking import pws, adaptive_filter, robust_stack, nroot_stack, selective_stack
+from .stacking import pws, adaptive_filter, robust_stack, nroot_stack, selective_stack
 import matplotlib.pyplot as plt
 
 Logger = logging.getLogger(__name__)
@@ -715,16 +715,18 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
 
         # run stretching
         #dvv, err, cc, cdp = stretching(ncwt2, ncwt1, dv_range, nbtrial, para)
-        dvv, err, cc, cdp = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
-        #dvv, err, cc, cdp = ts_dvv(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
-        return dvv, err
+        #dvv, err, cc, cdp = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
+        dvv, err, cc, cdp = stretching_vect(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
+        return dvv, err, cc, cdp
 
         # directly take advantage of the real-valued parts of wavelet transforms
     else:
         # initialize variable
         nfreq = len(freq_indin)
-        dvv, cc, cdp, err = np.zeros(nfreq, dtype=np.float32), np.zeros(nfreq, dtype=np.float32), \
-                            np.zeros(nfreq, dtype=np.float32), np.zeros(nfreq, dtype=np.float32)
+        dvv = np.zeros(nfreq, dtype=np.float32)
+        cc = np.zeros(nfreq, dtype=np.float32)
+        cdp = np.zeros(nfreq, dtype=np.float32)
+        err = np.zeros(nfreq, dtype=np.float32)
 
         # loop through each freq
         for ii, ifreq in enumerate(freq_indin):
@@ -742,11 +744,11 @@ def wts_dvv(ref, cur, allfreq, para, dv_range, nbtrial, dj=1 / 12, s0=-1, J=-1, 
 
             # run stretching
             #dv, error, c1, c2 = stretching(ncwt2, ncwt1, dv_range, nbtrial, para)
-            dv, error, c1, c2 = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
-            #dv, error, c1, c2 = ts_dvv(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
+            dv, error, c1, c2 = stretching_vect(ncwt2, ncwt1, dv_range, nbtrial, para)
+            #dv, error, c1, c2 = stretching(ncwt2[itvec], ncwt1[itvec], dv_range, nbtrial, para)
             dvv[ii], cc[ii], cdp[ii], err[ii] = dv, c1, c2, error
 
-        return freq[freq_indin], dvv, err
+        return freq[freq_indin], dvv, err, cc, cdp
 
 
 def wtdtw_dvv(ref, cur, allfreq, para, maxLag, b, direction, dj=1 / 12, s0=-1, J=-1, wvn='morlet', normalize=True):
@@ -1363,7 +1365,20 @@ def change_substack_length(timestamp, ndata, stacklen_new, step, dt, stack_metho
 
 
 def plot_substacks(timestamp, ndata, lag, title=None, normalize=True, vscale=1, figfile=None):
-    '''Plot substacks'''
+    """
+    Plot substacks (postitive and negative lags)
+    Args:
+        timestamp: Numpy vector of timestamps for start time of windows
+        ndata: 2D matrix of substacks (windows, time samples)
+        lag: maximum lag corresponding to input substacks (positive and negative lags)
+        title: plot title
+        normalize: normalize each substack by itself
+        vscale: Maximum amplitude (+/-) for colorscale
+        figfile: Name of output file (None if no saving)
+
+    Returns:
+
+    """
 
     nwin = len(timestamp)
 
@@ -1381,10 +1396,11 @@ def plot_substacks(timestamp, ndata, lag, title=None, normalize=True, vscale=1, 
     labels = [timestamp[k] for k in np.arange(0, nwin - 1, step=tick_inc)]
     ax.set_yticklabels(labels)
 
+    # Plot horizontal line corresponding to a specific event
+    # Here below, the Aegan Sea earthquake of May 10, 2014
     #     ieq = np.argmin(np.abs((timestamp - np.datetime64('2014-05-10T09:00:00'))// np.timedelta64(1, 's'))) # Mw 6.9 Aegan Sea
     #     if ieq > 0:
     #         ax.axhline(ieq, lw=3, c="k", ls="--")
-
     #     ieq = np.argmin(np.abs((timestamp - np.datetime64('2013-01-08 14:16:08.0'))// np.timedelta64(1, 's'))) # Mw 5.7 Aegan Sea
     #     if ieq > 0:
     #         ax.axhline(ieq, lw=3, c="gray", ls="--")
@@ -1392,6 +1408,7 @@ def plot_substacks(timestamp, ndata, lag, title=None, normalize=True, vscale=1, 
     # if ieq > 0:
     #     ax.axhline(ieq, lw=3, c="gray", ls="--")
     # xaxis
+
     ax.set_xlabel('time [s]')
     ax.xaxis.set_ticks_position('bottom')
 
