@@ -76,8 +76,9 @@ def cut_trace_make_stat(fc_para, source):
     # copy data into array
     data = source[0].data
 
-    # if the data is shorter than the tim chunck, return zero values
+    # if the data is shorter than the time chunck, return zero values
     if data.size < sps * inc_hours * 3600:
+        Logger.warning(f"The data is shorter than the time chunk! returning empty arrays {source.id}")
         return source_params, dataS_t, dataS
 
     # statistic to detect segments that may be associated with earthquakes
