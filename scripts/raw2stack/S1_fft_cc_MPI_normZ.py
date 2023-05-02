@@ -323,14 +323,16 @@ for ick in range(rank, splits, size):
         fft1 = fft_array[iiS]
         source_std = fft_std[iiS]
         sou_ind = np.where((source_std < fc_para['max_over_std']) & (source_std > 0) & (np.isnan(source_std) == 0))[0]
-        if not fft_flag[iiS] or not len(sou_ind): continue
+        if not fft_flag[iiS] or not len(sou_ind):
+            continue
 
         t0 = time.time()
         # -----------get the smoothed source spectrum for decon later----------
         sfft1 = cross_correlation.smooth_source_spect(fc_para, fft1)
         sfft1 = sfft1.reshape(N, Nfft2)
         t1 = time.time()
-        if flag: Logger.info('smoothing source takes %6.4fs' % (t1 - t0))
+        if flag:
+            Logger.info('smoothing source takes %6.4fs' % (t1 - t0))
 
         # get index right for auto/cross correlation
         istart = iiS
