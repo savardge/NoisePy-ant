@@ -300,6 +300,9 @@ for ick in range(rank, splits, size):
                 del source_white_E, data_E
                 
             del trace_stdS_Z, dataS_t_Z, dataS_Z, trace_stdS_N, dataS_t_N, dataS_N, trace_stdS_E, dataS_t_E, dataS_E
+        else:
+            Logger.info(f"Could not find all three channels for stations {tmps}")
+            Logger.info(f"len(dataZ): {len(dataS_Z)} dataN: {len(dataS_N)}, dataE: {len(dataS_E)}")
     del ds
 
     # check whether array size is enough
@@ -373,7 +376,8 @@ for ick in range(rank, splits, size):
                     iiR] + '.' + channel[iiR] + '\n')
 
             t4 = time.time()
-            if flag: Logger.info('read S %6.4fs, cc %6.4fs, write cc %6.4fs' % ((t1 - t0), (t3 - t2), (t4 - t3)))
+            if flag:
+                Logger.info('read S %6.4fs, cc %6.4fs, write cc %6.4fs' % ((t1 - t0), (t3 - t2), (t4 - t3)))
 
             del fft2, sfft2, receiver_std
         del fft1, sfft1, source_std
