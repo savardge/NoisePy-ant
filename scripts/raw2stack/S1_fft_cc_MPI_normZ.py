@@ -171,6 +171,8 @@ for ick in range(rank, splits, size):
     nseg_chunk = int(np.floor((nsec_chunk - cc_len) / step))
     npts_chunk = int(nseg_chunk * cc_len * samp_freq)
     memory_size = nsta * npts_chunk * 4 / 1024 ** 3
+    if flag:
+        Logger.info('Requires %5.3fG memory and %5.3fG provided' % (memory_size, MAX_MEM))
     if memory_size > MAX_MEM:
         raise ValueError('Require %5.3fG memory but only %5.3fG provided)! Reduce inc_hours to avoid this issue!' % (
             memory_size, MAX_MEM))
