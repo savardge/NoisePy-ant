@@ -298,7 +298,7 @@ for ick in range(rank, splits, size):
 
     # check whether array size is enough
     if iii != nsta:
-        Logger.info('it seems some stations miss data in download step, but it is OKAY!')
+        Logger.info(f"it seems some stations miss data in download step {iii}/{nsta}, but it is OKAY!")
 
     #############PERFORM CROSS-CORRELATION##################
     ftmp = open(tmpfile, 'w')
