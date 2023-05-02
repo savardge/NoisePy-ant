@@ -301,6 +301,9 @@ for ick in range(rank, splits, size):
                 
             else:
                 Logger.info(f"len(dataZ): {len(dataS_Z)} dataN: {len(dataS_N)}, dataE: {len(dataS_E)}")
+                print(sourceZ)
+                print(sourceN)
+                print(sourceE)
             del trace_stdS_Z, dataS_t_Z, dataS_Z, trace_stdS_N, dataS_t_N, dataS_N, trace_stdS_E, dataS_t_E, dataS_E
         else:
             Logger.info(f"Could not find all three channels for stations {tmps}")
