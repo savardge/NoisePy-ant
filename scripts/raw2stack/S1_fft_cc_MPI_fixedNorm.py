@@ -103,7 +103,7 @@ ncomp = down_info['ncomp']
 fc_para.update(down_info)
 
 dt = 1 / samp_freq
-
+fc_para['dt'] = dt
 ##################################################
 # save fft metadata for future reference
 fc_metadata = os.path.join(CCFDIR, 'fft_cc_data.yaml')
