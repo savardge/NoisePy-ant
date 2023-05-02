@@ -201,13 +201,15 @@ for ick in range(rank, splits, size):
         try:
             inv1 = ds.waveforms[tmps]['StationXML']
         except Exception as e:
-            Logger.info('abort! no stationxml for %s in file %s' % (tmps, tdir[ick]))
+            Logger.info('No stationxml for %s in file %s. Skipping.' % (tmps, tdir[ick]))
             continue
         sta, net, lon, lat, elv, loc = cross_correlation.sta_info_from_inv(inv1)
 
         # get days information: works better than just list the tags
         channel_list = ds.waveforms[tmps].get_waveform_tags()
-        if len(channel_list) == 0: continue
+        if len(channel_list) == 0:
+            Logger.warning(f"Channel_list empty for station {tmps}")
+            continue
 
         # --- Now do normalization for Z channel and append data ----
         ichaz = [i for i, chan in enumerate(channel_list) if chan[2] == "z"]
@@ -215,6 +217,8 @@ for ick in range(rank, splits, size):
         ichae = [i for i, chan in enumerate(channel_list) if chan[2] == "e"]
         
         if ichaz and ichan and ichae:  # If there is data for all 3 comps
+            if flag:
+                Logger.info(f"Found data for all three channels for station {tmps}")
             ichaz = ichaz[0]
             ichan = ichan[0]
             ichae = ichae[0]
@@ -244,7 +248,8 @@ for ick in range(rank, splits, size):
 
                 Nfft = source_white_Z.shape[1]
                 Nfft2 = Nfft // 2
-                if flag: Logger.info('N and Nfft are %d (proposed %d),%d (proposed %d)' % (N, nseg_chunk, Nfft, nnfft))
+                if flag:
+                    Logger.info('N and Nfft are %d (proposed %d),%d (proposed %d)' % (N, nseg_chunk, Nfft, nnfft))
 
                 # keep track of station info to write into parameter section of ASDF files
                 
