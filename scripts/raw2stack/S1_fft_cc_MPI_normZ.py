@@ -85,7 +85,7 @@ max_over_std = fc_para['max_over_std']  # threshold to remove window of bad sign
 MAX_MEM = fc_para["MAX_MEM"]
 
 # load useful download info if start from ASDF
-dfile = os.path.join(DATADIR, 'download_info.txt')
+dfile = os.path.join(DATADIR, 'download_info.yaml')
 with open(dfile, "r") as file:
     down_info = yaml.safe_load(file)
 samp_freq = down_info['samp_freq']
