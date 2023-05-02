@@ -233,7 +233,8 @@ for ick in range(rank, splits, size):
             trace_stdS_E, dataS_t_E, dataS_E = cross_correlation.cut_trace_make_stat(fc_para, sourceE)
             
             if len(dataS_Z) and len(dataS_N) and len(dataS_E): # Make sure there is data for all 3 comps (no exclusion due to mad and std stats)
-                if flag: Logger.info(f"Doing normalization for station {sta} and 3 channels {compN}, {compE}, {compZ}")
+                if flag:
+                    Logger.info(f"Doing normalization for station {sta} and 3 channels {compN}, {compE}, {compZ}")
                 if dataS_N.shape[0] != dataS_E.shape[0] or dataS_N.shape[0] != dataS_Z.shape[0]:
                     msg = f"Data for N, E, Z not the same length: {dataS_N.shape[0]}, {dataS_E.shape[0]}, {dataS_Z.shape[0]}"
                     raise ValueError(msg)
@@ -298,7 +299,7 @@ for ick in range(rank, splits, size):
 
     # check whether array size is enough
     if iii != nsta:
-        Logger.info(f"it seems some stations miss data in download step {iii}/{nsta}, but it is OKAY!")
+        Logger.info(f"it seems some stations miss data in download step: found {iii} out of {nsta} stations.")
 
     #############PERFORM CROSS-CORRELATION##################
     ftmp = open(tmpfile, 'w')
