@@ -46,7 +46,7 @@ local_data_path = fc_para['local_data_path']  # absolute dir where SAC files are
 locations = fc_para['locations']  # station info including
 
 # some control parameters
-input_fmt = fc_para['h5']  # string: 'h5', 'sac','mseed'
+input_fmt = fc_para['input_fmt']  # string: 'h5', 'sac','mseed'
 freq_norm = fc_para['freq_norm']  # 'no' for no whitening, or 'rma' for running-mean average, 'phase_only' for sign-bit normalization in freq domain.
 time_norm = fc_para['time_norm']  # 'no' for no normalization, or 'rma', 'one_bit' for normalization in time domain
 cc_method = fc_para['cc_method']  # 'xcorr' for pure cross correlation, 'deconv' for deconvolution; FOR "COHERENCY" PLEASE set freq_norm to "rma", time_norm to "no" and cc_method to "xcorr"
