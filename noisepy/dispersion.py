@@ -114,13 +114,14 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
         # QC:
         if np.abs(gv[ii] - vmax) < 3 * dvel:  # remove points close to vg limits
             gv[ii] = 0
-        elif dist / (per[ii] * gv[ii]) < minlambda:
+        elif dist / (per[ii] * gv[ii]) < minlambda:  # remove points for which no. of wavelengths is less than threshold
             gv[ii] = 0
 
     # check the continuous of the dispersion
     for ii in range(1, nper - 15):
         # 15 is the minimum length needed for output
-        if gv[ii] == 0: continue
+        if gv[ii] == 0:
+            continue
         for jj in range(15):
             if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:
                 gv[ii] = 0
@@ -275,11 +276,13 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
 
         # SNR
         # check if max is at edge of lag time limits
-        isnr = np.argmax(amplitude_envelope)
-        if isnr == 0 or isnr == len(amplitude_envelope) - 1:
-            snr_nbG[iomgn] = 0
-        else:
-            noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
-            snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
+        #isnr = np.argmax(amplitude_envelope)
+        #if isnr == 0 or isnr == len(amplitude_envelope) - 1:
+        #    snr_nbG[iomgn] = 0
+        #else:
+        #    noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
+        #    snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
+        noise_rms = np.sqrt(np.sum(amplitude_envelope[noise_win] ** 2) / len(noise_win))
+        snr_nbG[iomgn] = np.max(amplitude_envelope[signal_win]) / noise_rms
 
     return snr_nbG, snr_bb  # ccf_time_nbG , ccf_time_nbG_env, snr_nbG

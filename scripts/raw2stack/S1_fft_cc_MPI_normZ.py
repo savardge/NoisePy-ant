@@ -252,7 +252,7 @@ for ick in range(rank, splits, size):
                 Nfft2 = Nfft // 2
                 if flag:
                     Logger.info('N and Nfft are %d (proposed %d),%d (proposed %d)' % (N, nseg_chunk, Nfft, nnfft))
-
+                #nseg_chunk * (nnfft // 2)
                 # keep track of station info to write into parameter section of ASDF files
                 
                 # Add component Z
