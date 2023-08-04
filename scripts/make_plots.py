@@ -1,6 +1,6 @@
 import sys
 import glob
-from noisepy import plotting_modules
+from noisepy import plotting
 import time
 
 ccomp = sys.argv[1]

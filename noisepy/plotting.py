@@ -12,7 +12,8 @@ from obspy.signal.filter import bandpass
 
 '''
 Ensembles of plotting functions to display intermediate/final waveforms from the NoisePy package.
-by Chengxin Jiang @Harvard (May.04.2019)
+Originally by Chengxin Jiang @Harvard (May.04.2019)
+Modified by Genevieve Savard @UniGe (2023)
 
 Specifically, this plotting module includes functions of:
     1) plot_waveform     -> display the downloaded waveform for specific station
@@ -25,16 +26,18 @@ Specifically, this plotting module includes functions of:
 #############################################################################
 ###############PLOTTING FUNCTIONS FOR FILES FROM S0##########################
 #############################################################################
-def plot_waveform(sfile, net, sta, freqmin, freqmax, savefig=False, sdir=None):
+def plot_waveform(sfile, net, sta, comp, freqmin, freqmax, savefig=False, sdir=None):
     '''
-    display the downloaded waveform for station A
+    display the downloaded waveforms for given station "sta"
 
     PARAMETERS:
     -----------------------
-    sfile: containing all wavefrom data for a time-chunck in ASDF format
-    net,sta,comp: network, station name and component 
+    sfile: file containing all waveform data for a time-chunck in ASDF format
+    net,sta: network, station name
     freqmin: min frequency to be filtered
     freqmax: max frequency to be filtered
+    savefig: whether to save figure or not
+    sdir: directory where to save figure.
 
     USAGE: 
     -----------------------
@@ -55,58 +58,37 @@ def plot_waveform(sfile, net, sta, freqmin, freqmax, savefig=False, sdir=None):
 
     tcomp = ds.waveforms[tsta].get_waveform_tags()
     ncomp = len(tcomp)
-    if ncomp == 1:
-        tr = ds.waveforms[tsta][tcomp[0]]
-        dt = tr[0].stats.delta
-        npts = tr[0].stats.npts
-        tt = np.arange(0, npts) * dt
-        data = tr[0].data
-        data = bandpass(data, freqmin, freqmax, int(1 / dt), corners=4, zerophase=True)
-        plt.figure(figsize=(9, 3))
-        plt.plot(tt, data, 'k-', linewidth=1)
-        plt.title('T\u2080:%s   %s.%s.%s   @%5.3f-%5.2f Hz' % (
-        tr[0].stats.starttime, net, sta, tcomp[0].split('_')[0].upper(), freqmin, freqmax))
-        plt.xlabel('Time [s]')
-        plt.ylabel('Amplitude')
-        plt.tight_layout()
+    # Display all components
+    dt = ds.waveforms[tsta][tcomp[0]][0].stats.delta
+    npts = ds.waveforms[tsta][tcomp[0]][0].stats.npts
+    starttime = ds.waveforms[tsta][tcomp[0]][0].stats.starttime
+    tt = np.arange(0, npts) * dt # time lag vector
+    data = np.zeros(shape=(ncomp, npts), dtype=np.float32)
+    for ii in range(ncomp):
+        data[ii] = ds.waveforms[tsta][tcomp[ii]][0].data
+        data[ii] = bandpass(data[ii], freqmin, freqmax, int(1 / dt), corners=4, zerophase=True)
+
+    fig, axs = plt.subplots(figsize=(12, 3*ncomp), sharex=True)
+    for iax, ax in enumerate(axs):
+        ax.plot(tt, data[iax], 'k-', linewidth=1, label=tcomp[0].split('_')[0].upper())
+        ax.set_title('T\u2080:%s   %s.%s   @%5.3f-%5.2f Hz' % (starttime, net, sta, freqmin, freqmax))
+        plt.legend(loc='upper left')
+
+    plt.xlabel('Time [s]')
+    plt.tight_layout()
+
+    if savefig:
+        if not os.path.isdir(sdir): os.mkdir(sdir)
+        outfname = sdir + '/{0:s}_{1:s}.{2:s}.pdf'.format(sfile.split('.')[0], net, sta)
+        plt.savefig(outfname, format='pdf', dpi=400)
+        plt.close()
+    else:
         plt.show()
-    elif ncomp == 3:
-        tr = ds.waveforms[tsta][tcomp[0]]
-        dt = tr[0].stats.delta
-        npts = tr[0].stats.npts
-        tt = np.arange(0, npts) * dt
-        data = np.zeros(shape=(ncomp, npts), dtype=np.float32)
-        for ii in range(ncomp):
-            data[ii] = ds.waveforms[tsta][tcomp[ii]][0].data
-            data[ii] = bandpass(data[ii], freqmin, freqmax, int(1 / dt), corners=4, zerophase=True)
-        plt.figure(figsize=(9, 6))
-        plt.subplot(311)
-        plt.plot(tt, data[0], 'k-', linewidth=1)
-        plt.title('T\u2080:%s   %s.%s   @%5.3f-%5.2f Hz' % (tr[0].stats.starttime, net, sta, freqmin, freqmax))
-        plt.legend([tcomp[0].split('_')[0].upper()], loc='upper left')
-        plt.subplot(312)
-        plt.plot(tt, data[1], 'k-', linewidth=1)
-        plt.legend([tcomp[1].split('_')[0].upper()], loc='upper left')
-        plt.subplot(313)
-        plt.plot(tt, data[2], 'k-', linewidth=1)
-        plt.legend([tcomp[2].split('_')[0].upper()], loc='upper left')
-        plt.xlabel('Time [s]')
-        plt.tight_layout()
 
-        if savefig:
-            if not os.path.isdir(sdir): os.mkdir(sdir)
-            outfname = sdir + '/{0:s}_{1:s}.{2:s}.pdf'.format(sfile.split('.')[0], net, sta)
-            plt.savefig(outfname, format='pdf', dpi=400)
-            plt.close()
-        else:
-            plt.show()
-
-        #############################################################################
 
 
 ###############PLOTTING FUNCTIONS FOR FILES FROM S1##########################
 #############################################################################
-
 def plot_substack_cc(sfile, freqmin, freqmax, disp_lag=None, savefig=True, sdir='./', dtype=None):
     '''
     display the 2D matrix of the cross-correlation functions for a certain time-chunck. 
