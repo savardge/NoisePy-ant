@@ -1,0 +1,23 @@
+# This file contains the config parameters and paths used to convert NoisePy outputs to matlab variables using scripts "prep_data_noisepy2matlab.py"
+
+STACK_DIR: "/Users/genevieve/aegansea/STACK_rma2_normz_xcorr" # Contains the directory with the stacked cross-correlations in pyasdf (H5) format
+fs: 25.0 # Sampling rate in Hz of the cross-correlations
+stacsv: "/Users/genevieve/aegansea/stations.csv"  # file containing station locations: name,latitude,longitude,elevation
+comp: "ZZ"  # Component of cross-correlations to use
+stack_type: "Allstack_linear"  # Stacking method to use from H5 files
+
+# 2D inversion grid limits:
+min_lat: 39.2114
+max_lat: 41.14503
+min_lon: 23.9791
+max_lon: 26.888
+R_earth: 6371 # Earth's radius for coordinate transformation
+
+# output path to write Matlab .mat files to
+output_folder: "/Users/genevieve/aegansea/matlab_inputs"
+
+# Processing parameters used in NoisePy (script S1) (not used by Matlab script, just for documentation.)
+freq_norm: 'rma'  # frequency normalization option
+time_norm: 'rma'  # Time normalization option
+cc_method: 'xcorr' # cross-correlation method
+normz: True # If normalization of 3 components done with Z component (preserves relative amplitudes)
