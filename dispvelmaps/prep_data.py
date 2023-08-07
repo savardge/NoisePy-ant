@@ -798,7 +798,7 @@ def prep_all(config_file, ccomp_list, method="pws", save_mat=True, save_python=T
     #     output_fname = os.path.join(output_folder, f"all_picks_{comp}_lamb{ratio_d_lambda}_mul{multiplier}")
     #     station_fname = os.path.join("/media/genevieve/sandisk4TB/aargau-data/vg-maps/stat_list_merged.npz")
 
-        # Make PICK_CELL and save
-        t0 = time.time()
-        mdict = make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=True, save_python=True)
-        print(f"Elapsed time: {time.time() - t0} s.")
+    # Make PICK_CELL and save
+    # t0 = time.time()
+    # mdict = make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=True, save_python=True)
+    # print(f"Elapsed time: {time.time() - t0} s.")
