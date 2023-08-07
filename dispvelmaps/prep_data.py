@@ -514,7 +514,7 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
             rsta = stat_list[rr]
             rkey = f"{rnet}_{rsta}"
 
-            tmp = df.loc[(df.stasrc == f"{snet}.{ssta}") & (df.starcv == f"{rnet}.{rsta}"), :].copy()
+            tmp = picks.loc[(picks.stasrc == f"{snet}.{ssta}") & (picks.starcv == f"{rnet}.{rsta}"), :].copy()
             # Ensure no duplicates
             tmp.sort_values(by="group_velocity", inplace=True)
             tmp.drop_duplicates(subset="inst_period", keep="last", inplace=True)
