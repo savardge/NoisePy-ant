@@ -858,12 +858,6 @@ def wtdtw_dvv(ref, cur, allfreq, para, maxLag, b, direction, dj=1 / 12, s0=-1, J
         return freq[freq_indin], dvv, err
 
 
-#############################################################
-################ MONITORING UTILITY FUNCTIONS ###############
-#############################################################
-'''
-below are assembly of the monitoring utility functions called by monitoring functions
-'''
 def get_cc(s1, s_ref):
     # returns the correlation coefficient between waveforms in s1 against reference
     # waveform s_ref.

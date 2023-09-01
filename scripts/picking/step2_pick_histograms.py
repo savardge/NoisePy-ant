@@ -19,6 +19,7 @@ def get_mean(inst_periods, group_velocity):
         gv_std[iper] = np.std(group_velocity[inst_periods==per])
     return inst_periods_uniq, gv_moy, gv_std
 
+
 def plot_picks(picks, ax=None, dmax=None, bins=100, title="Pick density"):
     """ Plotting function """
     picks2 = picks.copy()

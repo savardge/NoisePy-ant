@@ -8,6 +8,8 @@ from scipy import fft
 from scipy import interpolate
 from scipy.signal import hilbert
 import logging
+from matplotlib.ticker import AutoMinorLocator
+from obspy.imaging.cm import pqlx
 Logger = logging.getLogger(__name__)
 
 def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14,6)):
@@ -286,3 +288,81 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         snr_nbG[iomgn] = np.max(amplitude_envelope[signal_win]) / noise_rms
 
     return snr_nbG, snr_bb  # ccf_time_nbG , ccf_time_nbG_env, snr_nbG
+
+
+def get_mean(inst_periods, group_velocity):
+    """
+    Get mean and standard deviation of group velocity picks along periods
+    Args:
+        inst_periods: Numpy array of instantaneous periods
+        group_velocity: Numpy array of group velocity
+
+    Returns:
+        Mean dispersion curve:
+        period, mean group velocity, standard deviation
+
+    """
+    inst_periods_uniq = np.unique(inst_periods)
+    gv_moy = np.zeros(shape=(len(inst_periods_uniq),))
+    gv_std = np.zeros(shape=(len(inst_periods_uniq),))
+    for iper, per in enumerate(inst_periods_uniq):
+        gv_moy[iper] = np.mean(group_velocity[inst_periods == per])
+        gv_std[iper] = np.std(group_velocity[inst_periods == per])
+    return inst_periods_uniq, gv_moy, gv_std
+
+
+def plot_picks(picks, ax=None, dmax=None, bins=100, title="Pick density", cmap=pqlx, std_multiple=2):
+    """
+    Plot an histogram of dispersion picks with the mean and 2*sigma bounds
+    Args:
+        picks: Pandas.DataFrame of picks with columns inst_period, group_velocity
+        ax: pyplot axes to plot in
+        dmax: Maximum group velocity
+        bins: Matrix of period bins and group velocity bins ([period bins; velocity bins])
+        title: plot title
+        cmap: colormap for histogram
+
+    Returns:
+        heatmap, xedges, yedges, image handle
+    """
+    picks2 = picks.copy()
+
+    inst_periods_uniq, gv_moy, gv_std = get_mean(picks2.inst_period.values, picks2.group_velocity.values)
+
+    heatmap, xedges, yedges = np.histogram2d(picks2.inst_period, picks2.group_velocity, bins=bins)
+
+    # Cut first column and first row
+    heatmap = heatmap[1:, 1:]
+    xedges = xedges[1:]
+    yedges = yedges[1:]
+
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    print(np.min(heatmap), np.max(heatmap))
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+        if dmax:
+            im = ax.imshow(heatmap.T, extent=extent, origin='lower', cmap=cmap, vmin=0, vmax=dmax)
+        else:
+            im = ax.imshow(heatmap.T, extent=extent, origin='lower', cmap=cmap)
+        ax.set_title(title)
+        plt.tight_layout()
+        cb = plt.colorbar(im, shrink=0.5, label="# picks")
+        plt.show()
+        plt.close()
+    else:
+        if dmax:
+            im = ax.imshow(heatmap.T, extent=extent, origin='lower', cmap=cmap, vmin=0, vmax=dmax)
+        else:
+            im = ax.imshow(heatmap.T, extent=extent, origin='lower', cmap=cmap)
+        ax.plot(inst_periods_uniq, gv_moy, c="w", ls="--", lw=2)
+        ax.plot(inst_periods_uniq, gv_moy + std_multiple * gv_std, c="w", ls=":", lw=1)
+        ax.plot(inst_periods_uniq, gv_moy - std_multiple * gv_std, c="w", ls=":", lw=1)
+        ax.set_title(title)
+        ax.set(xlim=(xedges[0], xedges[-1]), ylim=(yedges[0], yedges[-1]))
+        ax.xaxis.set_minor_locator(AutoMinorLocator(10))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(5))
+        ax.tick_params(which='both', width=1)
+        ax.tick_params(which='major', length=9)
+        ax.tick_params(which='minor', length=5, color='k')
+    return heatmap, xedges, yedges, im
