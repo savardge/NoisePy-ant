@@ -37,10 +37,12 @@ Rough structure (to be improved...):
 1. Create a text file of station locations (comma-separated, .csv) file containing station names and geographic locations. 
     * The CSV file must contain the following columns: `network, station, channel, latitude, longitude, [elevation], [serial number]`
     * **SmartSolo:** To get station coordinates from the SmartSolo log files, run `smartsolo/extract_coordinates_from_log.py`, which reads the DigiSolo.LOG files and extract the mean values of the GPS data logged.
-2. Do some quality control to determine stations that were disturbed during the experiment or that have poor quality data.
+2. Ensure the miniseed/sac files have the same headers as the station file.
+    * **SmartSolo**: By default, when exporting the data, SmartSolo fill in the last digits of the serial number as the station name. If you want to use other station name, you must correct the headers and rename the files and directory structure. To do this, use the scripts in `smartsolo/fix-headers`. These scripts also make the file names start with the usual structure "NETWORK.STATION.LOCATION.CHANNEL"
+3. Do some quality control to determine stations that were disturbed during the experiment or that have poor quality data.
     * **SmartSolo:** For SmartSolo nodes, run `smartsolo/QC/extract_QC_stats.py`. This creates a plot and two .csv files, that contain in a table format the GPS info and the positional angles logged every ~8 minutes (if Cycle On GPS mode). To identify bad stations, either inspect each plot or apply a threshold to the standard deviation of the ecompass North, tilt, roll or pitch angles measurements. (`smartsolo/QC/get_bad_stations.py`)
     * Calculate the PPSD distribution for each station using `scripts/QC/ppsd_1sta.py`
-3. Gather instrument response info and create a directory with one StationXML per station including the instrument response.
+4. Gather instrument response info and create a directory with one StationXML per station including the instrument response.
     * **SmartSolo:** Run `smartsolo/create_stationXML.py` to create these files given the RESP file template and the station location table in csv format.
 
 
