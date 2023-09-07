@@ -9,7 +9,7 @@ Rough structure (to be improved...):
 * `matlab`: Matlab codes to do group velocity map inversion and Vs depth inversion. See `scripts/postprocess_stacks/export_matlab.py` for preparing input files from the NoisePy outputs.
     * `vg_maps_inversion`: Group velocity map inversion (linearized inversion of Tarantola & Valette 1982)
     * `vs_depth_inversion`: Vs depth inversion for each 2D grid location using a set of group velocity maps, using the Neighborhood algorithm (Wathelet 2008).
-    * `synthetic_tests_to_design_network`: Given a list of station coordinates, do a checkboard of spike resolution test (straight ray path assumption) for different periods. Useful for testing network configuration.
+    * `synthetic_tests_to_design_network`: Given a list of station coordinates, do a checkboard or spike resolution test (straight ray path assumption) for different periods. Useful for testing network configuration.
     * `checkerboard_resolution_tests`: Checkerboard/spike tests for real picked data.
     * `make_map_background`: utility script to create an image to use as background for plotting in Matlab
 * `scripts`:
