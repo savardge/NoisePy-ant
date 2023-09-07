@@ -1,0 +1,8 @@
+# Input parameters for ppsd_1sta.py
+
+datadir: "/home/share/cdff/riehen/raw_data/" #directory with miniseed data. Assumes station subfolders (check script to change)
+figdir: "/home/users/s/savardg/scratch/riehen/ppsd/figures" # Directory where to save figures of PPSD
+npzdir: "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz" # Directory where to write a pickle file to save PPSD object
+stationxml_file: "/home/users/s/savardg/riehen/ppsd/riehen_stations.xml" # Station XML file (all stations merged)
+makefig: False # To make figures or not
+overwrite: True # To overwrite pickle files or not
