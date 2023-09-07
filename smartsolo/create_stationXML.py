@@ -7,26 +7,30 @@ import os
 ##### INPUT ########
 source = "UNIGE CDFF"
 
-# Paths
-outdir = "/home/users/s/savardg/scratch/aargau/resp" #"/home/users/s/savardg/scratch/riehen/resp" #
-output_file = "aargau_stations_nodes.xml" #"riehen_stations_nodes.xml" # 
-# resp_file = "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV" # Input RESP file
-# stainfo = pd.read_csv("/home/users/s/savardg/riehen/station_locations_riehen.csv") # Needs columns station,latitude,longitude,(elevation)
-resp_file = "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV_36dB" # Input RESP file
-stainfo = pd.read_csv("/home/users/s/savardg/aargau_ant/text_files/station_locations_noisepy.csv")
-stainfo.station = stainfo.station.astype(str)
-stations = list(stainfo['station'])
+# INPUT PATHS
+# CSV file with station locations columns: station,
+station_location_file = "/home/users/s/savardg/aargau_ant/text_files/station_locations_noisepy.csv"
+# RESP response file for SmartSolo IGU16HR 5Hz 3C
+resp_file = "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV" # Input RESP file
 
-# Network parameters
-network_code = "AA" #"RI" #
-network_desc = "Aargau nodal ANT: Dec 2020" #"Riehen nodal ANT: Sep 2022" #
-start_date = UTCDateTime(2020, 12, 4) #UTCDateTime(2022, 9, 3) #
-end_date = UTCDateTime(2021, 1, 6) #UTCDateTime(2022, 9, 24) #
-sampling_rate = 250
-channel_prefix = "DP"  # First 2 letters of the SEED channel code. See https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
-zero_elevation = False # To fix elevation at zero. Otherwise need "elevation" column in stainfo
+# INPUT PARAMS
+network_code = "RS"  # Give a 2-letter network code
+network_desc = "MIGRATE RoccaNodes deployment 2023" # Short description
+start_date = UTCDateTime(2020, 12, 4)  # Start date of the experiment
+end_date = UTCDateTime(2021, 1, 6)  # Last date of experiment + 1 day
+sampling_rate = 250  # in Hz. Must match setup of nodes (4 ms = 250 Hz)
+channel_prefix = "DP"  # First 2 letters of the SEED channel code. Use DP for SmartSolo. See https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
+zero_elevation = False  # To fix elevation at zero. Otherwise need "elevation" column in stainfo
+
+# OUTPUT PATHS
+outdir = "/home/users/s/savardg/scratch/aargau/resp"  # Directory where to write 1 StationXML file per station
+output_file = "RoccaNodes_stations_nodes.xml"  # Output StationXML file with all stations and their response
 
 ######################
+# Read in station locations
+stainfo = pd.read_csv(station_location_file)
+stainfo.station = stainfo.station.astype(str)
+stations = list(stainfo['station'])
 
 # Get response
 dum = read_inventory(resp_file, format='RESP')
