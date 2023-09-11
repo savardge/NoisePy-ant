@@ -24,6 +24,13 @@ from obspy.imaging.cm import obspy_sequential
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
+import matplotlib
+
+# Plot params
+plt.rcParams["figure.figsize"] = (18, 12)
+font = {'weight' : 'normal',
+        'size'   : 22}
+matplotlib.rc('font', **font)
 
 
 def plot_spectrogram(self, cmap=obspy_sequential, clim=None, xlims=None, ylims=None, grid=True,
@@ -145,6 +152,17 @@ inv = obspy.read_inventory(xmlfile)
 makefig = config["makefig"]  # False
 overwrite = config["overwrite"]  # False
 
+# Period limits for plotting
+minT = config["minT"]  # 0.02  # in seconds
+maxT = config["maxT"]  #10.0  # in seconds
+
+# Period bins to plot evolution over datetime
+period_bins = config["period_bins"]  #"[0.1, 0.2, 1] # in s
+
+# Start-end time of deployment for plotting
+starttime = obspy.UTCDateTime(config["starttime"])._get_datetime()  # start time of deployment
+endtime = obspy.UTCDateTime(config["starttime"])._get_datetime()  # end time of deployment
+
 # Output files
 npz_filename = os.path.join(npzdir, f"{station}_{channel}_ppsd.npz")
 outfile1 = os.path.join(figdir, f"{station}_{channel}_ppsd.png")
@@ -187,25 +205,24 @@ else:
 
 # MAKE FIGS
 if makefig:
-    plt.rcParams["figure.figsize"] = (12,8)
-    minT = 0.02
-    maxT = 10.0
     fig = ppsd.plot(show=False, show_mean=True, cmap=pqlx)
     ax = fig.axes[0]
     ax.set_xlim((minT, maxT))
     coverage = fig.axes[1]
     fig.delaxes(coverage)
     print(f"Saving figure to: {outfile1}")
+    fig.set_size_inches(15, 6)
     plt.savefig(outfile1, format="PNG")
     plt.close()
 
-    fig = ppsd.plot_temporal([0.1, 0.2, 1], color=None, marker=".", show=False)
-    fig.suptitle(f'Evolution of PPSD at period bins of 0.1, 0.2 and 1 s, station {station}')
+    fig = ppsd.plot_temporal(period_bins, color=None, marker=".", show=False)
+    fig.suptitle(f"Evolution of PPSD at period bins of {period_bins[0]:.1f}, {period_bins[1]:.1f} and {period_bins[2]:.1f} s, station {station}")
     print(f"Saving figure to: {outfile2}")
+    fig.set_size_inches(14, 6)
     plt.savefig(outfile2, format="PNG")
     plt.close()
 
-    xlims = (obspy.UTCDateTime(2020,12,5,0,0,0), obspy.UTCDateTime(2021,1,5,0,0,0))
+    xlims = (starttime, endtime)
     #fig = plot_spectrogram(ppsd, cmap=pqlx, clim=(-160, -100), xlims=xlims, ylims=(minT, maxT), grid=False, show=False)
     fig = plot_spectrogram(ppsd, cmap=pqlx, xlims=xlims, ylims=(minT, maxT), grid=False, show=False)
     fig.set_size_inches(16, 7)
