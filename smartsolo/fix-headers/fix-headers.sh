@@ -25,7 +25,7 @@ echo "*** PROCESSING DIRECTORY *** = $datadir"
 
 # Get net, sta and chan from an example filename in the directory
 firstfile=`ls $datadir/*.miniseed | head -1` # extract the first file in the directory.
-NET=`echo $firstfile | awk -F. '{print $1}'`
+NET=`echo $firstfile | xargs -n1 basename | awk -F. '{print $1}'`
 STA=`echo $firstfile | xargs -n1 basename | awk -F. '{print $2}'`
 #LOC=`echo $firstfile | awk -F. '{print $3}'`
 #CHAN=`echo $firstfile | awk -F. '{print $4}'`

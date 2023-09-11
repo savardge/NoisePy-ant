@@ -8,7 +8,7 @@ RAWDATA: '/home/users/s/savardg/scratch/aargau/RAW_DATA'
 DATADIR: '/home/users/s/savardg/scratch/aargau/CLEAN_DATA_CH-AA' #CLEAN_DATA_H5_25sps_3c_netfix'
 
 # station info including network,station,channel,latitude,longitude,elevation
-location: '/home/users/s/savardg/aargau_ant/station_locations_CH-AA.csv' #station_locations_noisepy_cleaned_NEZ.csv'
+locations: '/home/users/s/savardg/aargau_ant/station_locations_CH-AA.csv' #station_locations_noisepy_cleaned_NEZ.csv'
 
 # useful parameters for cleaning the data
 input_fmt: 'sac'  # input file format between 'sac' and 'mseed' 
