@@ -57,8 +57,20 @@ Rough structure (to be improved...):
 4. `S1` scripts: Calculate cross-correlations in frequency domain for given sub-window lengths.
 5. `S2` scripts: Stack the sub-window cross-correlations into a total stack and sub-stacks, if needed.
 
+### Postprocess stacks and plotting
+1. To merge the pyasdf files into numpy arrays for easier manipulation, use `scripts/postprocess_stacks/extract_ncts.py`
+2. Noise directivity analysis/ beamforming with script `scripts/postprocess_stacks/beamform.py` (requires the numpy files created with the script above)
+3. See various plotting functions in `noisepy/plotting.py` and `noisepy/binstack.py` (binned stack gathers, FK decomposition, plotting the full tensor, etc)
+4. Make plots of (ZR+RZ)/2 and (ZR-RZ)/2 with scripts in `scripts/FK/plot_takagi.py`
+
 ### FTAN and picking
-Run scripts in `scripts/picking` (e.g.`dispersion_curves_V2.py`) and merge the output files into one big data table (csv file) for analysis with Pandas.
+Run scripts in `scripts/picking`. 
+1. Run `dispersion_curves_V2.py` for each station pair (each stack H5 file), use the slurm script for efficient job scheduling (`dispersion.slurm`).
+2. Merge the output files into one big data table (csv file) for analysis with Pandas using `step1_merge_picks.py`
+3. Create histograms of picks given some filtering threshold with `step2_pick_histograms.py`
+
+### Group velocity maps
+1. 
 
 ### 
 
