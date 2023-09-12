@@ -69,8 +69,12 @@ Run scripts in `scripts/picking`.
 2. Merge the output files into one big data table (csv file) for analysis with Pandas using `step1_merge_picks.py`
 3. Create histograms of picks given some filtering threshold with `step2_pick_histograms.py`
 
-### Group velocity maps
-1. 
+### Group velocity maps and 3D Vs inversion [MATLAB]
+
+1. Filter picks for group velocity maps, and make the various input files for the Matlab scripts (grid definition etc.) with `matlab/noisepy_to_matlab/prep_data_noisepy2matlab.py`
+2. Create the map background for plotting `matlab/make_map_background`
+3. Vg map inversion with the scripts in module `matlab/vg_maps_inversion`
+4. Depth inversion with module `matlab/vs_depth_inversion`
 
 ### 
 
