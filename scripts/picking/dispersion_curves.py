@@ -16,9 +16,9 @@ from noisepy.dispersion import *
 ############################################
 
 # input file info
-rootpath = '/home/users/s/savardg/scratch/aargau/STACK_CH-AA/'  # root path for this data processing. available stack methods: auto_covariance, linear, nroot, pws, robust
-# rootpath = '/home/users/s/savardg/scratch/aargau/STACK_25sps_3c_adaptive/'  # root path for this data processing
-sfile = os.path.join(rootpath, sys.argv[1])  # ASDF file containing stacked data
+sfile = sys.argv[1]  # ASDF file containing stacked data (full path)
+dum = os.path.split(sfile)[0].split("/")[:-1]
+rootpath = "/".join(dum)
 
 pick_method = "topology"
 output_dir_root = os.path.join(rootpath,

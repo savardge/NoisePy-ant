@@ -12,35 +12,34 @@ from scipy.signal import hilbert
 from findpeaks import findpeaks
 from noisepy import dispersion
 
-############################################
-############ PARAMETER SECTION #############
-############################################
+
+## PARAMETER SECTION
 
 # input file info
-rootpath = '/home/users/s/savardg/scratch/aargau/STACK_CHAA_normZ/'  # root path for this data processing. available stack methods: auto_covariance, linear, nroot, pws, robust
-#rootpath = '/home/users/s/savardg/scratch/aargau/STACK_25sps_3c_adaptive/'  # root path for this data processing
-sfile = os.path.join(rootpath, sys.argv[1])  # ASDF file containing stacked data
-#sfile = os.path.join(rootpath, "CH.SBAV/CH.SBAV_RI.INZ12.h5")
-
+sfile = sys.argv[1]  # ASDF file containing stacked data (full path)
+dum = os.path.split(sfile)[0].split("/")[:-1]
+rootpath = "/".join(dum)
 output_dir_root = os.path.join(rootpath, f"dispersion_V2")  # dir where to output dispersive image and extracted dispersion
-try:
-    if not os.path.exists(outdir): os.makedirs(outdir)
-except:
-    pass
-
+print(f"Output directory: {output_dir_root}")
 print(f"Input file: {sfile}")
 overwrite = True
+
+try:
+    if not os.path.exists(output_dir_root ):
+        os.makedirs(output_dir_root )
+except:
+    pass
 
 # data type and cross-component
 #stack_methods =  ["pws"] # which stacked data to measure dispersion info # auto_covariance
 stack_methods =  ['pws', 'linear'] #,'robust', 'nroot', 'auto_covariance']
-lag_types = ['neg','pos','sym']  # options to do measurements on the 'neg', 'pos' or 'sym' lag (average of neg and pos)
+lag_types = ['neg', 'pos', 'sym']  # options to do measurements on the 'neg', 'pos' or 'sym' lag (average of neg and pos)
 
 #rtz_system = ['ZZ']
 #rtz_system = ['ZZ', 'RR', 'TT']
 rtz_system = ['RR', 'RZ', 'TT', 'ZR', 'ZZ']
 #rtz_system = ['RR', 'RT', 'RZ', 'TR', 'TT', 'TZ', 'ZR', 'ZT', 'ZZ']
-    
+
 
 # get station-pair name ready for output
 tmp = sfile.split('/')[-1].split('_')
