@@ -1,3 +1,16 @@
+"""
+This module contains the functions necessary to convert station info and dispersion picks calculated with NoisePy-derived codes by G.S.
+ to the inputs necessary for the matlab inversion scripts. Specify input parameters and paths in a YAML file (see method prep_all and example config file).
+ Creates the following files:
+ - stat_list_merged.mat
+ - dist_stat.mat
+ - stat_grid.mat
+ - kernel.mat
+ - pick_cell.mat
+
+Genevieve Savard @ UniGe (last updated 04.08.2023)
+"""
+
 from scipy.io import savemat
 import matplotlib.pyplot as plt
 import pandas as pd
