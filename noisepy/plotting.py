@@ -158,7 +158,7 @@ def plot_waveform(sfile, net, sta, comp, freqmin, freqmax, savefig=False, sdir=N
         ds = pyasdf.ASDFDataSet(sfile, mode='r')
         sta_list = ds.waveforms.list()
     except Exception:
-        print("exit! cannot open %s to read" % sfile);
+        print("exit! cannot open %s to read" % sfile)
         sys.exit()
 
     # check whether station exists
@@ -190,7 +190,7 @@ def plot_waveform(sfile, net, sta, comp, freqmin, freqmax, savefig=False, sdir=N
     if savefig:
         if not os.path.isdir(sdir): os.mkdir(sdir)
         outfname = sdir + '/{0:s}_{1:s}.{2:s}.pdf'.format(sfile.split('.')[0], net, sta)
-        plt.savefig(outfname, format='pdf', dpi=400)
+        plt.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()
@@ -314,7 +314,7 @@ def plot_substack_cc(sfile, freqmin, freqmax, disp_lag=None, savefig=True, sdir=
                 if not os.path.isdir(sdir): os.mkdir(sdir)
                 outfname = sdir + '/{0:s}.{1:s}.{2:s}_{3:s}.{4:s}.{5:s}.pdf'.format(net1, sta1, chan1, net2, sta2,
                                                                                     chan2)
-                fig.savefig(outfname, format='pdf', dpi=400)
+                fig.savefig(outfname, format='png', dpi=300)
                 plt.close()
             else:
                 plt.show()  # GS
@@ -428,7 +428,7 @@ def plot_substack_cc_spect(sfile, freqmin, freqmax, disp_lag=None, savefig=True,
                 if not os.path.isdir(sdir): os.mkdir(sdir)
                 outfname = sdir + '/{0:s}.{1:s}.{2:s}_{3:s}.{4:s}.{5:s}.pdf'.format(net1, sta1, chan1, net2, sta2,
                                                                                     chan2)
-                fig.savefig(outfname, format='pdf', dpi=400)
+                fig.savefig(outfname, format='png', dpi=300)
                 plt.close()
             else:
                 plt.show()  # GS
@@ -655,7 +655,7 @@ def plot_substack_all(sfile, freqmin, freqmax, ccomp, disp_lag=None, savefig=Fal
         if sdir == None: sdir = sfile.split('.')[0]
         if not os.path.isdir(sdir): os.mkdir(sdir)
         outfname = sdir + '/{0:s}_{1:4.2f}_{2:4.2f}Hz.pdf'.format(sfile.split('/')[-1], freqmin, freqmax)
-        fig.savefig(outfname, format='pdf', dpi=400)
+        fig.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()  # GS
@@ -730,7 +730,7 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
             amax[ii] = np.max(data[ii])
             data[ii] /= amax[ii]
         except Exception as e:
-            print(e);
+            print(e)
             continue
 
         if len(ngood) == 1:
@@ -763,7 +763,7 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
         if sdir == None: sdir = sfile.split('.')[0]
         if not os.path.isdir(sdir): os.mkdir(sdir)
         outfname = sdir + '/{0:s}.pdf'.format(sfile.split('/')[-1])
-        fig.savefig(outfname, format='pdf', dpi=400)
+        fig.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()  # GS
@@ -880,7 +880,7 @@ def plot_all_moveout(sfiles, dtype, freqmin, freqmax, ccomp, dist_inc, disp_lag=
     if savefig:
         outfname = sdir + '/moveout_allstack_' + str(stack_method) + '_' + str(ccomp) + '_bp' + str(
             freqmin) + '-' + str(freqmax) + '_' + str(dist_inc) + 'kmbin.pdf'
-        fig.savefig(outfname, format='pdf', dpi=400)
+        fig.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()  # GS
@@ -977,7 +977,7 @@ def plot_all_moveout_1D_1comp(sfiles, sta, dtype, freqmin, freqmax, ccomp, disp_
     # save figure or show
     if savefig:
         outfname = sdir + '/moveout_' + sta + '_1D_' + str(stack_method) + '.pdf'
-        plt.savefig(outfname, format='pdf', dpi=400)
+        plt.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()  # GS
@@ -1081,7 +1081,7 @@ def plot_all_moveout_1D_9comp(sfiles, sta, dtype, freqmin, freqmax, disp_lag=Non
     # save figure or show
     if savefig:
         outfname = sdir + '/moveout_' + sta + '_1D_' + str(stack_method) + '.pdf'
-        plt.savefig(outfname, format='pdf', dpi=300)
+        plt.savefig(outfname, format='png', dpi=300)
         plt.close()
     else:
         plt.show()  # GS
