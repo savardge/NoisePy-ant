@@ -1,3 +1,9 @@
+'''
+Ensembles of plotting functions to display intermediate/final waveforms from the NoisePy package.
+Originally by Chengxin Jiang @Harvard (May.04.2019)
+Modified by Genevieve Savard @UniGe (2023)
+'''
+
 import os
 import sys
 import glob
@@ -9,21 +15,8 @@ import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter, DayLocator, MonthLocator
 from scipy.fftpack import next_fast_len
 from obspy.signal.filter import bandpass
+from matplotlib.ticker import MultipleLocator
 import pandas as pd
-
-
-'''
-Ensembles of plotting functions to display intermediate/final waveforms from the NoisePy package.
-Originally by Chengxin Jiang @Harvard (May.04.2019)
-Modified by Genevieve Savard @UniGe (2023)
-
-Specifically, this plotting module includes functions of:
-    1) plot_waveform     -> display the downloaded waveform for specific station
-    2) plot_substack_cc  -> plot 2D matrix of the CC functions for one time-chunck (e.g., 2 days)
-    3) plot_substack_all -> plot 2D matrix of the CC functions for all time-chunck (e.g., every 1 day in 1 year)
-    4) plot_all_moveout  -> plot the moveout of the stacked CC functions for all time-chunk
-'''
-
 
 #############################################################################
 ###############PLOTTING FUNCTIONS FOR FILES FROM S0##########################
@@ -312,7 +305,7 @@ def plot_substack_cc(sfile, freqmin, freqmax, disp_lag=None, savefig=True, sdir=
             if savefig:
                 if sdir == None: sdir = sfile.split('.')[0]
                 if not os.path.isdir(sdir): os.mkdir(sdir)
-                outfname = sdir + '/{0:s}.{1:s}.{2:s}_{3:s}.{4:s}.{5:s}.pdf'.format(net1, sta1, chan1, net2, sta2,
+                outfname = sdir + '/{0:s}.{1:s}.{2:s}_{3:s}.{4:s}.{5:s}.png'.format(net1, sta1, chan1, net2, sta2,
                                                                                     chan2)
                 fig.savefig(outfname, format='png', dpi=300)
                 plt.close()
@@ -737,7 +730,12 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
             raise ValueError('seems no substacks have been done! not suitable for this plotting function')
 
     # plotting
-    tick_inc = 50
+    if nwin > 100:
+        tick_inc = int(nwin / 10)
+    elif nwin > 10:
+        tick_inc = int(nwin / 5)
+    else:
+        tick_inc = 2
     fig, ax = plt.subplots(3, sharex=False, figsize=figsize)
     ax[0].matshow(data, cmap='seismic', extent=[-disp_lag, disp_lag, nwin, 0], aspect='auto')
     ax[0].set_title('%s dist:%5.2f km' % (sfile.split('/')[-1], dist))
@@ -754,16 +752,30 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
     ax[1].set_yticklabels(timestamp[0:nwin:tick_inc])
     ax[1].xaxis.set_ticks_position('bottom')
     ax[2].plot(amax / max(amax), 'r-')
-    ax[2].plot(ngood, 'b-')
-    ax[2].set_xlabel('waveform number')
-    ax[2].set_xticks(np.arange(0, nwin, nwin // 15))
+    ax2 = ax[2].twinx()
+    ax2.plot(ngood, 'b-')
+    ax2.set_ylabel('ngood', color="b")
+    ax[2].set_xlabel('Timestamp')
+    ax[2].set_ylabel('relative amp', color="r")
+    tick_inc = 4
+    ax[2].set_xticks(np.arange(0, nwin, step=tick_inc))
+    ax[2].set_xticklabels(timestamp[0:nwin:tick_inc])
+#     ax[2].xaxis.set_major_locator(MultipleLocator(12))
+    ax[2].set_xticklabels(timestamp[0:nwin:tick_inc])
+    ax[2].xaxis.set_minor_locator(MultipleLocator(1))
+    ax[2].xaxis.grid(True, which='major')
+    ax[2].tick_params(axis='x', rotation=90)
+    ax[2].tick_params(axis='x', which='major', length=7)
+    ax[2].tick_params(axis='x', which='minor', length=3)
+#     ax[2].set_xticks(np.arange(0, nwin, nwin // 5))
     ax[2].legend(['relative amp', 'ngood'], loc='upper right')
     # save figure or just show
     if savefig:
         if sdir == None: sdir = sfile.split('.')[0]
         if not os.path.isdir(sdir): os.mkdir(sdir)
-        outfname = sdir + '/{0:s}.pdf'.format(sfile.split('/')[-1])
-        fig.savefig(outfname, format='png', dpi=300)
+#         outfname = sdir + '/{0:s}.png'.format(sfile.split('/')[-1])
+        outfname = sdir + '/{0:s}_{1:s}_{2:4.2f}_{3:4.2f}Hz_spectra.png'.format(sfile.split('/')[-1], ccomp, freqmin, freqmax)
+        fig.savefig(outfname, format='png') #, dpi=400)
         plt.close()
     else:
         plt.show()  # GS
