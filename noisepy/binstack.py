@@ -7,7 +7,7 @@ import time
 from .filter import lowpass, bandpass
 import scipy.fftpack as sfft
 from numpy import matlib as mb
-
+from obspy import Trace, Stream
 
 def get_stack_gather(sfiles, stack_method="Allstack_pws", comp="ZZ"):
     """
@@ -428,3 +428,138 @@ def fk_decomposition_pos(ncts_binned, dt, dr, plot=False, ax=None, title=None):
         ax.grid(c="w", ls=":", lw=.5)
 
     return newf, newk_km, fk_pos, fk_pos_dB
+
+
+def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), baz_range=None, freqlims=None, scale=1):
+    """
+
+    Args:
+        npzfile: File created with "extract_ncts.py" script
+            Content of .npz file:
+                r: inter-station distance (N x 1)
+                ncts: matrix of stacked cross-correlations (N x M)
+                t: Vector of lag times (M x 1)
+                numgood: Number of substacks used to build each stack (N x 1)
+                azimuth: inter-station azimuth (N x 1)
+                backazimuth: inter-station backazimuth (N x 1)
+                station_source: Source station (N x 1)
+                station_receiver: Receiver station (N x 1)
+                longitude_source: longitude of source station (N x 1)
+                latitude_source: latitude of source station (N x 1)
+                latitude_receiver: latitude of receiver station (N x 1)
+                longitude_receiver: longitude of receiver station (N x 1)
+                dt: sampling interval [s]
+                maxlag: maximum lag time [s]
+
+        component: cross-component to process (e.g. "ZZ")
+        station: Station to use as source
+        figsize: figure size (tuple)
+        baz_range: backazimuth range
+        freqlims: Frequency limits (tuple)
+        scale: Factor by which to scale amplitudes to section plot (default 1)
+
+    Returns:
+
+    """
+    # Read data
+    data = np.load(npzfile)
+    ncts0 = data["ncts"]
+    t = data["t"]
+    r0 = data["r"]
+    dt = data["dt"]
+    stasrc0 = [s.decode('utf-8') for s in data['station_source'].tolist()]
+    starcv0 = [s.decode('utf-8') for s in data['station_receiver'].tolist()]
+    baz0 = data['backazimuth']
+    azi0 = data['azimuth']
+
+    # Select pairs having the station as source
+    isrc = np.array([i for i, s in enumerate(stasrc0) if station in s])
+    ircv = np.array([i for i, s in enumerate(starcv0) if station in s])
+    if len(ircv) > 1:
+        ncts_s = ncts0[isrc, :]
+        ncts_r = np.fliplr(ncts0[ircv, :])
+        ncts = np.vstack((ncts_s, ncts_r))
+        r = np.hstack((r0[isrc], r0[ircv]))
+        baz = np.hstack((baz0[isrc], azi0[ircv]))
+        stalst = np.hstack((np.array(starcv0)[isrc], np.array(stasrc0)[ircv]))
+    else:
+        ncts = ncts0[isrc, :]
+        r = r0[isrc]
+        baz = baz0[isrc]
+        stalst = np.array(starcv0)[isrc]
+
+    # Select backzimuth range
+    if baz_range:
+        ibaz = np.argwhere((baz > baz_range[0]) & (baz < baz_range[1]))[:, 0]
+        ncts = ncts[ibaz, :]
+        r = r[ibaz]
+        stalst = stalst[ibaz]
+        baz = baz[ibaz]
+
+    # Sort
+    isort = np.argsort(r)
+    r = r[isort]
+    ncts = ncts[isort, :]
+    stalst = stalst[isort]
+    baz = baz[isort]
+
+    # Get symmetric lag
+    Mp, Msym = symmetric_stack_time(ncts, t, r, plot=False)
+
+    # # Binned stack
+    # binsize = 1
+    # ncts_binned, ncts_sym_binned_nonan, edges, time, distances, num_per_bin  = binstack.binned_stack_time(Mp, Msym, dt, t, r, dr=binsize, plot=False, tmaxplot=10, dmaxplot=None)
+
+    # # Convert to stream and plot record section
+    # from obspy import Trace, Stream
+    # strbin = Stream()
+    # for ix in range(len(distances)):
+    #     header = {"distance": distances[ix]*1e3, "station": stalst[ix], "delta":dt}
+    #     strbin += Trace(data=ncts_sym_binned_nonan[ix,:], header=header)
+
+    # Convert to stream and plot record section
+    nsta = len(r)
+    imid = len(t) // 2
+    ipos = np.arange(imid, Mp.shape[1])
+    ineg = np.arange(0, imid + 1)
+    strpos = Stream()
+    strneg = Stream()
+    strsym = Stream()
+    for ix in range(nsta):
+        header = {"distance": r[ix] * 1e3, "station": stalst[ix], "delta": dt}
+        strpos += Trace(data=ncts[ix, ipos], header=header)
+        strneg += Trace(data=ncts[ix, ineg], header=header)
+        strsym += Trace(data=Msym[ix, :], header=header)
+
+    vs_ave = 3.  # Average Vs
+    if freqlims:
+        freqmin, freqmax = freqlims
+    else:
+        freqmin = 1 / (np.max(
+            r) / vs_ave)  # Determine min frequency from the minimum station spacing (see. Bowden et al. 2021 and his tutorial)
+        freqmax = 1 / (np.min(
+            r) / vs_ave)  # Determine max frequency from the maximum station spacing (see. Bowden et al. 2021 and his tutorial)
+    print(f"Bandpass filter: {freqmin:.2f} - {freqmax:.2f} Hz")
+    recordlength = 4 * max(r) / vs_ave
+
+    for stream, side in zip([strsym, strpos, strneg], ["symmetric", "positive", "negative"]):
+        fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax).plot(handle=True, type="section",
+                                                                                      fillcolors=("b", "r"),
+                                                                                      orientation="horizontal",
+                                                                                      recordlength=recordlength,
+                                                                                      figsize=figsize, scale=scale)
+        ax = fig.axes[0]
+        ylims = ax.get_ylim()
+        xlims = ax.get_xlim()
+        for vref in [vs_ave]:  # , 6]:
+            ax.plot([0, ylims[1] / vref], [0, ylims[1]], c="k", lw=1, ls=":")
+            ax.text(ylims[1] / vref, 0.98 * ylims[1], f"{vref} km/s")
+        ax.set_ylim(ylims)
+        for tr in stream:
+            ax.text(0.90 * xlims[1], tr.stats.distance * 1e-3, tr.stats.station.split(".")[1],
+                    bbox=dict(facecolor='white', alpha=0.8))
+        title = f"Source: {station}, {component} cross-component, {side} lag"
+        ax.set_title(title)
+
+        plt.show()
+        plt.close()
