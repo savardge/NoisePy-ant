@@ -430,7 +430,7 @@ def fk_decomposition_pos(ncts_binned, dt, dr, plot=False, ax=None, title=None):
     return newf, newk_km, fk_pos, fk_pos_dB
 
 
-def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), baz_range=None, freqlims=None, scale=1):
+def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True, binsize=None, baz_range=None, freqlims=None, scale=1, showlabel=True):
     """
 
     Args:
@@ -502,35 +502,9 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), baz_range=N
     ncts = ncts[isort, :]
     stalst = stalst[isort]
     baz = baz[isort]
-
-    # Get symmetric lag
-    Mp, Msym = symmetric_stack_time(ncts, t, r, plot=False)
-
-    # # Binned stack
-    # binsize = 1
-    # ncts_binned, ncts_sym_binned_nonan, edges, time, distances, num_per_bin  = binstack.binned_stack_time(Mp, Msym, dt, t, r, dr=binsize, plot=False, tmaxplot=10, dmaxplot=None)
-
-    # # Convert to stream and plot record section
-    # from obspy import Trace, Stream
-    # strbin = Stream()
-    # for ix in range(len(distances)):
-    #     header = {"distance": distances[ix]*1e3, "station": stalst[ix], "delta":dt}
-    #     strbin += Trace(data=ncts_sym_binned_nonan[ix,:], header=header)
-
-    # Convert to stream and plot record section
     nsta = len(r)
-    imid = len(t) // 2
-    ipos = np.arange(imid, Mp.shape[1])
-    ineg = np.arange(0, imid + 1)
-    strpos = Stream()
-    strneg = Stream()
-    strsym = Stream()
-    for ix in range(nsta):
-        header = {"distance": r[ix] * 1e3, "station": stalst[ix], "delta": dt}
-        strpos += Trace(data=ncts[ix, ipos], header=header)
-        strneg += Trace(data=ncts[ix, ineg], header=header)
-        strsym += Trace(data=Msym[ix, :], header=header)
 
+    # Determine frequency band
     vs_ave = 3.  # Average Vs
     if freqlims:
         freqmin, freqmax = freqlims
@@ -542,12 +516,35 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), baz_range=N
     print(f"Bandpass filter: {freqmin:.2f} - {freqmax:.2f} Hz")
     recordlength = 4 * max(r) / vs_ave
 
-    for stream, side in zip([strsym, strpos, strneg], ["symmetric", "positive", "negative"]):
-        fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax).plot(handle=True, type="section",
-                                                                                      fillcolors=("b", "r"),
-                                                                                      orientation="horizontal",
-                                                                                      recordlength=recordlength,
-                                                                                      figsize=figsize, scale=scale)
+    # Get symmetric lag
+    Mp, Msym = symmetric_stack_time(ncts, t, r, plot=False)
+
+    if binned:  # Binned stack
+        if not binsize:
+            binsize = min(r) * 2
+        ncts_binned, ncts_sym_binned_nonan, edges, time, distances, num_per_bin = binned_stack_time(Mp, Msym,
+                                                                                                             dt, t, r,
+                                                                                                             dr=binsize,
+                                                                                                             plot=False,
+                                                                                                             tmaxplot=10,
+                                                                                                             dmaxplot=None)
+
+        # Convert to stream and plot record section
+        strbin = Stream()
+        for ix in range(len(distances)):
+            header = {"distance": distances[ix] * 1e3, "station": stalst[ix], "delta": dt}
+            strbin += Trace(data=ncts_sym_binned_nonan[ix, :], header=header)
+
+        # Plot
+        stream = strbin
+        fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True).plot(handle=True,
+                                                                                                      type="section",
+                                                                                                      fillcolors=(
+                                                                                                      "b", "r"),
+                                                                                                      orientation="horizontal",
+                                                                                                      recordlength=recordlength,
+                                                                                                      figsize=figsize,
+                                                                                                      scale=scale)
         ax = fig.axes[0]
         ylims = ax.get_ylim()
         xlims = ax.get_xlim()
@@ -555,11 +552,52 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), baz_range=N
             ax.plot([0, ylims[1] / vref], [0, ylims[1]], c="k", lw=1, ls=":")
             ax.text(ylims[1] / vref, 0.98 * ylims[1], f"{vref} km/s")
         ax.set_ylim(ylims)
-        for tr in stream:
-            ax.text(0.90 * xlims[1], tr.stats.distance * 1e-3, tr.stats.station.split(".")[1],
-                    bbox=dict(facecolor='white', alpha=0.8))
-        title = f"Source: {station}, {component} cross-component, {side} lag"
+        if showlabel:
+            for tr in stream:
+                ax.text(0.90 * xlims[1], tr.stats.distance * 1e-3, f"{tr.stats.distance * 1e-3:.1f} km",
+                        bbox=dict(facecolor='white', alpha=0.8))
+        title = f"Source: {station}, {component} cross-component, symmetric lag"
         ax.set_title(title)
 
         plt.show()
         plt.close()
+
+    else:
+        # Convert to stream and plot record section
+        imid = len(t) // 2
+        ipos = np.arange(imid, Mp.shape[1])
+        ineg = np.arange(0, imid + 1)
+        strpos = Stream()
+        strneg = Stream()
+        strsym = Stream()
+        for ix in range(nsta):
+            header = {"distance": r[ix] * 1e3, "station": stalst[ix], "delta": dt}
+            strpos += Trace(data=ncts[ix, ipos], header=header)
+            strneg += Trace(data=ncts[ix, ineg], header=header)
+            strsym += Trace(data=Msym[ix, :], header=header)
+
+        for stream, side in zip([strsym, strpos, strneg], ["symmetric", "positive", "negative"]):
+            fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True).plot(handle=True,
+                                                                                                          type="section",
+                                                                                                          fillcolors=(
+                                                                                                          "b", "r"),
+                                                                                                          orientation="horizontal",
+                                                                                                          recordlength=recordlength,
+                                                                                                          figsize=figsize,
+                                                                                                          scale=scale)
+            ax = fig.axes[0]
+            ylims = ax.get_ylim()
+            xlims = ax.get_xlim()
+            for vref in [vs_ave]:  # , 6]:
+                ax.plot([0, ylims[1] / vref], [0, ylims[1]], c="k", lw=1, ls=":")
+                ax.text(ylims[1] / vref, 0.98 * ylims[1], f"{vref} km/s")
+            ax.set_ylim(ylims)
+            if showlabel:
+                for tr in stream:
+                    ax.text(0.90 * xlims[1], tr.stats.distance * 1e-3, tr.stats.station.split(".")[1],
+                            bbox=dict(facecolor='white', alpha=0.8))
+            title = f"Source: {station}, {component} cross-component, {side} lag"
+            ax.set_title(title)
+
+            plt.show()
+            plt.close()
