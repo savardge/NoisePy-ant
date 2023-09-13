@@ -454,6 +454,8 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True
         component: cross-component to process (e.g. "ZZ")
         station: Station to use as source
         figsize: figure size (tuple)
+        binned: whether to stack CCF in distance bins [bool]
+        binsize: size of distance bins [in km]. Default: 2 times minimum distance
         baz_range: backazimuth range
         freqlims: Frequency limits (tuple)
         scale: Factor by which to scale amplitudes to section plot (default 1)
