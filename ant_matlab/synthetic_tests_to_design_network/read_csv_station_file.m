@@ -10,7 +10,7 @@ function [stat_list, stat_lon, stat_lat] = read_csv_station_file(filename, dataL
 %  scalar integers for dis-contiguous row intervals.
 %
 %  Example:
-%  [stat_list, stat_lon, stat_lat] = importfile("/media/savardg/sandisk4TB/matlab-swant/scripts/synthetic_tests_to_design_network/NANT_stations_example_D20km_N18.csv", [2, Inf]);
+%  [stat_list, stat_lon, stat_lat] = importfile("/media/savardg/sandisk4TB/ant_matlab-swant/scripts/synthetic_tests_to_design_network/NANT_stations_example_D20km_N18.csv", [2, Inf]);
 %
 %  See also READTABLE.
 %

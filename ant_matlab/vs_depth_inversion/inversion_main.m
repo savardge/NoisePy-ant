@@ -61,7 +61,7 @@ if verbose; disp('Computing initial dispersion curves with gpdc...'); end
 fname_in = [mod_name '.model']; % should change name for different points?
 fname_out = [mod_name '.disp'];
 %exec_line = ['!' gpdc_exec ' -group -f -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]; % -f added so doesnt stop when one curve cannot be computed
-%eval(exec_line); %better keep in matlab prompt so that release command only when finished
+%eval(exec_line); %better keep in ant_matlab prompt so that release command only when finished
 exec_line = [gpdc_exec ' -group -f -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]; % -f added so doesnt stop when one curve cannot be computed
 [status, cmdout] = system(exec_line);
 if status ~= 0

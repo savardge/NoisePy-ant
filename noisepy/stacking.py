@@ -324,7 +324,7 @@ def adaptive_filter(arr, g):
 
 def nroot_stack(cc_array, power):
     '''
-    this is nth-root stacking algorithm translated based on the matlab function
+    this is nth-root stacking algorithm translated based on the ant_matlab function
     from https://github.com/xtyangpsp/SeisStack (by Xiaotao Yang; follows the
     reference of Millet, F et al., 2019 JGR)
 

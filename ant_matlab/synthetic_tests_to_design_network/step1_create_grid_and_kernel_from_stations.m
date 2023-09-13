@@ -32,7 +32,7 @@ dy_grid = 2.5;
 % if ~exist(output_folder, 'dir')
 %     mkdir(output_folder)
 % end
-% % Import coordinates, write to matlab file
+% % Import coordinates, write to ant_matlab file
 % [stat_list, stat_lon, stat_lat] = read_csv_station_file(csv_file_stations);
 % mat_file_stations = [output_folder '/stat_list.mat'];
 % save(mat_file_stations, 'stat_list','stat_lon', 'stat_lat')

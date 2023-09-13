@@ -1,4 +1,4 @@
-# This file contains the config parameters and paths used to convert NoisePy outputs to matlab variables using scripts "prep_data_noisepy2matlab.py"
+# This file contains the config parameters and paths used to convert NoisePy outputs to ant_matlab variables using scripts "prep_data_noisepy2matlab.py"
 
 STACK_DIR: "/Users/genevieve/aegansea/STACK_rma2_normz_xcorr" # Contains the directory with the stacked cross-correlations in pyasdf (H5) format
 fs: 25.0 # Sampling rate in Hz of the cross-correlations

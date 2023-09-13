@@ -39,7 +39,7 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
         picks: pandas.DataFrame with selected picks
         station_fname: full path of station file "stat_list_merged.npz"        
         output_fname: path where to write PICK_CELL without the extension.
-        save_mat: save to matlab ".mat"
+        save_mat: save to ant_matlab ".mat"
         save_python: save to pickle ".pkl"
 
     Returns: dictionary with PICK_CELL

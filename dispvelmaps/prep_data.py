@@ -1,6 +1,6 @@
 """
 This module contains the functions necessary to convert station info and dispersion picks calculated with NoisePy-derived codes by G.S.
- to the inputs necessary for the matlab inversion scripts. Specify input parameters and paths in a YAML file (see method prep_all and example config file).
+ to the inputs necessary for the ant_matlab inversion scripts. Specify input parameters and paths in a YAML file (see method prep_all and example config file).
  Creates the following files:
  - stat_list_merged.mat
  - dist_stat.mat
@@ -103,7 +103,7 @@ def make_dist_stat(bounds, stainfo, output_folder, R_earth=6371, save_mat=True, 
         stainfo: dictionary of station info with keys: stat_list, stat_lat, stat_lon
         output_folder: parent folder where to write dist_stat files
         R_earth: radius of earth used for transformation to cartesian coordinates
-        save_mat: save in matlab format
+        save_mat: save in ant_matlab format
         save_python: save in .npz format
 
     Returns: dictionary with 'DIST_mat','x_stat','y_stat','stat_list','x_max','y_max','SW_corner','SE_corner','NW_corner','NE_corner'
@@ -185,7 +185,7 @@ def make_stat_grid(dist_stat, dx_grid, dy_grid, output_folder, make_plot=True, s
         dist_stat: dictionary with output of make_dist_stat()
         output_folder: output path for stat_grid files
         make_plot: make a plot of the grid
-        save_mat: save to matlab format
+        save_mat: save to ant_matlab format
         save_python: save to .npz format
 
     Returns: dictionary with node positions and station locations in XY coordinates
@@ -257,7 +257,7 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
         output_folder: Path where to store kernel.mat
         dl: minimum length of ray in cell in km
         plot_random_kernels: number of random kernels to plot for checking
-        save_mat: save to matlab format
+        save_mat: save to ant_matlab format
         save_python: save to python .npz format
 
     Returns: dictionary of G_mat and grid info in XY coordinates
@@ -282,7 +282,7 @@ def make_kernel(stat_grid, output_folder, dl=0.005, plot_random_kernels=None, sa
     ray_mat = {}
     G_mat = np.zeros(shape=(nb_ray, nb_cell))
     IND_LIN_GRID = np.reshape(np.arange(0, nb_cell, dtype=np.int16), (len(x_grid), len(y_grid)),
-                              order='F')  # np.reshape(...order='F') = matlab reshape
+                              order='F')  # np.reshape(...order='F') = ant_matlab reshape
     IND_S1 = np.zeros(shape=(nb_ray,), dtype=np.int16)  # to retrieve station from ray index
     IND_S2 = np.zeros(shape=(nb_ray,), dtype=np.int16)
     ind_ray = 0
@@ -408,7 +408,7 @@ def make_pick_cell_from_pairwise_files(disp_dir, output_folder, lag="sym", comp=
         snr_nbG_thresh: Threshold on SNR calculated with narrowband gaussian filter
         d_lambda_thresh: Threshold on ratio of distance/wavelength
         topologyMinScore: Minimum score of peaks retained for the topology peak detection method
-        save_mat: for to matlab format
+        save_mat: for to ant_matlab format
         save_python: Save to pickle format
 
     Returns: dictionary with PICK_CELL
@@ -499,7 +499,7 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
         picks: pandas.DataFrame with selected picks
         station_fname: full path of station file "stat_list_merged.npz"
         output_fname: path where to write PICK_CELL without the extension.
-        save_mat: save to matlab ".mat"
+        save_mat: save to ant_matlab ".mat"
         save_python: save to pickle ".pkl"
 
     Returns: dictionary with PICK_CELL
@@ -567,7 +567,7 @@ def make_data_kernels(dist_stat, kernel, pick_cell, Tc_list, output_dir_kern, pl
         Tc_list: List of periods at which to make kernels
         output_dir_kern: Output directory
         plot_num_picks: Make a plot of number of picks vs period
-        save_mat: save to matlab format
+        save_mat: save to ant_matlab format
         save_python: save to .npz format
 
     Returns: nothing
@@ -693,7 +693,7 @@ def prep_all(config_file, ccomp_list, method="pws", save_mat=True, save_python=T
         config_file: YAML parameter file
         ccomp_list: List of cross-component for which to extract picks
         method: stack method used for the picks. Used to get path to dispersion pick files
-        save_mat: save outputs to matlab variable files
+        save_mat: save outputs to ant_matlab variable files
         save_python: save outputs to numpy pickle files
 
     Returns:

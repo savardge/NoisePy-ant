@@ -46,8 +46,8 @@ end
 
 fname_in = [mod_name '.model']; % model file (input)
 fname_out = [mod_name '.disp']; % dispersion file (output)
-% eval(['!/Applications/Geopsy.org/3.3/gpdc -group -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]); % execute within matlab prompt to make sure it is finished before releasing handle
-eval(['!' gpdc_exec ' -group -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]); % execute within matlab prompt to make sure it is finished before releasing handle
+% eval(['!/Applications/Geopsy.org/3.3/gpdc -group -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]); % execute within ant_matlab prompt to make sure it is finished before releasing handle
+eval(['!' gpdc_exec ' -group -s ' sampling_type ' -min ' num2str(min_freq) ' -max ' num2str(max_freq) ' ' fname_in '  > ' fname_out]); % execute within ant_matlab prompt to make sure it is finished before releasing handle
 pause(0.1);
 
 fid = fopen(fname_out,'rt');
