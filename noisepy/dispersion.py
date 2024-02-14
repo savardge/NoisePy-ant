@@ -1,4 +1,7 @@
-""" DISPERSION PICKING FUNCTIONS"""
+"""
+DISPERSION PICKING FUNCTIONS
+Code modified from the older version of the NoisePy repository https://github.com/noisepy/NoisePy
+"""
 import numpy as np
 import pycwt
 from findpeaks import findpeaks  # https://github.com/erdogant/findpeaks
@@ -10,28 +13,47 @@ from scipy.signal import hilbert
 import logging
 from matplotlib.ticker import AutoMinorLocator
 from obspy.imaging.cm import pqlx
+
 Logger = logging.getLogger(__name__)
 
-def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14,6)):
-    """ Get dispersion image wtih CWT """
 
-    # basic parameters for wavelet transform
+def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14, 6)):
+    '''
+    Get the group dispersion image with the Continuous Wavelet Transform
+    Args:
+        ccf: Cross-correlation function (symmetric)
+        dist: inter-station distance for the given ccf in km
+        dt: Sampling interval in second
+        Tmin: Minimum period
+        dT: Spacing of the period axis on the dispersion image in second
+        vmin: Minimum group velocity
+        vmax: Maximum group velocity
+        dvel: Spacing of the group velocity axis in km/s
+        plot: Whether to plot or not (bool)
+        figsize: Figure size if plotting
+
+    Returns:
+        rcwt_new: Group dispersion image (2D numpy array)
+        per, vel: corresponding period and group velocity vectors
+    '''
+
+    # Basic parameters for wavelet transform
     dj = 1 / 12  # Spacing between discrete scales. Default is Twelve sub-octaves per octaves.
     # Smaller values will result in better scale resolution, but slower calculation and plot.
     s0 = -1  # Smallest scale of the wavelet. Default value [-1] is 2*dt.
-    J = -1   # Number of scales less one.
+    J = -1  # Number of scales less one.
     # Scales range from s0 up to s0 * 2**(J * dj), which gives a total of (J + 1) scales.
     # Default [-1] is J = (log2(N * dt / so)) / dj.
     wvn = 'morlet'  # type of wavelet to use
 
     # Get period and velocity ranges
-    Tmax = dist / 3.0
+    Tmax = dist / 3.0  # Max period assumes a velocity of 3 km/s
     fmin = 1 / Tmax
     fmax = 1 / Tmin
-    per = np.arange(Tmin, Tmax, dT)
-    vel = np.arange(vmin, vmax, dvel)
+    per = np.arange(Tmin, Tmax, dT)  # Periods
+    vel = np.arange(vmin, vmax, dvel)  # Group velocities
 
-    # trim the data according to velocity window vmin-vmax
+    # Trim the CCF according to velocity window vmin-vmax
     npts = ccf.shape[0]
     pt1 = int(dist / vmax / dt)
     pt2 = int(dist / vmin / dt)
@@ -46,25 +68,27 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     # wavelet transformation
     cwt, sj, freq, coi, _, _ = pycwt.cwt(ccf, dt, dj, s0, J, wvn)
 
-    # do filtering here
+    # Filter the image within the requested frequency band
     if (fmax > np.max(freq)) | (fmax <= fmin):
         raise ValueError('Abort: frequency out of limits!')
     freq_ind = np.where((freq >= fmin) & (freq <= fmax))[0]
     cwt = cwt[freq_ind]
     freq = freq[freq_ind]
 
-    # use amplitude of the cwt
+    # Calculate the amplitude and phase of the cwt
     period = 1 / freq
-    rcwt, pcwt = np.abs(cwt) ** 2, np.angle(cwt)
+    rcwt = np.abs(cwt) ** 2  # Amplitude
+    pcwt = np.angle(cwt)  # Phase
 
-    # interpolation to grids of freq-vel
+    # Interpolation of the image to the requested intervals in period and velocity
     fc = scipy.interpolate.interp2d(dist / tvec, period, rcwt)
     rcwt_new = fc(vel, per)
 
-    # do normalization for each frequency
+    # Normalization amplitude at each frequency
     for ii in range(len(per)):
         rcwt_new[ii] /= np.max(rcwt_new[ii])
 
+    # Plot
     if plot:
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         ax.imshow(np.transpose(rcwt_new),
@@ -93,45 +117,47 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     phase: 2D phase matrix of the wavelet spectrum
     per:  period vector for the 2D matrix
     vel:  vel vector of the 2D matrix
-    maxgap: default 5
-    minlambda: minimum multiple of wavelength
+    maxgap: Maximum gap in group velocity between successive picks in samples
+    minlambda: minimum multiple of wavelength (default 1.5 wavelength required)
+
     RETURNS:
     ----------------
     per:  central frequency of each wavelet scale with good data
     gv:   group velocity vector at each frequency
     ampsnr: max over median amplitude of dispersion diagram at pick time
     '''
-    nper = amp.shape[0]
-    gv = np.zeros(nper, dtype=np.float32)
-    ampsnr = np.zeros(nper, dtype=np.float32)
-    dvel = vel[1] - vel[0]
+    nper = amp.shape[0]  # Number of period samples
+    gv = np.zeros(nper, dtype=np.float32)  # Group velocity
+    ampsnr = np.zeros(nper, dtype=np.float32)  # SNR
+    dvel = vel[1] - vel[0]  # Group velocity spacing
+    minimum_output_length = 15  # The minimum length of the curve needed for output
 
-    # find global maximum
+    # Find global maximum at each period
     for ii in range(nper):
-        if per[ii] == 0: continue
+        if per[ii] == 0:
+            continue
         maxvalue = np.max(amp[ii], axis=0)
         indx = list(amp[ii]).index(maxvalue)
         gv[ii] = vel[indx]
         ampsnr[ii] = maxvalue / np.median(amp[ii], axis=0)
+
         # QC:
-        if np.abs(gv[ii] - vmax) < 3 * dvel:  # remove points close to vg limits
+        if np.abs(gv[ii] - vmax) < 3 * dvel:  # remove points close to vg limits (within 3 samples of the max)
             gv[ii] = 0
-        elif dist / (per[ii] * gv[ii]) < minlambda:  # remove points for which no. of wavelengths is less than threshold
+        elif dist / (per[ii] * gv[ii]) < minlambda:  # remove if number of wavelengths is less than threshold
             gv[ii] = 0
 
-    # check the continuous of the dispersion
-    for ii in range(1, nper - 15):
-        # 15 is the minimum length needed for output
+    # Check the continuity of the dispersion curve
+    for ii in range(1, nper - minimum_output_length):
         if gv[ii] == 0:
             continue
-        for jj in range(15):
-            if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:
+        for jj in range(minimum_output_length):
+            if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:  # If there is a large velocity gap, set to 0
                 gv[ii] = 0
                 break
 
-    # remove the bad ones
+    # Remove discarded picks set to 0
     indx = np.where(gv > 0)[0]
-
     pick_per = per[indx]
     pick_gv = gv[indx]
     pick_ampsnr = ampsnr[indx]
@@ -165,21 +191,21 @@ def extract_dispersion_simple(amp, per, vel):
     per:  central frequency of each wavelet scale with good data
     gv:   group velocity vector at each frequency
     '''
-    maxgap = 5
+    minimum_output_length = 15  # The minimum length of the curve needed for output
+    maxgap = 5  # Maximum gap in group velocity between successive picks in samples
     nper = amp.shape[0]
     gv = np.zeros(nper, dtype=np.float32)
     dvel = vel[1] - vel[0]
 
-    # find global maximum
+    # Find global maximum at each period
     for ii in range(nper):
         maxvalue = np.max(amp[ii], axis=0)
         indx = list(amp[ii]).index(maxvalue)
         gv[ii] = vel[indx]
 
-    # check the continuous of the dispersion
-    for ii in range(1, nper - 15):
-        # 15 is the minumum length needed for output
-        for jj in range(15):
+    # Check continuity of the dispersion curve
+    for ii in range(1, nper - minimum_output_length):
+        for jj in range(minimum_output_length):
             if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:
                 gv[ii] = 0
                 break
@@ -200,6 +226,8 @@ def extract_curves_topology(amp, per, vel, limit=0.1):
         limit: Minimum score
 
     Returns:
+        pick_per, pick_vel: 1D arrays with the picked period and group velocity
+        pick_sco: Corresponding peak score, between 0 (not a peak) and 1 (most significant peak)
 
     """
     # Get peak for each period
@@ -238,7 +266,10 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         vmax: Maximum group velocity to determine signal window
 
     Returns:
-
+        snr_nbG: SNR array for the CCF filtered at each frequency of fn_array
+        snr_bb: SNR value calculated without filtering (broadband CCF)
+        ccf_time_nbG: 2D array of CCF narrowband-filtered at each frequency of fn_array
+        ccf_time_nbG_env: 2D array of the envelope of the CCF narrowband-filtered at each frequency of fn_array
     """
     # Define signal and noise windows
     signal_win = np.arange(int(dist / vmax / dt), int(dist / vmin / dt))
@@ -256,8 +287,8 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
     freq_samp = 2 * np.pi * abs(fft.fftfreq(Nfft, dt))
 
     # Narrowband filtering
-    # ccf_time_nbG = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
-    # ccf_time_nbG_env = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
+    ccf_time_nbG = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
+    ccf_time_nbG_env = np.zeros(shape=(len(omgn_array), len(ccf)), dtype=np.float32)
     snr_nbG = np.zeros(shape=(len(omgn_array),), dtype=np.float32)
     for iomgn, omgn in enumerate(omgn_array):
         # Gaussian kernel
@@ -269,25 +300,25 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
 
         # Transform to the time domain
         ccftnbg = tmp[:len(ccf)]
-        # ccf_time_nbG[iomgn, :] = ccftnbg
+        ccf_time_nbG[iomgn, :] = ccftnbg
 
         # Get envelope
         analytic_signal = hilbert(ccftnbg)
         amplitude_envelope = np.abs(analytic_signal)
-        # ccf_time_nbG_env[iomgn, :] = amplitude_envelope
+        ccf_time_nbG_env[iomgn, :] = amplitude_envelope
 
         # SNR
         # check if max is at edge of lag time limits
-        #isnr = np.argmax(amplitude_envelope)
-        #if isnr == 0 or isnr == len(amplitude_envelope) - 1:
+        # isnr = np.argmax(amplitude_envelope)
+        # if isnr == 0 or isnr == len(amplitude_envelope) - 1:
         #    snr_nbG[iomgn] = 0
-        #else:
+        # else:
         #    noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
         #    snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
         noise_rms = np.sqrt(np.sum(amplitude_envelope[noise_win] ** 2) / len(noise_win))
         snr_nbG[iomgn] = np.max(amplitude_envelope[signal_win]) / noise_rms
 
-    return snr_nbG, snr_bb  # ccf_time_nbG , ccf_time_nbG_env, snr_nbG
+    return snr_nbG, snr_bb, ccf_time_nbG, ccf_time_nbG_env
 
 
 def get_mean(inst_periods, group_velocity):

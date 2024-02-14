@@ -9,6 +9,7 @@ import scipy.fftpack as sfft
 from numpy import matlib as mb
 from obspy import Trace, Stream
 
+
 def get_stack_gather(sfiles, stack_method="Allstack_pws", comp="ZZ"):
     """
     This function takes in a list of the H5 stack files and outputs the CCFs and key information into numpy arrays,
@@ -293,7 +294,8 @@ def fk_decomposition(ncts_binned, dt=0.04, dr=0.150, plot=True, title=None, kmax
     return fk, omega0, k0
 
 
-def fk_filtering_then_plot(ncts_binned, edges, t, dt=0.04, dr=0.150, cmin=0.7, cmax=7.0, lambda_min=0, lambda_max=20, plot=True):
+def fk_filtering_then_plot(ncts_binned, edges, t, dt=0.04, dr=0.150, cmin=0.7, cmax=7.0, lambda_min=0, lambda_max=20,
+                           plot=True):
     """
     FK decomposition followed by filtering based on phase velocity and wavelength,
     then inverse transform back to time domain to get filtered time domain CCFs
@@ -430,7 +432,8 @@ def fk_decomposition_pos(ncts_binned, dt, dr, plot=False, ax=None, title=None):
     return newf, newk_km, fk_pos, fk_pos_dB
 
 
-def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True, binsize=None, baz_range=None, freqlims=None, scale=1, showlabel=True):
+def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True, binsize=None, baz_range=None,
+                       freqlims=None, scale=1, showlabel=True):
     """
 
     Args:
@@ -525,11 +528,11 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True
         if not binsize:
             binsize = min(r) * 2
         ncts_binned, ncts_sym_binned_nonan, edges, time, distances, num_per_bin = binned_stack_time(Mp, Msym,
-                                                                                                             dt, t, r,
-                                                                                                             dr=binsize,
-                                                                                                             plot=False,
-                                                                                                             tmaxplot=10,
-                                                                                                             dmaxplot=None)
+                                                                                                    dt, t, r,
+                                                                                                    dr=binsize,
+                                                                                                    plot=False,
+                                                                                                    tmaxplot=10,
+                                                                                                    dmaxplot=None)
 
         # Convert to stream and plot record section
         strbin = Stream()
@@ -542,7 +545,7 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True
         fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True).plot(handle=True,
                                                                                                       type="section",
                                                                                                       fillcolors=(
-                                                                                                      "b", "r"),
+                                                                                                          "b", "r"),
                                                                                                       orientation="horizontal",
                                                                                                       recordlength=recordlength,
                                                                                                       figsize=figsize,
@@ -582,7 +585,7 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True
             fig = stream.copy().filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True).plot(handle=True,
                                                                                                           type="section",
                                                                                                           fillcolors=(
-                                                                                                          "b", "r"),
+                                                                                                              "b", "r"),
                                                                                                           orientation="horizontal",
                                                                                                           recordlength=recordlength,
                                                                                                           figsize=figsize,
