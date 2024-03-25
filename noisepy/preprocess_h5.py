@@ -338,7 +338,7 @@ def stats2inv(stats, prepro_para, locs=None):
             dip=stats.sac["cmpinc"],
             sample_rate=stats.sampling_rate)
 
-    elif input_fmt == 'mseed':
+    elif input_fmt == 'mseed' or input_fmt == 'miniseed':
         ista = locs[locs['station'] == stats.station].index.values.astype('int64')[0]
 
         net = Network(

@@ -708,6 +708,7 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
     timestamp = np.empty(ttime.size, dtype='datetime64[s]')
     amax = np.zeros(nwin, dtype=np.float32)
 
+    nbad = 0
     for ii, itype in enumerate(dtype_lists[num_stacks:]):
         if "stack" in itype: continue
         timestamp[ii] = obspy.UTCDateTime(np.float(itype[1:]))
@@ -723,12 +724,13 @@ def plot_substack_all_spect(sfile, freqmin, freqmax, ccomp, disp_lag=None, savef
             amax[ii] = np.max(data[ii])
             data[ii] /= amax[ii]
         except Exception as e:
-            print(e)
+            # print(e)
+            nbad += 1
             continue
 
         if len(ngood) == 1:
             raise ValueError('seems no substacks have been done! not suitable for this plotting function')
-
+    print(f"Number of substacks without {ccomp}: {nbad}")
     # plotting
     if nwin > 100:
         tick_inc = int(nwin / 10)

@@ -103,7 +103,7 @@ if rank == 0:
     # check station list
     if not os.path.isfile(locations):
         raise ValueError('Abort! station info is needed for this script')
-    locs = pd.read_csv(locations)
+    locs = pd.read_csv(locations,converters={'station': str})
     nsta = len(locs)
 
     # output parameter info
@@ -185,11 +185,11 @@ for ick in range(rank, splits, size):
         # norrow down file list by using sta/net info in the file name
         ttfiles = [ifile for ifile in tfiles if station in ifile]
         if not len(ttfiles):
-            # Logger.info(f"No files found for {station}")
+            Logger.info(f"No files found for {station}")
             continue
-        tttfiles = [ifile for ifile in ttfiles if comp in ifile]
+        tttfiles = [ifile for ifile in ttfiles if comp in ifile or f".{comp[-1]}." in ifile]
         if not len(tttfiles):
-            # Logger.info(f"No files found for {station}.{comp}")
+            Logger.info(f"No files found for {station}.{comp}")
             continue
 
         source = obspy.Stream()
