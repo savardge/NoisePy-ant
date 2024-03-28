@@ -10,10 +10,13 @@
 #SBATCH --mail-type=START,END
 #SBATCH --mail-user=genevieve.savard@unige.ch
 
+#unset DISPLAY  # uncomment if doing plotting
+
 fname="station_locations_riehen.csv"
 station=`sed -n "${SLURM_ARRAY_TASK_ID}p" $fname | awk -F, '{print $1}'`
 echo $station 
+configfile="ppsd_params.yaml"
 
-python plot_ppsd_1sta.py $station DPZ
-python plot_ppsd_1sta.py $station DPN
-python plot_ppsd_1sta.py $station DPE
+python ppsd_1sta.py $station DPZ $configfile
+#python ppsd_1sta.py $station DPN $configfile
+#python ppsd_1sta.py $station DPE $configfile

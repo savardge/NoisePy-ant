@@ -1,0 +1,29 @@
+MAX_MEM: 10.0 # maximum memory allowed per core in GB
+
+# absolute path parameters
+rootpath: '/home/users/s/savardg/scratch/aargau'  # root path for this data processing
+CCFDIR: '/home/users/s/savardg/scratch/aargau/CCF_CH-AA_rma2_normZ'  # dir where CC data is stored
+STACKDIR: '/home/users/s/savardg/scratch/aargau/STACK_CH-AA_rma2_normZ'  # dir where stacked data is going to
+
+# station info including network,station,channel,latitude,longitude,elevation
+locations: '/home/users/s/savardg/aargau_ant/station_locations_CH-AA.csv'  
+
+# define new stacking para
+keep_substack: True  # False                                          # keep all sub-stacks in final ASDF file
+flag: False  # output intermediate args for debugging
+stack_method: 'all'  # linear, pws, robust, nroot, selective, auto_covariance or all
+ncomp: 3
+
+# ENZ system
+# For auto-correlation:
+# if enz_system_option == 1: enz_system = ['EE','EN','EZ','NN','NZ','ZZ']
+# if enz_system_option == 2 : enz_system = ['EE', 'NE', 'NN', 'ZE', 'ZN', 'ZZ']
+# For cross-correlation:
+# if enz_system_option == 1/2: enz_system = ['EE', 'EN', 'EZ', 'NE', 'NN', 'NZ', 'ZE', 'ZN', 'ZZ']
+enz_system_option: 1
+
+overwrite: False
+
+# rotation from E-N-Z to R-T-Z if ncomp=3
+rotation: True                                                 
+correction: False  

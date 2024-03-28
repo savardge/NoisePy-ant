@@ -1,0 +1,44 @@
+# absolute path for your project
+rootpath: '/home/users/s/savardg/aargau_broadband/'                           
+
+# where to store the downloaded data
+direc: '/home/users/s/savardg/scratch/aargau_broadband/RAW_DATA' 
+
+# CSV file for station location info
+dlist: '/home/users/s/savardg/scratch/aargau_broadband/RAW_DATA/station.txt' 
+
+# Download parameters
+# Client/data center. see https://docs.obspy.org/packages/obspy.clients.fdsn.html for a list
+client_name: 'ETH' 
+down_list: False  # download stations from a pre-compiled list or not
+flag: True       # print intermediate variables and computing time
+
+# targeted region/station information: only needed when down_list is False
+# regional box: min lat, min lon, max lat, max lon (-114.0)
+
+lamin: 47.3
+lamax: 47.6
+lomin: 8.05
+lomax: 8.50      
+chan_list: ["BHE","BHN","BHZ"] # channel if down_list=false (format like "HN?" not work here)
+ncomp: 3  # Must match chan_list
+net_list: # network list
+- "CH"                                               
+sta_list: # station (using a station list compared to specifying stations one by one)
+- "ACB"
+- "SULZ"                                               
+start_date: "2019_04_11_0_0_0"                               # start date of download
+end_date: "2022_01_12_0_0_0"                               # end date of download
+inc_hours: 24                                                 # length of data for each request (in hour)
+
+# processing parameters
+samp_freq: 25     # targeted sampling rate
+rm_resp: 'inv'        # select 'no' to not remove response and use 'inv','spectrum','RESP', or 'polozeros' to remove response
+respdir: '/home/users/s/savardg/aargau_broadband/resp' # directory where resp files are located (required if rm_resp is neither 'no' nor 'inv')
+freqmin: 0.05    # pre filtering frequency bandwidth
+freqmax: 14.5    # note this cannot exceed Nquist freq
+
+# get rough estimate of memory needs to ensure it now below up in S1
+cc_len: 1800                                                        # basic unit of data length for fft (s)
+step: 450                                                         # overlapping between each cc_len (s)
+MAX_MEM: 3.0 

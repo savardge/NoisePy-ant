@@ -1,0 +1,13 @@
+# Input parameters for ppsd_1sta.py
+
+datadir: "/home/share/cdff/riehen/raw_data/" #directory with miniseed data. Assumes station subfolders (check script to change)
+figdir: "/home/users/s/savardg/scratch/riehen/ppsd/figures" # Directory where to save figures of PPSD
+npzdir: "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz" # Directory where to write a pickle file to save PPSD object
+stationxml_file: "/home/users/s/savardg/riehen/ppsd/riehen_stations.xml" # Station XML file (all stations merged)
+makefig: False # To make figures or not
+overwrite: True # To overwrite pickle files or not
+minT: 0.02  # minimum period to plot in s
+maxT: 10.0 #maximum period to plot in s
+period_bins: [0.1, 0.2, 1]  # period bins for the temporal PPSD plot
+starttime: "2023-06-16T00:00:00" # start date of deployment
+endtime: "2023-07-17T00:00:00"  # End date of deployment

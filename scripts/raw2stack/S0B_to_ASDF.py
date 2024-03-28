@@ -235,7 +235,7 @@ for ick in range(rank, splits, size):
             ds.add_waveforms(tr, tag=new_tags)
 
     t3 = time.time()
-    Logger.info('it takes ' + str(t3 - t0) + ' s to process ' + str(inc_hours) + 'h length in step 0B')
+    Logger.info('it takes ' + str(t3 - t0) + ' s to process ' + str(inc_hours) + 'h length for chunk ' + all_chunk[ick] + 'T' + all_chunk[ick + 1] + ' in step 0B')
 
 tt1 = time.time()
 Logger.info('step0B takes ' + str(tt1 - tt0) + ' s')
