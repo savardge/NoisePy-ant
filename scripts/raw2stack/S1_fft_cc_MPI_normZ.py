@@ -63,7 +63,7 @@ respdir = fc_para['respdir']  # directory where resp files are located (required
 if input_fmt != 'h5':
     if not os.path.isfile(locations):
         raise ValueError('Abort! station info is needed for this script')
-    locs = pd.read_csv(locations)
+    locs = pd.read_csv(locations,converters={'station': str})
 
 # pre-processing parameters 
 cc_len = fc_para['cc_len']  # basic unit of data length for fft (sec)

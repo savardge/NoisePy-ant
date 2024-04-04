@@ -13,7 +13,7 @@
 #unset DISPLAY  # uncomment if doing plotting
 
 fname="station_locations_riehen.csv"
-station=`sed -n "${SLURM_ARRAY_TASK_ID}p" $fname | awk -F, '{print $1}'`
+station=`sed -n "${SLURM_ARRAY_TASK_ID}p" $fname | awk -F, '{print $2}'` # if station name in 2nd column
 echo $station 
 configfile="ppsd_params.yaml"
 

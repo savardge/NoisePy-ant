@@ -172,8 +172,8 @@ outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
 if not os.path.exists(npz_filename) or overwrite:
     # File list
     # sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
-    #sfiles = glob.glob(os.path.join(datadir, station, channel, "*"))
-    pattern = os.path.join(datadir, "*", f"*{station}*{channel[-1]}.miniseed")
+    pattern = os.path.join(datadir, "*", station, channel, "*")
+    #pattern = os.path.join(datadir, "*", f"*{station}*{channel[-1]}.miniseed")
     print(f"Searching this pattern to find miniseed data (change script L176 if wrong): " + pattern)
     sfiles = glob.glob(pattern)
     

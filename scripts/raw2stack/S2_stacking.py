@@ -59,7 +59,7 @@ rotation = stack_para['rotation']  # rotation from E-N-Z to R-T-Z
 correction = stack_para['correction']  # angle correction due to mis-orientation
 if rotation and correction:
     corrfile = os.path.join(rootpath, 'meso_angles.txt')  # csv file containing angle info to be corrected
-    locs = pd.read_csv(corrfile)
+    locs = pd.read_csv(corrfile,converters={'station': str})
 else:
     locs = []
 
@@ -118,7 +118,7 @@ if rank == 0:
     #tlocs.network = tlocs.network.fillna('')  # GS fix if there is no network code specified
     #tlocs.station = tlocs.station.astype(str)  # this does not work if station all numbers and include starting 0
     sta = sorted(np.unique(tlocs['network'] + '.' + tlocs['station']))
-    print(sta)
+    #print(sta)
     for ii in range(len(sta)):
         tmp = os.path.join(STACKDIR, sta[ii])
         if not os.path.isdir(tmp):
@@ -130,7 +130,7 @@ if rank == 0:
     for ii in range(len(sta)):
         for jj in range(ii, len(sta)):
             pairs_all.append(sta[ii] + '_' + sta[jj])
-    print(pairs_all)
+    #print(pairs_all)
     splits = len(pairs_all)
     if len(ccfiles) == 0 or splits == 0:
         raise IOError('Abort! no available CCF data for stacking')
@@ -346,7 +346,7 @@ for ipair in range(rank, splits, size):
                                           path=comp,
                                           parameters=tparameters)
 
-        Logger.info(f"Wrote component {comp} to output file: {stack_h5}")
+        if flag: Logger.info(f"Wrote component {comp} to output file: {stack_h5}")
 
         t3 = time.time()
         if flag:

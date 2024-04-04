@@ -109,9 +109,9 @@ if rank == 0:
     ccfiles = sorted(glob.glob(os.path.join(CCFDIR, '*.h5')))
 
     # load station info
-    tlocs = pd.read_csv(locations)
+    tlocs = pd.read_csv(locations,converters={'station': str})
     tlocs.network = tlocs.network.fillna('')  # GS fix
-    tlocs.station = tlocs.station.astype(str)  # GS fix
+    #tlocs.station = tlocs.station.astype(str)  # GS fix
     sta = sorted(np.unique(tlocs['network'] + '.' + tlocs['station']))
     print(sta)
     for ii in range(len(sta)):
