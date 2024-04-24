@@ -782,11 +782,13 @@ def correlate(fft1_smoothed_abs, fft2, D, Nfft, dataS_t):
             for istack in range(nstack):
                 # find the indexes of all of the windows that start or end within
                 itime = np.where((dataS_t >= tstart) & (dataS_t < tstart + substack_len))[0]
-                if len(itime) == 0: tstart += substack_len;continue
+                if len(itime) == 0:
+                    tstart += substack_len
+                    continue
 
                 crap[:Nfft2] = np.mean(corr[itime, :], axis=0)  # linear average of the correlation
                 crap[:Nfft2] = crap[:Nfft2] - np.mean(crap[:Nfft2])  # remove the mean in freq domain (spike at t=0)
-                crap[-(Nfft2) + 1:] = np.flip(np.conj(crap[1:(Nfft2)]), axis=0)
+                crap[-Nfft2 + 1:] = np.flip(np.conj(crap[1:Nfft2]), axis=0)
                 crap[0] = complex(0, 0)
                 s_corr[istack, :] = np.real(np.fft.ifftshift(scipy.fftpack.ifft(crap, Nfft, axis=0)))
                 n_corr[istack] = len(itime)  # number of windows stacks
@@ -811,7 +813,7 @@ def correlate(fft1_smoothed_abs, fft2, D, Nfft, dataS_t):
         crap = np.zeros(Nfft, dtype=np.complex64)
         crap[:Nfft2] = np.mean(corr[tindx], axis=0)
         crap[:Nfft2] = crap[:Nfft2] - np.mean(crap[:Nfft2], axis=0)
-        crap[-(Nfft2) + 1:] = np.flip(np.conj(crap[1:(Nfft2)]), axis=0)
+        crap[-Nfft2 + 1:] = np.flip(np.conj(crap[1:Nfft2]), axis=0)
         s_corr = np.real(np.fft.ifftshift(scipy.fftpack.ifft(crap, Nfft, axis=0)))
 
     # trim the CCFs in [-maxlag maxlag]

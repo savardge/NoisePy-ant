@@ -10,8 +10,10 @@ import gc
 import sys
 import time
 import pyasdf
-import os, glob
+import os
+import glob
 import numpy as np
+import pandas as pd
 from mpi4py import MPI
 from scipy.fftpack.helper import next_fast_len
 import yaml
@@ -46,7 +48,7 @@ local_data_path = fc_para['local_data_path']  # absolute dir where SAC files are
 locations = fc_para['locations']  # station info including
 
 # some control parameters
-input_fmt = fc_para['h5']  # string: 'h5', 'sac','mseed'
+input_fmt = fc_para['input_fmt']  # string: 'h5', 'sac','mseed'
 freq_norm = fc_para['freq_norm']  # 'no' for no whitening, or 'rma' for running-mean average, 'phase_only' for sign-bit normalization in freq domain.
 time_norm = fc_para['time_norm']  # 'no' for no normalization, or 'rma', 'one_bit' for normalization in time domain
 cc_method = fc_para['cc_method']  # 'xcorr' for pure cross correlation, 'deconv' for deconvolution; FOR "COHERENCY" PLEASE set freq_norm to "rma", time_norm to "no" and cc_method to "xcorr"
@@ -85,7 +87,7 @@ max_over_std = fc_para['max_over_std']  # threshold to remove window of bad sign
 MAX_MEM = fc_para["MAX_MEM"]
 
 # load useful download info if start from ASDF
-dfile = os.path.join(DATADIR, 'download_info.txt')
+dfile = os.path.join(DATADIR, 'download_info.yaml')
 with open(dfile, "r") as file:
     down_info = yaml.safe_load(file)
 samp_freq = down_info['samp_freq']
@@ -121,6 +123,8 @@ if rank == 0:
 
     # set variables to broadcast
     tdir = sorted(glob.glob(os.path.join(DATADIR, '*.h5')))
+
+    # Calculate number of splits and chunks
     nchunk = len(tdir)
     splits = nchunk
     if nchunk == 0:
@@ -157,7 +161,7 @@ for ick in range(rank, splits, size):
     ds = pyasdf.ASDFDataSet(tdir[ick], mpi=False, mode='r')
     sta_list = ds.waveforms.list()
     nsta = ncomp * len(sta_list)
-    Logger.info(f" Rank {rank} found {nsta} stations in total")
+    Logger.info(f'Rank {rank} found %d station-component pairs to run in total' % nsta)
 
     if len(sta_list) == 0:
         Logger.info('continue! no data in %s' % tdir[ick])
@@ -168,6 +172,8 @@ for ick in range(rank, splits, size):
     nseg_chunk = int(np.floor((nsec_chunk - cc_len) / step))
     npts_chunk = int(nseg_chunk * cc_len * samp_freq)
     memory_size = nsta * npts_chunk * 4 / 1024 ** 3
+    if flag:
+        Logger.info('Requires %5.3fG memory and %5.3fG provided' % (memory_size, MAX_MEM))
     if memory_size > MAX_MEM:
         raise ValueError('Require %5.3fG memory but only %5.3fG provided)! Reduce inc_hours to avoid this issue!' % (
             memory_size, MAX_MEM))
@@ -196,7 +202,7 @@ for ick in range(rank, splits, size):
         try:
             inv1 = ds.waveforms[tmps]['StationXML']
         except Exception as e:
-            Logger.warning('abort! no stationxml for %s in file %s' % (tmps, tdir[ick]))
+            Logger.info('No stationxml for %s in file %s. Skipping.' % (tmps, tdir[ick]))
             continue
         sta, net, lon, lat, elv, loc = cross_correlation.sta_info_from_inv(inv1)
 
@@ -250,16 +256,19 @@ for ick in range(rank, splits, size):
 
     # check whether array size is enough
     if iii != nsta:
-        Logger.warning('it seems some stations miss data in download step, but it is OKAY!')
+        Logger.info(f"it seems some stations miss data in download step: found {iii} out of {nsta} stations.")
 
-    #############PERFORM CROSS-CORRELATION##################
+    ############# PERFORM CROSS-CORRELATION ##################
     ftmp = open(tmpfile, 'w')
     # make cross-correlations 
     for iiS in range(iii):
         fft1 = fft_array[iiS]
+
+        # ---------- check the existence of earthquakes in source waveform ----------
         source_std = fft_std[iiS]
         sou_ind = np.where((source_std < fc_para['max_over_std']) & (source_std > 0) & (np.isnan(source_std) == 0))[0]
-        if not fft_flag[iiS] or not len(sou_ind): continue
+        if not fft_flag[iiS] or not len(sou_ind):
+            continue
 
         t0 = time.time()
         # -----------get the smoothed source spectrum for decon later----------
@@ -269,13 +278,14 @@ for ick in range(rank, splits, size):
         if flag: Logger.info('smoothing source takes %6.4fs' % (t1 - t0))
 
         # get index right for auto/cross correlation
-        istart = iiS;
+        istart = iiS
         iend = iii
 
-        # -----------now loop III for each receiver B----------
+        # -----------now loop III for each receiver ----------
         for iiR in range(istart, iend):
             if acorr_only:
-                if (station[iiR] != station[iiS]): continue
+                if station[iiR] != station[iiS]:
+                    continue
             if flag:
                 Logger.info('receiver: %s %s %s' % (station[iiR], network[iiR], channel[iiR]))
             if not fft_flag[iiR]: continue
@@ -284,7 +294,7 @@ for ick in range(rank, splits, size):
             sfft2 = fft2.reshape(N, Nfft2)
             receiver_std = fft_std[iiR]
 
-            # ---------- check the existence of earthquakes ----------
+            # ---------- check the existence of earthquakes in receiver waveform ----------
             rec_ind = \
                 np.where((receiver_std < fc_para['max_over_std']) & (receiver_std > 0) & (np.isnan(receiver_std) == 0))[
                     0]
@@ -297,7 +307,7 @@ for ick in range(rank, splits, size):
                                                              fft_time[iiR][bb])
             t3 = time.time()
 
-            # ---------------keep daily cross-correlation into a hdf5 file--------------
+            # ---------------keep cross-correlation into a hdf5 file--------------
             tname = tdir[ick].split('/')[-1]
             cc_h5 = os.path.join(CCFDIR, tname)
             crap = np.zeros(corr.shape, dtype=corr.dtype)
@@ -337,7 +347,7 @@ for ick in range(rank, splits, size):
     fft_flag = []
     fft_time = []
     n = gc.collect()
-    Logger.info(f"unreadable garbarge: {n}")
+    Logger.info('unreadable garbarge: %d'% n)
 
     t11 = time.time()
     Logger.info('it takes %6.2fs to process the chunk of %s' % (t11 - t10, tdir[ick].split('/')[-1]))
