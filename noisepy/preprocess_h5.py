@@ -339,8 +339,12 @@ def stats2inv(stats, prepro_para, locs=None):
             sample_rate=stats.sampling_rate)
 
     elif input_fmt == 'mseed' or input_fmt == 'miniseed':
-        ista = locs[locs['station'] == stats.station].index.values.astype('int64')[0]
-
+    
+        try:
+            ista = locs[locs['station'] == stats.station].index.values.astype('int64')[0]
+        except:
+            raise ValueError('Could not find matching station information for miniseed header: %s.' % stats.station)
+        
         net = Network(
             # This is the network code according to the SEED standard.
             code=locs.iloc[ista]["network"],
