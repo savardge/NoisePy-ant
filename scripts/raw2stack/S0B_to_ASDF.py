@@ -116,8 +116,8 @@ if rank == 0:
     # all time chunk for output: loop for MPI
     all_chunk = preprocess_h5.get_event_list(start_date, end_date, inc_hours)
     splits = len(all_chunk) - 1
-    if splits < 1: raise ValueError(
-        'Abort! no chunk found between %s-%s with inc %s' % (start_date, end_date, inc_hours))
+    if splits < 1: 
+        raise ValueError('Abort! no chunk found between %s-%s with inc %s' % (start_date, end_date, inc_hours))
 
     # rough estimation on memory needs needed in S1 (assume float32 dtype)
     nsec_chunk = inc_hours / 24 * 86400
@@ -180,16 +180,17 @@ for ick in range(rank, splits, size):
         station = str(locs.iloc[ista]['station'])
         network = locs.iloc[ista]['network']
         comp = locs.iloc[ista]['channel']
-        if flag: Logger.info(f"Rank {rank} is working on station {station} channel {comp}")
+        if flag: 
+            Logger.info(f"Rank {rank} is working on station {station} channel {comp}")
 
         # norrow down file list by using sta/net info in the file name
         ttfiles = [ifile for ifile in tfiles if station in ifile]
         if not len(ttfiles):
-            Logger.info(f"No files found for {station}")
+            Logger.info(f"Rank {rank}: No files found for {station}  in window: {s1} to {s2}")
             continue
-        tttfiles = [ifile for ifile in ttfiles if comp in ifile or f".{comp[-1]}." in ifile]
+        tttfiles = [ifile for ifile in ttfiles if comp in ifile]# or f".{comp[-1]}." in ifile]
         if not len(tttfiles):
-            Logger.info(f"No files found for {station}.{comp}")
+            Logger.info(f"Rank {rank} station {station} channel {comp}: No files found for {station}.{comp}  in window: {s1} to {s2}")
             continue
 
         source = obspy.Stream()
@@ -203,7 +204,9 @@ for ick in range(rank, splits, size):
                 continue
 
         # jump if no good data left
-        if not len(source): Logger.warning("trace read from file"); continue
+        if not len(source): 
+            Logger.warning("Rank {rank} station {station} channel {comp}: trace read from file"); 
+            continue
 
         # make inventory to save into ASDF file
         t1 = time.time()
@@ -211,11 +214,17 @@ for ick in range(rank, splits, size):
         tr = preprocess_h5.preprocess_raw(source, inv1, prepro_para, date_info)
 
         # jump if no good data left
-        if not len(tr): Logger.warning("No trace left after pre-processing"); continue
-        if np.all(tr[0].data == 0): print("Data all zeroes after pre-processing. skip"); print(len(tr)); continue
+        if not len(tr): 
+            Logger.warning("Rank {rank} station {station} channel {comp}: No trace left after pre-processing")
+            continue
+        if np.all(tr[0].data == 0): 
+            print("Rank {rank}: Data all zeroes after pre-processing. skip")
+            print(len(tr))
+            continue
 
         t2 = time.time()
-        if flag: Logger.info(f"pre-processing takes {t2 - t1:.2f}s")
+        if flag: 
+            Logger.info(f"Rank {rank} station {station} channel {comp}  in window: {s1} to {s2}: pre-processing takes {t2 - t1:.2f}s")
 
         # ready for output
         ff = os.path.join(DATADIR, all_chunk[ick] + 'T' + all_chunk[ick + 1] + '.h5')
@@ -235,7 +244,7 @@ for ick in range(rank, splits, size):
             ds.add_waveforms(tr, tag=new_tags)
 
     t3 = time.time()
-    Logger.info('it takes ' + str(t3 - t0) + ' s to process ' + str(inc_hours) + 'h length for chunk ' + all_chunk[ick] + 'T' + all_chunk[ick + 1] + ' in step 0B')
+    Logger.info(f"Rank {rank}: it takes " + str(t3 - t0) + ' s to process ' + str(inc_hours) + 'h length for chunk ' + all_chunk[ick] + 'T' + all_chunk[ick + 1] + ' in step 0B')
 
 tt1 = time.time()
 Logger.info('step0B takes ' + str(tt1 - tt0) + ' s')
