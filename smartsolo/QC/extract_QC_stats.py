@@ -16,7 +16,7 @@ OUTPUT_DIR is where to save figure (JPG format) and data tables (CSV)
 Author: genevieve.savard@unige.ch
 """
 
-import os 
+import os
 import glob
 import pandas as pd
 import numpy as np
@@ -32,7 +32,7 @@ def get_temperature(fname):
     with open(fname, "r") as f:
         for line in f:
             if line.startswith("[Temperature"):
-                dum = next(f).split()[-1].replace("\"","")
+                dum = next(f).split()[-1].replace("\"", "")
                 t = pd.to_datetime(dum, utc=True, format="%Y/%m/%d,%H:%M:%S")
                 temp = np.float32(next(f).split()[-1])
                 times.append(t)
@@ -42,9 +42,9 @@ def get_temperature(fname):
     df['time_local'] = df['time_UTC'].dt.tz_convert(LOCAL_TIME_ZONE)
     df['temperature'] = temps
     return df
-    
-    
-def get_gps_info(fname):    
+
+
+def get_gps_info(fname):
     times = []
     compass = []
     tilt = []
@@ -55,14 +55,14 @@ def get_gps_info(fname):
     altitude = []
     with open(fname, "r") as f:
         for line in f:
-            if line.startswith("[GPS"):                
-                status = next(f).split("=")[-1].strip() # GPS Status
+            if line.startswith("[GPS"):
+                status = next(f).split("=")[-1].strip()  # GPS Status
                 if status == "GPS Synchronization":
                     # print(line)
                     dum = next(f).split()[-1].strip("\"")
                     times.append(pd.to_datetime(dum, utc=True, format="%Y/%m/%d,%H:%M:%S"))
-                    dum = next(f) # Lead Second
-                    for k in range(15):                        
+                    dum = next(f)  # Lead Second
+                    for k in range(15):
                         if dum.startswith("eCompass"):
                             compass.append(np.float32(dum.split()[-1]))
                         elif dum.startswith("Tilted Angle"):
@@ -75,9 +75,9 @@ def get_gps_info(fname):
                             longitude.append(np.float32(dum.split()[-1]))
                         elif dum.startswith("Latitude"):
                             latitude.append(np.float32(dum.split()[-1]))
-                        elif dum.startswith("Altitude"):                        
+                        elif dum.startswith("Altitude"):
                             try:
-                                altitude.append(np.float32(dum.split()[-1]))                        
+                                altitude.append(np.float32(dum.split()[-1]))
                             except:
                                 altitude.append(np.nan)
                         if dum == "\n":
@@ -102,41 +102,55 @@ def get_gps_info(fname):
     df["pitch"] = pitch
     df["longitude"] = longitude
     df["latitude"] = latitude
-    df["altitude"] = altitude    
+    df["altitude"] = altitude
     return df
-    
-    
+
+
 if __name__ == "__main__":
-    
-    DCCDATA_DIR = sys.argv[1]
-    OUTPUT_DIR = sys.argv[2]
-    
-    filelist = glob.glob(os.path.join(DCCDATA_DIR,"*", "*", "DigiSolo.LOG"))
-    print(f"Number of DigiSolo.LOG files found: {len(filelist)}")
+
+    DCCDATA_DIR = sys.argv[1]  # DCCDATA folder path
+    OUTPUT_DIR = sys.argv[2]  # Output directory for csv and figure files
+    start_date_str = sys.argv[3]  # e.g. "2024/03/01,00:00:00"
+    end_date_str = sys.argv[4]  # e.g. "2024/04/25,00:00:00"
+    start_date = pd.to_datetime(start_date_str, utc=True) #, format="%Y/%m/%d,%H:%M:%S")
+    end_date = pd.to_datetime(end_date_str, utc=True) #, format="%Y/%m/%d,%H:%M:%S")
+    print(f"Keeping data between {start_date_str} and {end_date_str}")
+
+    filelist = glob.glob(os.path.join(DCCDATA_DIR, "*", "*", "DigiSolo.LOG"))
+    print(f"Reading data from directory: {DCCDATA_DIR}: Number of DigiSolo.LOG files found: {len(filelist)}")
     filelist.sort()
     for fname in filelist:
         print(fname)
+
+        # Extract metadata
         temp = get_temperature(fname)
         gps = get_gps_info(fname)
+
+        # Keep only dates after start_date
+        temp = temp.loc[(temp.time_UTC >= start_date) & (temp.time_UTC <= end_date), :]
+        gps = gps.loc[(gps.time_UTC >= start_date) & (gps.time_UTC <= end_date), :]
+
+        # Get serial number
         n = len(DCCDATA_DIR.rstrip("/").split("/"))
-        serial_number = fname.split("/")[n]        
-        
+        serial_number = fname.split("/")[n]
+
         # Save data to CSV tables
         fname_table1 = os.path.join(OUTPUT_DIR, f"{serial_number}_stats_temperature.csv")
         temp.to_csv(fname_table1, index=False)
         fname_table2 = os.path.join(OUTPUT_DIR, f"{serial_number}_stats_GPSinfo.csv")
         gps.to_csv(fname_table2, index=False)
-        
+
         # Plot 
         figname = os.path.join(OUTPUT_DIR, f"{serial_number}_stats.jpg")
-        fig, axs = plt.subplots(6,1,figsize=(16, 6*2), sharex=True)
+        fig, axs = plt.subplots(6, 1, figsize=(16, 6 * 2), sharex=True)
         # Temperature
         axs[0].plot(temp.time_local.values, temp.temperature.values, c="b")
         axs[0].set_title(f"Temperature [C] with std deviation = {temp.temperature.std():.3f}")
         axs[0].set_ylabel("Temperature [C]")
         # Latitude
         axs[1].plot(gps.time_local.values, gps.latitude.values, c="b")
-        axs[1].set_title(f"Latitude and Longitude with std deviations = {gps.latitude.std():.9f}, {gps.longitude.std():.9f}")
+        axs[1].set_title(
+            f"Latitude and Longitude with std deviations = {gps.latitude.std():.9f}, {gps.longitude.std():.9f}")
         axs[1].set_ylabel("Latitude")
         ax = axs[1].twinx()
         ax.plot(gps.time_local.values, gps.longitude.values, c="g")
