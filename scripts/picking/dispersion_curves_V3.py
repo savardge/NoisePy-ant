@@ -140,7 +140,7 @@ for stack_method in stack_methods:
                     print(
                         f"Error occured when picking dispersion for comp {comp}, lag {lag} and pick_method {pick_method}")
 
-        print(f"Wrote dispersion curves for {comp} in file: {dcfile}")
+        print(f"Wrote dispersion curves for {comp}, stack {stack_method}")
 
     # Now get picks for combinations
     amp_list = [
@@ -194,6 +194,6 @@ for stack_method in stack_methods:
             except Exception as e:
                 print(f"Error occured when picking dispersion for comp {comp}, lag {lag} and pick_method {pick_method}")
 
-        print(f"Wrote dispersion curves from product of FTAN images for {comp}-{lag} in file: {dcfile}")
+    print(f"Wrote dispersion curves from product of FTAN images for {comp}-{lag}  stack {stack_method}")
 
 fphase.close()
