@@ -123,8 +123,9 @@ for stack_method in stack_methods:
                     nper, gv, score = dispersion.remove_picks_coi(nper, gv, score, vel, CCFdata["COI"][lag][comp])
 
                     # Calculate SNR using narrowband Gauss filters
-                    snr_nbG, snr_bb = dispersion.nb_filt_gauss(CCFdata["ccf"][lag][comp], dt, np.divide(1, nper), dist,
-                                                               alpha=gauss_alpha)
+                    fn_array = np.divide(1, nper)
+                    snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(CCFdata["ccf"][lag][comp], dt, fn_array, dist,
+                                                                     alpha=gauss_alpha, vmin=vmin, vmax=vmax)
 
                     # Write picks to file
                     for iii in range(len(nper)):
@@ -162,7 +163,7 @@ for stack_method in stack_methods:
     lag_list = ["all2", "sym", "sym", "sym"]
     comp_list = ["all4", "all4", "ZZ-ZR", "RR-RZ"]
 
-    for amp, lag, comp in zip(comp_list, lag_list, comp_list):
+    for amp, lag, comp in zip(amp_list, lag_list, comp_list):
         for pick_method in pick_methods:
 
             try:
@@ -175,8 +176,13 @@ for stack_method in stack_methods:
                     continue
 
                 # Calculate SNR using narrowband Gauss filters
-                snr_nbG, snr_bb = dispersion.nb_filt_gauss(CCFdata["ccf"]["sym"]["ZZ"], dt, np.divide(1, nper), dist,
-                                                           alpha=gauss_alpha)
+                fn_array = np.divide(1, nper)
+                if comp == "RR-RZ":
+                    snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(CCFdata["ccf"]["sym"]["RZ"], dt, fn_array,
+                                                                     dist, alpha=gauss_alpha, vmin=vmin, vmax=vmax)
+                else:
+                    snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(CCFdata["ccf"]["sym"]["ZZ"], dt, fn_array,
+                                                                     dist, alpha=gauss_alpha, vmin=vmin, vmax=vmax)
                 # Write picks to file
                 for iii in range(len(nper)):
                     if nper[iii] == 0:
