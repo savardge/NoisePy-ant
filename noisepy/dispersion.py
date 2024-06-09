@@ -13,11 +13,13 @@ from scipy.signal import hilbert
 import logging
 from matplotlib.ticker import AutoMinorLocator
 from obspy.imaging.cm import pqlx
+from scipy.signal.windows import tukey as tukey_window
+
 
 Logger = logging.getLogger(__name__)
 
 
-def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, plot=True, figsize=(14, 6)):
+def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3., plot=True, figsize=(14, 6)):
     '''
     Get the group dispersion image with the Continuous Wavelet Transform
     Args:
@@ -29,6 +31,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
         vmin: Minimum group velocity
         vmax: Maximum group velocity
         dvel: Spacing of the group velocity axis in km/s
+        vave: average velocity in km/s used to calculate Tmax = dist/ vave
         plot: Whether to plot or not (bool)
         figsize: Figure size if plotting
 
@@ -47,7 +50,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     wvn = 'morlet'  # type of wavelet to use
 
     # Get period and velocity ranges
-    Tmax = dist / 3.0  # Max period assumes a velocity of 3 km/s
+    Tmax = dist / vave # Max period assumes a velocity of 3 km/s
     fmin = 1 / Tmax
     fmax = 1 / Tmin
     per = np.arange(Tmin, Tmax, dT)  # Periods
@@ -105,6 +108,113 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     return rcwt_new, per, vel
 
 
+def get_disp_image_taper(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3., plot=True,
+                         figsize=(14, 6)):
+    '''
+    Get the group dispersion image with the Continuous Wavelet Transform
+    Args:
+        ccf: Cross-correlation function (symmetric)
+        dist: inter-station distance for the given ccf in km
+        dt: Sampling interval in second
+        Tmin: Minimum period
+        dT: Spacing of the period axis on the dispersion image in second
+        vmin: Minimum group velocity
+        vmax: Maximum group velocity
+        dvel: Spacing of the group velocity axis in km/s
+        vave: average velocity in km/s used to calculate Tmax = dist/ vave
+        plot: Whether to plot or not (bool)
+        figsize: Figure size if plotting
+
+    Returns:
+        rcwt_new: Group dispersion image (2D numpy array)
+        per, vel: corresponding period and group velocity vectors
+    '''
+
+    # Basic parameters for wavelet transform
+    dj = 1 / 12  # Spacing between discrete scales. Default is Twelve sub-octaves per octaves.
+    # Smaller values will result in better scale resolution, but slower calculation and plot.
+    s0 = -1  # Smallest scale of the wavelet. Default value [-1] is 2*dt.
+    J = -1  # Number of scales less one.
+    # Scales range from s0 up to s0 * 2**(J * dj), which gives a total of (J + 1) scales.
+    # Default [-1] is J = (log2(N * dt / so)) / dj.
+    wvn = 'morlet'  # type of wavelet to use
+
+    # Get period and velocity ranges
+    Tmax = dist / vave  # Max period assumes a velocity of 3 km/s
+    fmin = 1 / Tmax
+    fmax = 1 / Tmin
+    per = np.arange(Tmin, Tmax, dT)  # Periods
+    vel = np.arange(vmin, vmax, dvel)  # Group velocities
+
+    # Trim the CCF according to velocity window vmin-vmax
+    npts = ccf.shape[0]
+    tvec = np.arange(0, npts) * dt
+    pt1 = int(dist / vmax / dt)
+    pt2 = int(dist / vmin / dt)
+    if pt1 == 0:
+        pt1 = 10
+    if pt2 > (npts // 2):
+        pt2 = npts // 2
+    indx = np.arange(pt1, pt2)
+
+    # Taper the window
+    taper = np.zeros(shape=npts)
+    window = tukey_window(len(indx), alpha=0.05, sym=True)
+    taper[indx] = window
+    ccf *= taper
+    # Cut the part after the taper (to speed up calculation)
+    ccf = ccf[:pt2]
+    tvec = tvec[:pt2]
+
+    # wavelet transformation
+    cwt, sj, freq, coi, _, _ = pycwt.cwt(ccf, dt, dj, s0, J, wvn)
+
+    # Filter the image within the requested frequency band
+    if (fmax > np.max(freq)) | (fmax <= fmin):
+        raise ValueError('Abort: frequency out of limits!')
+    freq_ind = np.where((freq >= fmin) & (freq <= fmax))[0]
+    cwt = cwt[freq_ind]
+    freq = freq[freq_ind]
+
+    # Calculate the amplitude and phase of the cwt
+    period = 1 / freq
+    rcwt = np.abs(cwt) ** 2  # Amplitude
+    # pcwt = np.angle(cwt)  # Phase
+
+    # Remove t=0 sample
+    tvec = tvec[1:]
+    rcwt = rcwt[:, 1:]
+    coi = coi[1:]
+
+    # Interpolation of the image to the requested intervals in period and velocity
+    velocity = dist / tvec
+    fc = scipy.interpolate.interp2d(velocity, period, rcwt)
+    rcwt_new = fc(vel, per)
+
+    # Interpolation of coi
+    ff = scipy.interpolate.interp1d(velocity, coi, fill_value='extrapolate', assume_sorted=False)
+    coi_new = ff(vel)
+
+    # Normalization amplitude at each frequency
+    rcwt_new /= np.max(rcwt_new, axis=1)[:, np.newaxis]
+
+    # Plot
+    if plot:
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax.imshow(np.transpose(rcwt_new),
+                  cmap='jet',
+                  extent=[per[0], per[-1], vel[0], vel[-1]],
+                  aspect='auto',
+                  origin='lower')
+        ax.scatter(coi_new, vel, c="k", s=5)
+        ax.set(xlabel='Period [s]', ylabel='Vg [km/s]', xlim=(Tmin, Tmax), ylim=(vmin, vmax))
+        ax.set_title('Inter-station distance: %5.2f km' % dist)
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    return rcwt_new, per, vel, coi_new
+
 # function to extract the dispersion from the image
 def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     '''
@@ -130,7 +240,7 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     gv = np.zeros(nper, dtype=np.float32)  # Group velocity
     ampsnr = np.zeros(nper, dtype=np.float32)  # SNR
     dvel = vel[1] - vel[0]  # Group velocity spacing
-    minimum_output_length = 15  # The minimum length of the curve needed for output
+    minimum_output_length = 15  # The minimum length of the curve needed for output in samples
 
     # Find global maximum at each period
     for ii in range(nper):
@@ -252,6 +362,36 @@ def extract_curves_topology(amp, per, vel, limit=0.1):
 
     return pick_per, pick_vel, pick_sco
 
+
+def remove_picks_coi(pick_per, pick_vel, pick_sco, vel, coi):
+    """
+    Remove picks inside cone of influence (coi) of CWT image
+    Args:
+        pick_per: period vector of picks
+        pick_vel: velocity vector of picks
+        pick_sco: persistence score of picks
+        vel: velocity vector corresponding to coi vector
+        coi: cone of influence vector
+
+    Returns:
+        Cleaned up picks
+        periods, velocities, score
+    """
+    ibad = []
+    for ii in range(len(pick_vel)):
+        ix = np.argwhere(vel == pick_vel[ii])[0][0]
+        if pick_per[ii] > coi[ix]:
+            ibad.append(ii)
+    pick_per_f = np.delete(pick_per, ibad)
+    pick_vel_f = np.delete(pick_vel, ibad)
+    pick_sco_f = np.delete(pick_sco, ibad)
+    if ibad:
+        maxT_coi = min([p for ii, p in enumerate(pick_per) if ii in ibad])
+        ibad2 = np.argwhere(pick_per_f > maxT_coi).flatten()
+        pick_per_f = np.delete(pick_per_f, ibad2)
+        pick_vel_f = np.delete(pick_vel_f, ibad2)
+        pick_sco_f = np.delete(pick_sco_f, ibad2)
+    return pick_per_f, pick_vel_f, pick_sco_f
 
 def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
     """
