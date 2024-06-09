@@ -546,7 +546,7 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=F
             n1 = tmp.shape[0]
             tmp.drop_duplicates(subset=period_col, keep="last", inplace=True)
             tmp.sort_values(by=period_col, inplace=True)
-            Logger.info(f"Dropped {tmp.shape[0] - n1} duplicate entries for pair {snet}.{ssta} - {rnet}.{rsta}.")
+            # Logger.info(f"Dropped {tmp.shape[0] - n1} duplicate entries for pair {snet}.{ssta} - {rnet}.{rsta}.")
 
             periods = tmp[period_col].values
             group_velocity = tmp[vg_col].values
