@@ -15,11 +15,11 @@ from matplotlib.ticker import AutoMinorLocator
 from obspy.imaging.cm import pqlx
 from scipy.signal.windows import tukey as tukey_window
 
-
 Logger = logging.getLogger(__name__)
 
 
-def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3., plot=True, figsize=(14, 6)):
+def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3., plot=True,
+                   figsize=(14, 6)):
     '''
     Get the group dispersion image with the Continuous Wavelet Transform
     Args:
@@ -50,7 +50,7 @@ def get_disp_image(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.
     wvn = 'morlet'  # type of wavelet to use
 
     # Get period and velocity ranges
-    Tmax = dist / vave # Max period assumes a velocity of 3 km/s
+    Tmax = dist / vave  # Max period assumes a velocity of 3 km/s
     fmin = 1 / Tmax
     fmax = 1 / Tmin
     per = np.arange(Tmin, Tmax, dT)  # Periods
@@ -129,6 +129,7 @@ def get_disp_image_taper(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, d
         rcwt_new: Group dispersion image (2D numpy array)
         per, vel: corresponding period and group velocity vectors
     '''
+    ccf = ccf.copy()
 
     # Basic parameters for wavelet transform
     dj = 1 / 12  # Spacing between discrete scales. Default is Twelve sub-octaves per octaves.
@@ -214,6 +215,7 @@ def get_disp_image_taper(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, d
         plt.close()
 
     return rcwt_new, per, vel, coi_new
+
 
 # function to extract the dispersion from the image
 def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
@@ -393,6 +395,7 @@ def remove_picks_coi(pick_per, pick_vel, pick_sco, vel, coi):
         pick_vel_f = np.delete(pick_vel_f, ibad2)
         pick_sco_f = np.delete(pick_sco_f, ibad2)
     return pick_per_f, pick_vel_f, pick_sco_f
+
 
 def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
     """
