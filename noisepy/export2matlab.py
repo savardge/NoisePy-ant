@@ -530,6 +530,8 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=F
         skey = f"{snet}_{ssta}"  # key name for source station
 
         PICK_CELL[skey] = {}
+        if uncertainty:
+            UNC_CELL[skey] = {}
         for rr in np.arange(ss + 1, nb_stat):  # Iterate over virtual receivers
             rnet = net_list[rr]
             rsta = stat_list[rr]
