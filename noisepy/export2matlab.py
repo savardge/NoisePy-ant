@@ -497,8 +497,8 @@ def picks_recursive_filtering(picks, multiplier=2):
     return df
 
 
-def make_pick_cell_from_dataframe(df, station_fname, output_fname, period_col="inst_period", vg_col="group_velocity",
-                                  snr_col="score", save_mat=True, save_python=True):
+def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=False, period_col="inst_period", vg_col="group_velocity",
+                                  unc_col="score", save_mat=True, save_python=True):
     """
     Extract picks and make PICK_CELL
     Args:
@@ -518,6 +518,8 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, period_col="i
     Logger.info(f"Number of stations: {nb_stat}")
 
     PICK_CELL = {}
+    if uncertainty:
+        UNC_CELL = {}
     Ntot = 0
     ts = time.time()
     for ss in range(nb_stat - 1):  # Iterate over virtual sources
@@ -538,23 +540,29 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, period_col="i
                   ((df.starcv == f"{snet}.{ssta}") & (df.stasrc == f"{rnet}.{rsta}"))
             , :].copy()
             # Ensure no duplicates
-            tmp.sort_values(by="group_velocity", inplace=True)
+            tmp.sort_values(by=vg_col, inplace=True)
             n1 = tmp.shape[0]
-            tmp.drop_duplicates(subset="inst_period", keep="last", inplace=True)
-            tmp.sort_values(by="inst_period", inplace=True)
+            tmp.drop_duplicates(subset=period_col, keep="last", inplace=True)
+            tmp.sort_values(by=period_col, inplace=True)
             Logger.info(f"Dropped {tmp.shape[0] - n1} duplicate entries for pair {snet}.{ssta} - {rnet}.{rsta}.")
 
-            periods = tmp["inst_period"].values
-            group_velocity = tmp["group_velocity"].values
-            snr = tmp["score"].values
+            periods = tmp[period_col].values
+            group_velocity = tmp[vg_col].values
 
             if len(periods) > 0:
                 Ntot += len(periods)
                 data = np.float32(np.vstack([periods, group_velocity]))
                 PICK_CELL[skey][rkey] = data
+                if uncertainty:
+                    std = tmp[unc_col].values
+                    unc = np.float32(np.vstack([periods, std]))
+                    UNC_CELL[skey][rkey] = unc
 
     Logger.info(f"Number of picks added: {Ntot}")
-    mdict = {"PICK_CELL": PICK_CELL}
+    if uncertainty:
+        mdict = {"PICK_CELL": PICK_CELL, 'UNC_CELL': UNC_CELL}
+    else:
+        mdict = {"PICK_CELL": PICK_CELL}
     if save_mat:
         fname = output_fname + ".mat"
         savemat(fname, mdict=mdict)
@@ -562,7 +570,7 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, period_col="i
     if save_python:
         fname = output_fname + ".pkl"
         with open(fname, 'wb') as output:  # Pickle dictionary using protocol 0.
-            pickle.dump(PICK_CELL, output)
+            pickle.dump(mdict, output)
         Logger.info(f"Wrote file {fname}")
     return mdict
 
