@@ -28,7 +28,7 @@ logging.basicConfig(
 Logger = logging.getLogger(__name__)
 
 
-def make_stat_list(STACK_DIR, station_file, fs, output_folder, save_mat=True, save_python=True):
+def make_stat_list(station_file, fs, output_folder, STACK_DIR=None, save_mat=True, save_python=True):
     """
     Create "stat_list_merged.mat" file for stations with NCCF data
     Args:
@@ -44,26 +44,29 @@ def make_stat_list(STACK_DIR, station_file, fs, output_folder, save_mat=True, sa
 
     """
 
-    # Get list of stations contained in stack files
-    stackfiles = glob.glob(os.path.join(STACK_DIR, "*", "*.h5"))
-    stalst_h5 = []
-    for f in stackfiles:
-        ff = os.path.split(f)[1]
-        sta1 = ff.split(".h5")[0].split("_")[0].split(".")[1]
-        if sta1 not in stalst_h5:
-            stalst_h5.append(sta1)
-        sta2 = ff.split(".h5")[0].split("_")[1].split(".")[1]
-        if sta2 not in stalst_h5:
-            stalst_h5.append(sta2)
-    Logger.info(f"Number of stations in H5 stack files: {len(stalst_h5)}")
+    if STACK_DIR:
+        # Get list of stations contained in stack files
+        stackfiles = glob.glob(os.path.join(STACK_DIR, "*", "*.h5"))
+        stalst_h5 = []
+        for f in stackfiles:
+            ff = os.path.split(f)[1]
+            sta1 = ff.split(".h5")[0].split("_")[0].split(".")[1]
+            if sta1 not in stalst_h5:
+                stalst_h5.append(sta1)
+            sta2 = ff.split(".h5")[0].split("_")[1].split(".")[1]
+            if sta2 not in stalst_h5:
+                stalst_h5.append(sta2)
+        Logger.info(f"Number of stations in H5 stack files: {len(stalst_h5)}")
 
     # Read station csv file used for noisepy
     stadf = pd.read_csv(station_file)
     stadf.station = stadf.station.astype(str)
     stadf = stadf.drop(columns="channel").drop_duplicates()  # remove duplicate rows
     Logger.info(f"Number of stations in CSV station file: {len(stadf.station.values)}")
-    stadf = stadf[stadf['station'].isin(stalst_h5)]  # Keep station actually used for stacking
-    Logger.info(f"Number of stations in common: {len(stadf.station.values)}")
+    if STACK_DIR:
+        # Keep station actually used for stacking
+        stadf = stadf[stadf['station'].isin(stalst_h5)]
+        Logger.info(f"Number of stations in common: {len(stadf.station.values)}")
     stadf.sort_values(by='station', inplace=True)
     net_list = stadf["network"].values
     stat_list = stadf["station"].values
