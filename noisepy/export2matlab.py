@@ -524,7 +524,7 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=F
     ts = time.time()
     for ss in range(nb_stat - 1):  # Iterate over virtual sources
         if ss % 20 == 0:
-            print(f"{ss}/{nb_stat}: {time.time() - ts} s elapsed")
+            print(f"loop 1: {ss}/{nb_stat}: {time.time() - ts} s elapsed")
         snet = net_list[ss]  # network for source station
         ssta = stat_list[ss]  # source station name
         skey = f"{snet}_{ssta}"  # key name for source station
@@ -533,6 +533,8 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=F
         if uncertainty:
             UNC_CELL[skey] = {}
         for rr in np.arange(ss + 1, nb_stat):  # Iterate over virtual receivers
+            if ss % 20 == 0:
+                print(f"loop 2: {rr}/{len(np.arange(ss + 1, nb_stat))}: {time.time() - ts} s elapsed")
             rnet = net_list[rr]
             rsta = stat_list[rr]
             rkey = f"{rnet}_{rsta}"
