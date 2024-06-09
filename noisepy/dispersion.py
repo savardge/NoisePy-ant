@@ -379,7 +379,8 @@ def remove_picks_coi(pick_per, pick_vel, pick_sco, vel, coi):
     """
     ibad = []
     for ii in range(len(pick_vel)):
-        ix = np.argwhere(vel == pick_vel[ii])[0][0]
+        # ix = np.argwhere(vel == pick_vel[ii])[0][0]  # doesn't work if rounding precision error
+        ix = np.argmin(np.abs(vel - pick_vel[ii]))
         if pick_per[ii] > coi[ix]:
             ibad.append(ii)
     pick_per_f = np.delete(pick_per, ibad)
