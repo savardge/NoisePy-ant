@@ -197,3 +197,4 @@ for stack_method in stack_methods:
     print(f"Wrote dispersion curves from product of FTAN images for {comp}-{lag}  stack {stack_method}")
 
 fphase.close()
+print(dcfile)
