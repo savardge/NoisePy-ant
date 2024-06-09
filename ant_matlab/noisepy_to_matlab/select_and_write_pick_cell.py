@@ -7,32 +7,34 @@ from scipy.io import savemat
 import logging
 import pickle
 import time
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s\t%(name)s\t%(levelname)s\t%(message)s")
 Logger = logging.getLogger(__name__)
 
+
 def picks_recursive_filtering(picks, multiplier=2):
     """ 
     Remove recursively picks outside a multiplier of the standard deviation around the mean at each period.
     Loop stops when all picks are within the defined boundaries.
-    """    
+    """
     df = picks.copy()
-    Nremoved = 1000 # dummy initialization
+    Nremoved = 1000  # dummy initialization
     while Nremoved > 10:
-        
         # Filter within 2 standard deviations
         groups_byt_gv = df.groupby('inst_period')['group_velocity']
         gv_mean = groups_byt_gv.transform('mean')
         gv_std = groups_byt_gv.transform('std')
         ikeep = df['group_velocity'].between(gv_mean.sub(gv_std.mul(multiplier)),
-                              gv_mean.add(gv_std.mul(multiplier)), inclusive=False)        
+                                             gv_mean.add(gv_std.mul(multiplier)), inclusive=False)
         Nremoved = df.shape[0] - ikeep.sum()
-        df = df.loc[ikeep, :]        
-        
+        df = df.loc[ikeep, :]
+
     return df
 
-def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=True, save_python=True):
+
+def make_pick_cell_from_dataframe(df, station_fname, output_fname, period_col="inst_period", vg_col="group_velocity", snr_col="score", save_mat=True, save_python=True):
     """
     Extract picks and make PICK_CELL
     Args:
@@ -45,7 +47,6 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
     Returns: dictionary with PICK_CELL
     """
 
-    fname = os.path.join(output_folder, "stat_list_merged.npz")
     npzfile = np.load(station_fname, allow_pickle=True)
     stat_list = npzfile['stat_list_merged']
     net_list = npzfile['net_list_merged']
@@ -56,8 +57,8 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
     Ntot = 0
     ts = time.time()
     for ss in range(nb_stat - 1):  # Iterate over virtual sources
-        if ss % 50 == 0: 
-            print(f"{ss}/{nb_stat}: {time.time()-ts} s elapsed")
+        if ss % 50 == 0:
+            print(f"{ss}/{nb_stat}: {time.time() - ts} s elapsed")
         snet = net_list[ss]  # network for source station
         ssta = stat_list[ss]  # source station name
         skey = f"{snet}_{ssta}"  # key name for source station
@@ -68,21 +69,26 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
             rsta = stat_list[rr]
             rkey = f"{rnet}_{rsta}"
 
-            tmp = df.loc[(df.stasrc == f"{snet}.{ssta}") & (df.starcv == f"{rnet}.{rsta}"),:].copy() 
+            tmp = df.loc[
+                ((df.stasrc == f"{snet}.{ssta}") & (df.starcv == f"{rnet}.{rsta}")) |
+                ((df.starcv == f"{snet}.{ssta}") & (df.stasrc == f"{rnet}.{rsta}"))
+            , :].copy()
             # Ensure no duplicates
             tmp.sort_values(by="group_velocity", inplace=True)
+            n1 = tmp.shape[0]
             tmp.drop_duplicates(subset="inst_period", keep="last", inplace=True)
             tmp.sort_values(by="inst_period", inplace=True)
+            Logger.info(f"Dropped {tmp.shape[0]-n1} duplicate entries for pair {snet}.{ssta} - {rnet}.{rsta}.")
 
             periods = tmp["inst_period"].values
             group_velocity = tmp["group_velocity"].values
             snr = tmp["score"].values
 
-            if len(periods) > 0:            
+            if len(periods) > 0:
                 Ntot += len(periods)
                 data = np.float32(np.vstack([periods, group_velocity]))
                 PICK_CELL[skey][rkey] = data
-                
+
     Logger.info(f"Number of picks added: {Ntot}")
     mdict = {"PICK_CELL": PICK_CELL}
     if save_mat:
@@ -91,18 +97,19 @@ def make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=T
         Logger.info(f"Wrote file {fname}")
     if save_python:
         fname = output_fname + ".pkl"
-        with open(fname, 'wb') as output: # Pickle dictionary using protocol 0.            
+        with open(fname, 'wb') as output:  # Pickle dictionary using protocol 0.
             pickle.dump(PICK_CELL, output)
         Logger.info(f"Wrote file {fname}")
     return mdict
+
 
 if __name__ == "__main__":
     picks = pd.read_csv("/media/genevieve/sandisk4TB/aargau-data/picks_merged_CHAA_V2_normZ.csv")
 
     # Select picks
-    for comp in ["ZZ"]: #"ZR", "RZ","ZZ-ZR","RR","all4","RR-RZ"]:
+    for comp in ["ZZ"]:  # "ZR", "RZ","ZZ-ZR","RR","all4","RR-RZ"]:
         print(comp)
-        lag = "sym" #"sym"
+        lag = "sym"  # "sym"
         pick_method = "topology"
         stack_method = "pws"
         score_thresh = 1.0
@@ -110,20 +117,20 @@ if __name__ == "__main__":
         ratio_d_lambda = 1.5
         # picks = pd.read_csv("/media/savardg/sandisk4TB/riehen-data/picks_merged_CHRI_V2.csv")
         if comp == "all4":
-            df = picks.loc[(picks.pick_method==pick_method) & 
-                             (picks.score >= score_thresh) & 
-    #                          (picks.stack_method==stack_method) & 
-    #                          (picks.snr_nbG >= 5) &
-    #                          (picks.ratio_d_lambda >= ratio_d_lambda) &
-                             (picks.component==comp), :]
+            df = picks.loc[(picks.pick_method == pick_method) &
+                           (picks.score >= score_thresh) &
+                           #                          (picks.stack_method==stack_method) &
+                           #                          (picks.snr_nbG >= 5) &
+                           #                          (picks.ratio_d_lambda >= ratio_d_lambda) &
+                           (picks.component == comp), :]
         else:
-            df = picks.loc[(picks.pick_method==pick_method) & 
-                            (picks.score >= 1) & 
-                            (picks.component==comp) &
-                            (picks.stack_method==stack_method) &                     
-                            (picks.lag==lag) &
-                            (picks.snr_nbG >= 5) &
-                            (picks.ratio_d_lambda >= ratio_d_lambda) , :]
+            df = picks.loc[(picks.pick_method == pick_method) &
+                           (picks.score >= 1) &
+                           (picks.component == comp) &
+                           (picks.stack_method == stack_method) &
+                           (picks.lag == lag) &
+                           (picks.snr_nbG >= 5) &
+                           (picks.ratio_d_lambda >= ratio_d_lambda), :]
         if multiplier > 0:
             # Filter within X standard deviations
             df = picks_recursive_filtering(df, multiplier=multiplier)
@@ -137,5 +144,5 @@ if __name__ == "__main__":
 
         # Make PICK_CELL and save
         t0 = time.time()
-        mdict= make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=True, save_python=True)
+        mdict = make_pick_cell_from_dataframe(picks, station_fname, output_fname, save_mat=True, save_python=True)
         print(f"Elapsed time: {time.time() - t0} s.")

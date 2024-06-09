@@ -7,7 +7,7 @@ This module contains the functions necessary to convert station info and dispers
  - stat_grid.mat
  - kernel.mat
  - pick_cell.mat
- 
+
 Genevieve Savard @ UniGe (last updated 04.08.2023)
 """
 
@@ -64,6 +64,7 @@ def make_stat_list(STACK_DIR, station_file, fs, output_folder, save_mat=True, sa
     Logger.info(f"Number of stations in CSV station file: {len(stadf.station.values)}")
     stadf = stadf[stadf['station'].isin(stalst_h5)]  # Keep station actually used for stacking
     Logger.info(f"Number of stations in common: {len(stadf.station.values)}")
+    stadf.sort_values(by='station', inplace=True)
     net_list = stadf["network"].values
     stat_list = stadf["station"].values
     stat_lat = stadf["latitude"].values
