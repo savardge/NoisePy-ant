@@ -523,7 +523,7 @@ def make_pick_cell_from_dataframe(df, station_fname, output_fname, uncertainty=F
     Ntot = 0
     ts = time.time()
     for ss in range(nb_stat - 1):  # Iterate over virtual sources
-        if ss % 50 == 0:
+        if ss % 20 == 0:
             print(f"{ss}/{nb_stat}: {time.time() - ts} s elapsed")
         snet = net_list[ss]  # network for source station
         ssta = stat_list[ss]  # source station name
