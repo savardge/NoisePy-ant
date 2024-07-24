@@ -67,7 +67,7 @@ azimuth = data["azimuth"]  # Azimuth of each station pair
 backazimuth = data["backazimuth"]  # Backazimuth of each station pair
 distance = data["r"]  # Inter-station distances
 ccf = data["ncts"]  # Stacked CCFs in time-domain
-dt = 1 / data["dt"]  # sampling time interval
+dt = data["dt"]  # sampling time interval
 tt_corr = data["t"]  # Time lags
 
 # Define bandpass filter and apply
