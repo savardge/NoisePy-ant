@@ -1,0 +1,25 @@
+# config/example.yaml
+
+grid:
+  min_lat: 47.237194
+  max_lat: 47.464396
+  min_lon: 6.945514
+  max_lon: 7.491476
+  dx_km: 1.0
+  dy_km: 1.0
+
+inversion:
+  period: 1.0
+  sigma: 0.00005
+  LC: 1.0
+
+thresholds:
+  max_std_percent: 15
+  min_count: 2
+
+files:
+  station_file: data/stations_from_FDSN.csv
+  pick_file: data/picks_love.csv
+  background_map: data/hautesorne_background_terrain_faults.png
+  output_dir: output/
+

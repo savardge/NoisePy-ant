@@ -1,0 +1,13 @@
+# Core scientific stack
+numpy
+pandas
+matplotlib
+scipy
+yaml  # Provided by PyYAML
+
+# Optional for extended environments
+tqdm  # progress bars (optional)
+seaborn  # better histograms (optional)
+
+# You can install with:
+# pip install -r requirements.txt
