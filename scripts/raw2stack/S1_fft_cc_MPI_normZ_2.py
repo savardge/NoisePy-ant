@@ -54,7 +54,19 @@ def setup_logging(level="INFO"):
 def load_config(path: Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"Params file not found: {path}")
-    return yaml.safe_load(path.read_text())
+    fc_para = yaml.safe_load(path.read_text())
+    # load useful download info if start from ASDF
+    dfile = os.path.join(fc_para['DATADIR'], 'download_info.yaml')
+    with open(dfile, "r") as file:
+        down_info = yaml.safe_load(file)
+    samp_freq = down_info['samp_freq']
+
+    # Add down_info parameters to fc_para
+    fc_para.update(down_info)
+
+    dt = 1 / samp_freq
+    fc_para['dt'] = dt
+    return fc_para
 
 
 def validate_paths(cfg: dict):
