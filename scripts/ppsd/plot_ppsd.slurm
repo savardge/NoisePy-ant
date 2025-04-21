@@ -10,7 +10,7 @@
 #SBATCH --mail-type=START,END
 #SBATCH --mail-user=genevieve.savard@unige.ch
 
-#set -euo pipefail
+set -euo pipefail
 mkdir -p outslurm
 
 fname="station_locations_riehen.csv"
