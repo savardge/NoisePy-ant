@@ -138,7 +138,7 @@ def main():
     config = {
         "source": "UNIGE CDFF",
         "station_location_file": "/home/users/s/savardg/aargau_ant/text_files/station_locations_noisepy.csv",
-        "resp_file": "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV",
+        "resp_file": "/home/users/s/savardg/NoisePy-ant/smartsolo/stationxml/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_fromMilliVolts",
         "network_code": "RS",  # Two-letter network code
         "network_desc": "MIGRATE RoccaNodes deployment 2023",
         "start_date": UTCDateTime(2020, 12, 4),  # Experiment start date
