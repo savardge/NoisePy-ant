@@ -1,165 +1,174 @@
-from obspy.core.inventory import Inventory, Network, Station, Channel, Site
-from obspy import read_inventory, UTCDateTime
-from obspy.core.inventory.util import Equipment
 import pandas as pd
+from obspy import read_inventory, UTCDateTime
+from obspy.core.inventory import Inventory, Network, Station, Channel, Site
+from obspy.core.inventory.util import Equipment
 import os
 
-##### INPUT ########
-source = "UNIGE CDFF"
 
-# INPUT PATHS
-# CSV file with station locations columns: station,
-station_location_file = "/home/users/s/savardg/aargau_ant/text_files/station_locations_noisepy.csv"
-# RESP response file for SmartSolo IGU16HR 5Hz 3C
-resp_file = "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV" # Input RESP file
+def read_station_data(station_location_file):
+    """Read and process station location data from a CSV."""
+    stainfo = pd.read_csv(station_location_file)
+    stainfo.station = stainfo.station.astype(str)  # Ensure station names are strings
+    return stainfo
 
-# INPUT PARAMS
-network_code = "RS"  # Give a 2-letter network code
-network_desc = "MIGRATE RoccaNodes deployment 2023" # Short description
-start_date = UTCDateTime(2020, 12, 4)  # Start date of the experiment
-end_date = UTCDateTime(2021, 1, 6)  # Last date of experiment + 1 day
-sampling_rate = 250  # in Hz. Must match setup of nodes (4 ms = 250 Hz)
-channel_prefix = "DP"  # First 2 letters of the SEED channel code. Use DP for SmartSolo. See https://ds.iris.edu/ds/nodes/dmc/data/formats/seed-channel-naming/
-zero_elevation = False  # To fix elevation at zero. Otherwise need "elevation" column in stainfo
 
-# OUTPUT PATHS
-outdir = "/home/users/s/savardg/scratch/aargau/resp"  # Directory where to write 1 StationXML file per station
-output_file = "RoccaNodes_stations_nodes.xml"  # Output StationXML file with all stations and their response
+def build_sensor(serial_number, start_date, end_date):
+    """Return an Equipment object representing the sensor."""
+    return Equipment(
+        type="SmartSolo 3C",
+        description="3C 10 Hz",
+        manufacturer="Dynamic Technology (DTCC)",
+        model="IGU-16",
+        serial_number=serial_number,
+        installation_date=start_date,
+        removal_date=end_date,
+    )
 
-######################
-# Read in station locations
-stainfo = pd.read_csv(station_location_file)
-stainfo.station = stainfo.station.astype(str)
-stations = list(stainfo['station'])
 
-# Get response
-dum = read_inventory(resp_file, format='RESP')
-response = dum.networks[0].stations[0].channels[0].response
+def build_channel(code, latitude, longitude, elevation, sampling_rate, start_date, end_date, azimuth, dip,
+                  location_code):
+    """Create a Channel with the specified parameters."""
+    return Channel(
+        code=code,
+        location_code=location_code,
+        latitude=latitude,
+        longitude=longitude,
+        elevation=elevation,
+        depth=0,
+        azimuth=azimuth,
+        dip=dip,
+        sample_rate=sampling_rate,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-# We'll first create all the various objects. These strongly follow the
-# hierarchy of StationXML files.
-inv = Inventory(
-    # We'll add networks later.
-    networks=[],
-    # The source should be the id whoever create the file.
-    source=source)
 
-net = Network(
-    # This is the network code according to the SEED standard.
-    code=network_code,
-    # A list of stations. We'll add one later.
-    stations=[],
-    description=network_desc,
-    #description="March-May deployment",
-    # Start-and end dates are optional.
-    start_date=start_date,
-    end_date=end_date
-)
-
-for station in stations:    
-    if station in list(set([sta.code for sta in net.stations])): continue # skip duplicate        
-    latitude = stainfo.loc[stainfo['station'] == station, 'latitude'].values[0]
-    longitude = stainfo.loc[stainfo['station'] == station, 'longitude'].values[0]
-    serial_number = stainfo.loc[stainfo['station'] == station, 'serial_number'].values[0]
-    if zero_elevation:
-        elevation = 0
-    else:
-        elevation = stainfo.loc[stainfo['station'] == station, 'elevation'].values[0]
-    # create sensor object
-    sensor = Equipment(type='SmartSolo 3C',
-                   description='3C 10 Hz',
-                   manufacturer='Dynamic Technology (DTCC)',
-                   model='IGU-16',
-                   serial_number=serial_number,
-                   installation_date=start_date,
-                   removal_date=end_date
-                   )
-    sta = Station(
-        # This is the station code according to the SEED standard.
-        code=station,
+def build_station(
+        station_code,
+        latitude,
+        longitude,
+        elevation,
+        start_date,
+        sensor,
+        channel_prefix,
+        sampling_rate,
+        response,
+        end_date,
+        location_code,
+):
+    """Build a complete Station object with channels and response."""
+    station = Station(
+        code=station_code,
         latitude=latitude,
         longitude=longitude,
         elevation=elevation,
         creation_date=start_date,
-        site=Site(name="")
+        site=Site(name=""),
     )
 
-    chaN = Channel(
-        # This is the channel code according to the SEED standard.
-        code=channel_prefix +"N",
-        # This is the location code according to the SEED standard.
-        location_code="",
-        # Note that these coordinates can differ from the station coordinates.
-        latitude=latitude,
-        longitude=longitude,
-        elevation=elevation,
-        depth=0,
-        azimuth=0,
-        dip=0.0,
-        sample_rate=sampling_rate,
-        start_date=start_date,
-        end_date=end_date
-    )
-    chaE = Channel(
-        # This is the channel code according to the SEED standard.
-        code=channel_prefix +"E",
-        # This is the location code according to the SEED standard.
-        location_code="",
-        # Note that these coordinates can differ from the station coordinates.
-        latitude=latitude,
-        longitude=longitude,
-        elevation=elevation,
-        depth=0,
-        azimuth=90,
-        dip=0.0,
-        sample_rate=sampling_rate,
-        start_date=start_date,
-        end_date=end_date
-    )
-    chaZ = Channel(
-        # This is the channel code according to the SEED standard.
-        code=channel_prefix +"Z",
-        # This is the location code according to the SEED standard.
-        location_code="",
-        # Note that these coordinates can differ from the station coordinates.
-        latitude=latitude,
-        longitude=longitude,
-        elevation=elevation,
-        depth=0,
-        azimuth=0.0,
-        dip=-90.0,
-        sample_rate=sampling_rate,
-        start_date=start_date,
-        end_date=end_date
+    # Add channels with response and sensor
+    for suffix, azimuth, dip in [("N", 0, 0.0), ("E", 90, 0.0), ("Z", 0, -90.0)]:
+        channel_code = f"{channel_prefix}{suffix}"
+        channel = build_channel(
+            code=channel_code,
+            latitude=latitude,
+            longitude=longitude,
+            elevation=elevation,
+            sampling_rate=sampling_rate,
+            start_date=start_date,
+            end_date=end_date,
+            azimuth=azimuth,
+            dip=dip,
+            location_code=location_code,
+        )
+        channel.response = response
+        channel.sensor = sensor
+        station.channels.append(channel)
+
+    return station
+
+
+def build_inventory(stainfo, response, config):
+    """Build the full inventory with networks, stations, and channels."""
+    inventory = Inventory(networks=[], source=config["source"])
+
+    network = Network(
+        code=config["network_code"],
+        stations=[],
+        description=config["network_desc"],
+        start_date=config["start_date"],
+        end_date=config["end_date"],
     )
 
+    for _, row in stainfo.iterrows():
+        station_code = row.station
+        # Avoid duplicate station entries
+        if station_code in [sta.code for sta in network.stations]:
+            continue
 
-    # Now tie it all together.
-    chaN.response = response
-    chaE.response = response
-    chaZ.response = response
-    chaN.sensor = sensor
-    chaE.sensor = sensor
-    chaZ.sensor = sensor
-    sta.channels.append(chaN)
-    sta.channels.append(chaE)
-    sta.channels.append(chaZ)
-    net.stations.append(sta)
+        latitude = row.latitude
+        longitude = row.longitude
+        serial_number = row.serial_number
+        elevation = 0 if config["zero_elevation"] else row.elevation
 
-inv.networks.append(net)
+        # Build sensor and station
+        sensor = build_sensor(serial_number, config["start_date"], config["end_date"])
+        station = build_station(
+            station_code,
+            latitude,
+            longitude,
+            elevation,
+            config["start_date"],
+            sensor,
+            config["channel_prefix"],
+            config["sampling_rate"],
+            response,
+            config["end_date"],
+            config["location_code"],
+        )
 
-# And finally write it to a StationXML file. We also force a validation against
-# the StationXML schema to ensure it produces a valid StationXML file.
-#
-# Note that it is also possible to serialize to any of the other inventory
-# output formats ObsPy supports.
-inv.write(output_file, format="stationxml", validate=True)
+        network.stations.append(station)
 
-# Write 1 file per station
-if not os.path.exists(outdir):
-    os.mkdir(outdir)
-for sta in inv[0]:
-    fname = os.path.join(outdir, f"{network_code}.{sta.code}.xml")
-    inv.select(station=sta.code).write(fname, format="StationXML")
-    print(fname)
-    
+    inventory.networks.append(network)
+    return inventory
+
+
+def main():
+    # Configuration parameters (inline)
+    config = {
+        "source": "UNIGE CDFF",
+        "station_location_file": "/home/users/s/savardg/aargau_ant/text_files/station_locations_noisepy.csv",
+        "resp_file": "/home/users/s/savardg/smartsolo/sensor_response_info/RESP.XX.NS680..SPZ.DTSOLO.5.1850.43000.76_6_toV",
+        "network_code": "RS",  # Two-letter network code
+        "network_desc": "MIGRATE RoccaNodes deployment 2023",
+        "start_date": UTCDateTime(2020, 12, 4),  # Experiment start date
+        "end_date": UTCDateTime(2021, 1, 6),  # Experiment end date
+        "sampling_rate": 250,  # Sampling rate in Hz
+        "channel_prefix": "DP",  # Prefix for SEED channel code
+        "location_code": "01",  # Customizable location code for all channels
+        "zero_elevation": False,  # If true, elevation is fixed to zero
+        "outdir": "/home/users/s/savardg/scratch/aargau/resp",  # Directory for one file per station
+        "output_file": "RoccaNodes_stations_nodes.xml",  # Consolidated StationXML file
+    }
+
+    # Load station information and response data
+    stainfo = read_station_data(config["station_location_file"])
+    response_inventory = read_inventory(config["resp_file"], format="RESP")
+    response = response_inventory.networks[0].stations[0].channels[0].response
+
+    # Build inventory
+    inventory = build_inventory(stainfo, response, config)
+
+    # Write to output StationXML file
+    inventory.write(config["output_file"], format="stationxml", validate=True)
+
+    # Write one file per station
+    os.makedirs(config["outdir"], exist_ok=True)
+    for station in inventory[0]:
+        filename = os.path.join(config["outdir"], f"{config['network_code']}.{station.code}.xml")
+        inventory.select(station=station.code).write(filename, format="stationxml")
+        print(f"Created: {filename}")
+
+
+if __name__ == "__main__":
+    main()

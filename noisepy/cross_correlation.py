@@ -255,9 +255,19 @@ def noise_processing_3comps(fft_para, dataSN, dataSE, dataSZ):
             whiteZ = np.zeros(shape=dataSZ.shape, dtype=dataSZ.dtype)
             for kkk in range(N):
                 move_age_z = moving_ave(np.abs(dataSZ[kkk, :]), smooth_N)
-                whiteN[kkk, :] = dataSN[kkk, :] / move_age_z
-                whiteE[kkk, :] = dataSE[kkk, :] / move_age_z
-                whiteZ[kkk, :] = dataSZ[kkk, :] / move_age_z
+
+                # Check if 0 or NaN
+                if np.any(move_age_z == 0):
+                    logging.error("move_age_z contains zeros.")
+                if np.any(np.isnan(move_age_z)):
+                    logging.error("move_age_z contains NaN values.")
+
+                # Guard against division by Zero
+                eps = 1e-10  # A small constant
+
+                whiteN[kkk, :] = dataSN[kkk, :] / (move_age_z + eps)
+                whiteE[kkk, :] = dataSE[kkk, :] / (move_age_z + eps)
+                whiteZ[kkk, :] = dataSZ[kkk, :] / (move_age_z + eps)
 
     else:  # don't normalize
         whiteN = dataSN
