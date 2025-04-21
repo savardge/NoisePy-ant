@@ -23,6 +23,7 @@ import gc
 import time
 
 from pathlib import Path
+from typing import List
 import numpy as np
 import pandas as pd
 import yaml
@@ -80,7 +81,7 @@ def parse_memory_limit():
     raise ValueError(f"Unsupported unit {unit} in memory limit")
 
 
-def list_chunks(data_dir: Path) -> list[Path]:
+def list_chunks(data_dir: Path) -> List[Path]:
     return sorted(data_dir.glob("*.h5"))
 
 
@@ -103,7 +104,7 @@ def estimate_memory(nsta: int, cc_len: int, step: int, samp_freq: float,
         logging.warning(f"High memory use: {req_gb/mem_limit:.0%}")
 
 
-def load_waveform_list(chunk: Path) -> list[str]:
+def load_waveform_list(chunk: Path) -> List[str]:
     with pyasdf.ASDFDataSet(str(chunk), mode='r', mpi=False) as ds:
         return ds.waveforms.list()
 
@@ -185,7 +186,7 @@ def process_chunk(chunk: Path, ccf_dir: Path, cfg: dict, mem_limit: float):
             meta.append((sta, comp))
             idx += 1
 
-    ds.close()
+    del ds
 
     cc_file = ccf_dir / f"{chunk.stem}.h5"
     with pyasdf.ASDFDataSet(str(cc_file), mode='a', mpi=False) as ccf:
