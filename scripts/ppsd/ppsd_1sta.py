@@ -7,7 +7,8 @@ using ObsPy, and optionally creates plots. Configuration is provided through a Y
 Usage:
     python ppsd_station.py [station] [channel] [config_file]
 
-Author: Refactored by ChatGPT (Python GPT)
+Author: Genevieve Savard
+Refactored by: ChatGPT
 """
 
 import os
