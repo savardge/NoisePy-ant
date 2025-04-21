@@ -1,236 +1,220 @@
-""" Calculate PPSD for one station for all dates available and optionally make plots.
-Call:
-python ppsd_1sta.py [station] [channel] [config_file]
+"""
+PPSD Generator Script for a Single Station
 
-config_file contains following parameters:
-- datadir
-- figdir
-- npzdir
-- xmlfile
-- makefig # Whether to make plots or not
+This script reads MiniSEED files, computes the Probabilistic Power Spectral Density (PPSD)
+using ObsPy, and optionally creates plots. Configuration is provided through a YAML file.
 
-*** IMPORTANT: Update line 155-156 for path ***
+Usage:
+    python ppsd_station.py [station] [channel] [config_file]
 
+Author: Refactored by ChatGPT (Python GPT)
 """
 
-import sys
-import obspy
-import glob
 import os
+import sys
+import glob
+import logging
+import yaml
+import argparse
+from typing import List, Optional
+
+import obspy
+from obspy import read_inventory, read, UTCDateTime
 from obspy.signal import PPSD
-from obspy.imaging.cm import pqlx
+from obspy.imaging.cm import pqlx, obspy_sequential
 from obspy.imaging.util import _set_xaxis_obspy_dates
-from obspy.imaging.cm import obspy_sequential
 import numpy as np
 import matplotlib.pyplot as plt
-import yaml
 import matplotlib
 
-# Plot params
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+# Matplotlib configuration for consistent styling
 plt.rcParams["figure.figsize"] = (18, 12)
-font = {'weight' : 'normal',
-        'size'   : 22}
+font = {'weight': 'normal', 'size': 22}
 matplotlib.rc('font', **font)
 
+# Ensure output directories exist before saving figures
+def ensure_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+        logging.info(f"Created directory: {path}")
 
-def plot_spectrogram(self, cmap=obspy_sequential, clim=None, xlims=None, ylims=None, grid=True,
-                         filename=None, show=True):
+def load_config(path: str) -> dict:
+    """Load configuration from a YAML file."""
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    logging.info(f"Loaded config: {path}")
+    return config
+
+
+def find_mseed_files(datadir: str, station: str, channel: str, pattern_template: Optional[str] = None) -> List[str]:
+    """Find MiniSEED files using a pattern template from config or a default fallback."""
+    if pattern_template:
+        pattern = pattern_template.format(datadir=datadir, station=station, channel=channel)
+    else:
+        pattern = os.path.join(datadir, "*", station, channel, "*")
+    files = glob.glob(pattern)
+    if not files:
+        logging.warning(f"No MiniSEED files found with pattern: {pattern}")
+    return files
+
+
+def create_ppsd(files: List[str], inv_path: str, npz_path: str, overwrite: bool = False) -> PPSD:
     """
-    Plot the temporal evolution of the PSD in a spectrogram-like plot.
+    Create or load PPSD object.
 
-    .. note::
-        For example plots see the :ref:`Obspy Gallery <gallery>`.
+    Parameters:
+        files: List of MiniSEED files
+        inv_path: Path to StationXML file
+        npz_path: Output .npz file to store/load PPSD
+        overwrite: Whether to overwrite existing PPSD .npz
 
-    :type cmap: :class:`matplotlib.colors.Colormap`
-    :param cmap: Specify a custom colormap instance. If not specified, then
-        the default ObsPy sequential colormap is used.
-    :type clim: list
-    :param clim: Minimum/maximum dB values for lower/upper end of colormap.
-        Specified as type ``float`` or ``None`` for no clipping on one end
-        of the scale (e.g. ``clim=[-150, None]`` for a lower limit of
-        ``-150`` dB and no clipping on upper end).
-    :type grid: bool
-    :param grid: Enable/disable grid in histogram plot.
-    :type filename: str
-    :param filename: Name of output file
-    :type show: bool
-    :param show: Enable/disable immediately showing the plot.
+    Returns:
+        PPSD object
     """
-    import matplotlib.pyplot as plt
+    if os.path.exists(npz_path) and not overwrite:
+        logging.info(f"Loading PPSD from cache: {npz_path}")
+        return PPSD.load_npz(npz_path)
 
+    inv = read_inventory(inv_path)
+    trace = read(files[0], headonly=True)[0]
+    ppsd = PPSD(trace.stats, metadata=inv)
+
+    for f in files:
+        try:
+            trace = read(f)[0]
+            ppsd.add(trace)
+        except Exception as e:
+            logging.warning(f"Failed to read file {f}: {e}")
+
+    logging.info(f"Processed {len(ppsd.times_processed)} PSD segments.")
+    logging.info(f"Saving PPSD to: {npz_path}")
+    ppsd.save_npz(npz_path)
+    return ppsd
+
+
+def plot_spectrogram(ppsd: PPSD, filename: Optional[str] = None, cmap=obspy_sequential,
+                     clim=None, xlims=None, ylims=None, grid=True, show=True):
+    """
+    Plot a spectrogram showing temporal evolution of PSD values.
+
+    Parameters:
+        ppsd: PPSD object
+        filename: If provided, saves figure to this path
+        cmap: Colormap to use
+        clim: Color limits (min, max) in dB
+        xlims: Tuple of (start, end) time limits
+        ylims: Tuple of (min, max) period limits
+        grid: Show grid or not
+        show: Show figure interactively
+
+    Returns:
+        matplotlib Figure object
+    """
     fig, ax = plt.subplots()
-
+    yedges = ppsd.period_xedges
     quadmeshes = []
-    yedges = self.period_xedges
 
-    for times, psds in self._get_gapless_psd():
-        xedges = [t.matplotlib_date for t in times] + \
-            [(times[-1] + self.step).matplotlib_date]
+    for times, psds in ppsd._get_gapless_psd():
+        xedges = [t.matplotlib_date for t in times] + [(times[-1] + ppsd.step).matplotlib_date]
         meshgrid_x, meshgrid_y = np.meshgrid(xedges, yedges)
         data = np.array(psds).T
-
-        quadmesh = ax.pcolormesh(meshgrid_x, meshgrid_y, data, cmap=cmap,
-                                 zorder=-1)
-        quadmeshes.append(quadmesh)
+        qm = ax.pcolormesh(meshgrid_x, meshgrid_y, data, cmap=cmap, zorder=-1)
+        quadmeshes.append(qm)
 
     if clim is None:
         cmin = min(qm.get_clim()[0] for qm in quadmeshes)
         cmax = max(qm.get_clim()[1] for qm in quadmeshes)
         clim = (cmin, cmax)
 
-    for quadmesh in quadmeshes:
-        quadmesh.set_clim(*clim)
+    for qm in quadmeshes:
+        qm.set_clim(*clim)
 
-    cb = plt.colorbar(quadmesh, ax=ax)
-
+    cb = plt.colorbar(qm, ax=ax)
+    cb.ax.set_ylabel('Amplitude [dB]')
+    ax.set_ylabel('Period [s]')
+    ax.set_yscale("log")
     if grid:
         ax.grid()
-
-    if self.special_handling is None:
-        cb.ax.set_ylabel('Amplitude [$m^2/s^4/Hz$] [dB]')
-    elif self.special_handling == "infrasound":
-        ax.set_ylabel('Amplitude [$Pa^2/Hz$] [dB]')
-    else:
-        cb.ax.set_ylabel('Amplitude [dB]')
-    ax.set_ylabel('Period [s]')
-
-    fig.autofmt_xdate()
     _set_xaxis_obspy_dates(ax)
-
-    ax.set_yscale("log")
     if xlims:
         ax.set_xlim(xlims)
-    else:
-        ax.set_xlim(self.times_processed[0].matplotlib_date,
-                    (self.times_processed[-1] + self.step).matplotlib_date)
     if ylims:
         ax.set_ylim(ylims)
-    else: 
-        ax.set_ylim(yedges[0], yedges[-1])
-    try:
-        ax.set_facecolor('0.8')
-    # mpl <2 has different API for setting Axes background color
-    except AttributeError:
-        ax.set_axis_bgcolor('0.8')
-
+    ax.set_facecolor('0.8')
     fig.tight_layout()
 
-    if filename is not None:
-        plt.savefig(filename)
-        plt.close()
+    if filename:
+        ensure_dir(os.path.dirname(filename))
+        fig.set_size_inches(16, 7)
+        fig.savefig(filename, format="PNG")
+        plt.close(fig)
+        logging.info(f"Saved spectrogram to: {filename}")
     elif show:
-        plt.draw()
         plt.show()
-    else:
-        plt.draw()
     return fig
 
 
-# def fix_trace(tr):
-#     """ Fix trace amplitude for SmartSolo geophone"""
-#     tr.stats.sampling_rate = 250.0  # Force sampling rate to be exactly 250
-#     tr.data /= 1000  # Convert mV to V
-#     return tr
+def generate_figures(ppsd: PPSD, config: dict, station: str, channel: str):
+    """Generate and save PPSD, temporal evolution, and spectrogram plots."""
+    figdir = config["figdir"]
+    ensure_dir(figdir)
+    outfile1 = os.path.join(figdir, f"{station}_{channel}_ppsd.png")
+    outfile2 = os.path.join(figdir, f"{station}_{channel}_temporal.png")
+    outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
 
-# ***
+    minT = config["minT"]
+    maxT = config["maxT"]
+    period_bins = config["period_bins"]
+    starttime = UTCDateTime(config["starttime"])._get_datetime()
+    endtime = UTCDateTime(config["endtime"])._get_datetime()
 
-# Input parameters
-station = sys.argv[1]  # "3006977"
-channel = sys.argv[2]  # DPZ
-config_file = sys.argv[3]  # YAML File with parameters (paths and options)
-
-# Paths
-with open(config_file, "r") as file:
-    config = yaml.safe_load(file)
-print(config)
-datadir = config['datadir']  # "/home/share/cdff/riehen/raw_data/"
-figdir = config["figdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/figures"
-npzdir = config["npzdir"]  # "/home/users/s/savardg/scratch/riehen/ppsd/ppsd_npz"
-xmlfile = config["stationxml_file"]  # "/home/users/s/savardg/riehen/ppsd/riehen_stations.xml"
-inv = obspy.read_inventory(xmlfile)
-# smartsolo = config["smartsolo"]  #True  # Whether we are doing PPSD for smartSolo geophones or not
-makefig = config["makefig"]  # False
-overwrite = config["overwrite"]  # False
-
-# Period limits for plotting
-minT = config["minT"]  # 0.02  # in seconds
-maxT = config["maxT"]  #10.0  # in seconds
-
-# Period bins to plot evolution over datetime
-period_bins = config["period_bins"]  #"[0.1, 0.2, 1] # in s
-
-# Start-end time of deployment for plotting
-starttime = obspy.UTCDateTime(config["starttime"])._get_datetime()  # start time of deployment
-endtime = obspy.UTCDateTime(config["starttime"])._get_datetime()  # end time of deployment
-
-# Output files
-npz_filename = os.path.join(npzdir, f"{station}_{channel}_ppsd.npz")
-outfile1 = os.path.join(figdir, f"{station}_{channel}_ppsd.png")
-outfile2 = os.path.join(figdir, f"{station}_{channel}_temporal.png")
-outfile3 = os.path.join(figdir, f"{station}_{channel}_spectrogram.png")
-
-if not os.path.exists(npz_filename) or overwrite:
-    # File list
-    # sfiles = glob.glob(os.path.join(datadir, station, f"*{channel}*"))
-    pattern = os.path.join(datadir, "*", station, channel, "*")
-    #pattern = os.path.join(datadir, "*", f"*{station}*{channel[-1]}.miniseed")
-    print(f"Searching this pattern to find miniseed data (change script L176 if wrong): " + pattern)
-    sfiles = glob.glob(pattern)
-    
-    #print(len(sfiles))
-    
-    # Initialize ppsd object
-    trace = obspy.read(sfiles[0], headonly=True)[0]
-    # if smartsolo:
-    #     trace = fix_trace(trace)
-    ppsd = PPSD(trace.stats, metadata=inv)
-
-    # Add other files
-    for sfile in sfiles:
-        try:
-            trace = obspy.read(sfile)[0]
-        except:
-            print(f"ERROR while reading file {sfile}. Skipping")
-            continue
-        # if smartsolo: trace = fix_trace(trace)
-        ppsd.add(trace)
-
-    print("number of psd segments:", len(ppsd.times_processed))
-
-    # SAVE OBJECT
-    print(f"Saving PPSD object to pickle: {npz_filename}")
-    ppsd.save_npz(npz_filename)
-    
-else:
-    if makefig:
-        print(f"Reading PPSD object from pickle: {npz_filename}")
-        ppsd = PPSD.load_npz(npz_filename)
-    else:
-        print(f"PPSD object already created: {npz_filename}.")
-
-# MAKE FIGS
-if makefig:
+    # Basic PPSD plot
     fig = ppsd.plot(show=False, show_mean=True, cmap=pqlx)
-    ax = fig.axes[0]
-    ax.set_xlim((minT, maxT))
-    coverage = fig.axes[1]
-    fig.delaxes(coverage)
-    print(f"Saving figure to: {outfile1}")
+    fig.axes[0].set_xlim((minT, maxT))
+    fig.delaxes(fig.axes[1])
     fig.set_size_inches(15, 6)
-    plt.savefig(outfile1, format="PNG")
-    plt.close()
+    fig.savefig(outfile1, format="PNG")
+    plt.close(fig)
+    logging.info(f"Saved PPSD figure to: {outfile1}")
 
+    # Temporal evolution plot
     fig = ppsd.plot_temporal(period_bins, color=None, marker=".", show=False)
-    fig.suptitle(f"Evolution of PPSD at period bins of {period_bins[0]:.1f}, {period_bins[1]:.1f} and {period_bins[2]:.1f} s, station {station}")
-    print(f"Saving figure to: {outfile2}")
     fig.set_size_inches(14, 6)
-    plt.savefig(outfile2, format="PNG")
-    plt.close()
+    fig.savefig(outfile2, format="PNG")
+    plt.close(fig)
+    logging.info(f"Saved temporal plot to: {outfile2}")
 
-    xlims = (starttime, endtime)
-    #fig = plot_spectrogram(ppsd, cmap=pqlx, clim=(-160, -100), xlims=xlims, ylims=(minT, maxT), grid=False, show=False)
-    fig = plot_spectrogram(ppsd, cmap=pqlx, xlims=xlims, ylims=(minT, maxT), grid=False, show=False)
-    fig.set_size_inches(16, 7)
-    print(f"Saving figure to: {outfile3}")
-    plt.savefig(outfile3, format="PNG")
-    plt.close()
+    # Spectrogram
+    plot_spectrogram(ppsd, filename=outfile3, cmap=pqlx, xlims=(starttime, endtime),
+                     ylims=(minT, maxT), grid=False, show=False)
+
+
+def main():
+    """Main function to parse arguments and run the workflow."""
+    parser = argparse.ArgumentParser(description="Compute and optionally plot PPSD from MiniSEED files.")
+    parser.add_argument("station", type=str, help="Station code")
+    parser.add_argument("channel", type=str, help="Channel code")
+    parser.add_argument("config", type=str, help="Path to YAML config file")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    station, channel = args.station, args.channel
+
+    pattern_template = config.get("file_pattern")
+    files = find_mseed_files(config["datadir"], station, channel, pattern_template)
+    if not files:
+        logging.error("No MiniSEED files found. Exiting.")
+        sys.exit(1)
+
+    npz_path = os.path.join(config["npzdir"], f"{station}_{channel}_ppsd.npz")
+    ppsd = create_ppsd(files, config["stationxml_file"], npz_path, config.get("overwrite", False))
+
+    if config.get("makefig", False):
+        generate_figures(ppsd, config, station, channel)
+
+
+if __name__ == "__main__":
+    main()
