@@ -1,17 +1,17 @@
 # Input parameters for ppsd_1sta.py
 
 # Directory where raw MiniSEED data is stored.
-datadir: "/path/to/raw_data"
-file_pattern: "{datadir}/*/{station}/{channel}.D/*.miniseed"
+datadir: "/srv/beegfs/scratch/shares/cdff/thurgau/DATA_MSEED/TG_mseed/"
+file_pattern: "{datadir}/{station}/{channel}.D/*.miniseed"
 
 # Directory to save output PNG figures
-figdir: "/path/to/output/figures"
+figdir: "/srv/beegfs/scratch/shares/cdff/thurgau/ppsd/figs"
 
 # Directory to save or load the PPSD .npz files
-npzdir: "/path/to/output/ppsd_npz"
+npzdir: "/srv/beegfs/scratch/shares/cdff/thurgau/ppsd/npz"
 
 # Path to StationXML metadata file
-stationxml_file: "/path/to/station_metadata.xml"
+stationxml_file: "/home/share/cdff/thurgau/stationxml/TG_stations_nodes.xml"
 
 # Whether to create plots (True or False)
 makefig: true
@@ -24,8 +24,8 @@ minT: 0.02
 maxT: 10.0
 
 # Period bins for the temporal evolution plot
-period_bins: [0.1, 0.2, 1.0]
+period_bins: [0.5, 1.0, 3.0]
 
 # Start and end of deployment (used in spectrogram x-axis)
-starttime: "2023-01-01T00:00:00"
-endtime: "2023-12-31T23:59:59"
+starttime: "2025-03-06T00:00:00"
+endtime: "2025-04-07T23:59:59"
