@@ -42,7 +42,7 @@ vmin = 0.5  # 0.5
 vmax = 4.0  # 4.5
 dvel = 0.01
 vel = np.arange(vmin, vmax, dvel)
-maxgap = int(0.2 / 0.01)  # 0.2 km/s max jump in vg in time interval of dT=0.1 s
+maxgap = int(0.2 / 0.1)  # 0.2 km/s max jump in vg in time interval of dT=0.1 s
 min_score = 0.7  # minimum persistence score for topology method
 gauss_alpha = 5.  # Gaussian filter parameter to get SNR
 
