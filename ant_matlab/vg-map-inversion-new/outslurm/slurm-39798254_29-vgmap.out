@@ -1,0 +1,552 @@
+Period: 3.0
+
+sigma_vec =
+
+    0.0500    0.0600    0.0700    0.0800    0.0900
+
+
+output_root =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new'
+
+
+station_file =
+
+    '/home/users/s/savardg/riehen/noisepy-nodes/stations_nodes_sed_noisepy.csv'
+
+
+ans =
+
+    'Grid origin (SW corner) lat,long: ( 47.4813, 7.5296 )
+     Grid extent: 21.33 km by 20.20 km'
+
+
+ans =
+
+    'Number of stations inside grid: 231 (7 removed).'
+
+
+ans =
+
+    'Number of picks/ray paths: 4476'
+
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.2/inv_TV_rayleigh_sigma0.05_LC0.2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.2/inv_TV_rayleigh_sigma0.05_LC0.2_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=2.00e-01
+Elapsed time is 211.770898 seconds.
+[Warning: MATLAB has disabled some advanced graphics rendering features by
+switching to software OpenGL. For more information, click <a
+href="matlab:opengl('problems')">here</a>.] 
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.2/inv_TV_rayleigh_sigma0.06_LC0.2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.2/inv_TV_rayleigh_sigma0.06_LC0.2_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=2.00e-01
+Elapsed time is 204.454427 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.2/inv_TV_rayleigh_sigma0.07_LC0.2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.2/inv_TV_rayleigh_sigma0.07_LC0.2_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=2.00e-01
+Elapsed time is 210.234272 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.2/inv_TV_rayleigh_sigma0.08_LC0.2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.2/inv_TV_rayleigh_sigma0.08_LC0.2_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=2.00e-01
+Elapsed time is 210.033792 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.2/inv_TV_rayleigh_sigma0.09_LC0.2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.2/inv_TV_rayleigh_sigma0.09_LC0.2_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=2.00e-01
+Elapsed time is 210.015257 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.5/inv_TV_rayleigh_sigma0.05_LC0.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC0.5/inv_TV_rayleigh_sigma0.05_LC0.5_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=5.00e-01
+Elapsed time is 209.884850 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.5/inv_TV_rayleigh_sigma0.06_LC0.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC0.5/inv_TV_rayleigh_sigma0.06_LC0.5_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=5.00e-01
+Elapsed time is 209.659241 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.5/inv_TV_rayleigh_sigma0.07_LC0.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC0.5/inv_TV_rayleigh_sigma0.07_LC0.5_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=5.00e-01
+Elapsed time is 210.203036 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.5/inv_TV_rayleigh_sigma0.08_LC0.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC0.5/inv_TV_rayleigh_sigma0.08_LC0.5_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=5.00e-01
+Elapsed time is 209.348664 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.5/inv_TV_rayleigh_sigma0.09_LC0.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC0.5/inv_TV_rayleigh_sigma0.09_LC0.5_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=5.00e-01
+Elapsed time is 210.217185 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1/inv_TV_rayleigh_sigma0.05_LC1_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1/inv_TV_rayleigh_sigma0.05_LC1_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=1.00e+00
+Elapsed time is 209.376406 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1/inv_TV_rayleigh_sigma0.06_LC1_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1/inv_TV_rayleigh_sigma0.06_LC1_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=1.00e+00
+Elapsed time is 210.458535 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1/inv_TV_rayleigh_sigma0.07_LC1_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1/inv_TV_rayleigh_sigma0.07_LC1_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=1.00e+00
+Elapsed time is 209.240035 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1/inv_TV_rayleigh_sigma0.08_LC1_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1/inv_TV_rayleigh_sigma0.08_LC1_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=1.00e+00
+Elapsed time is 209.787160 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1/inv_TV_rayleigh_sigma0.09_LC1_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1/inv_TV_rayleigh_sigma0.09_LC1_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=1.00e+00
+Elapsed time is 209.333831 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1.5/inv_TV_rayleigh_sigma0.05_LC1.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC1.5/inv_TV_rayleigh_sigma0.05_LC1.5_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=1.50e+00
+Elapsed time is 210.003689 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1.5/inv_TV_rayleigh_sigma0.06_LC1.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC1.5/inv_TV_rayleigh_sigma0.06_LC1.5_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=1.50e+00
+Elapsed time is 209.598291 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1.5/inv_TV_rayleigh_sigma0.07_LC1.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC1.5/inv_TV_rayleigh_sigma0.07_LC1.5_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=1.50e+00
+Elapsed time is 209.446877 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1.5/inv_TV_rayleigh_sigma0.08_LC1.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC1.5/inv_TV_rayleigh_sigma0.08_LC1.5_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=1.50e+00
+Elapsed time is 209.796262 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1.5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1.5/inv_TV_rayleigh_sigma0.09_LC1.5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC1.5/inv_TV_rayleigh_sigma0.09_LC1.5_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=1.50e+00
+Elapsed time is 208.437283 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC2/inv_TV_rayleigh_sigma0.05_LC2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC2/inv_TV_rayleigh_sigma0.05_LC2_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=2.00e+00
+Elapsed time is 210.059656 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC2/inv_TV_rayleigh_sigma0.06_LC2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC2/inv_TV_rayleigh_sigma0.06_LC2_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=2.00e+00
+Elapsed time is 208.828527 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC2/inv_TV_rayleigh_sigma0.07_LC2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC2/inv_TV_rayleigh_sigma0.07_LC2_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=2.00e+00
+Elapsed time is 209.216699 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC2/inv_TV_rayleigh_sigma0.08_LC2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC2/inv_TV_rayleigh_sigma0.08_LC2_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=2.00e+00
+Elapsed time is 209.039373 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC2'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC2/inv_TV_rayleigh_sigma0.09_LC2_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC2/inv_TV_rayleigh_sigma0.09_LC2_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=2.00e+00
+Elapsed time is 209.424372 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC5/inv_TV_rayleigh_sigma0.05_LC5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.05_LC5/inv_TV_rayleigh_sigma0.05_LC5_T3.0.png'
+
+Launching inversion with sigma = 5.00e-02 LC=5.00e+00
+Elapsed time is 209.057218 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC5/inv_TV_rayleigh_sigma0.06_LC5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.06_LC5/inv_TV_rayleigh_sigma0.06_LC5_T3.0.png'
+
+Launching inversion with sigma = 6.00e-02 LC=5.00e+00
+Elapsed time is 206.634262 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC5/inv_TV_rayleigh_sigma0.07_LC5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.07_LC5/inv_TV_rayleigh_sigma0.07_LC5_T3.0.png'
+
+Launching inversion with sigma = 7.00e-02 LC=5.00e+00
+Elapsed time is 199.637273 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC5/inv_TV_rayleigh_sigma0.08_LC5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.08_LC5/inv_TV_rayleigh_sigma0.08_LC5_T3.0.png'
+
+Launching inversion with sigma = 8.00e-02 LC=5.00e+00
+Elapsed time is 197.365528 seconds.
+
+output_folder =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC5'
+
+
+output_fname =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC5/inv_TV_rayleigh_sigma0.09_LC5_T3.0.mat'
+
+
+output_fig =
+
+    '/home/users/s/savardg/scratch/matlab-swant/data-riehen/run6_dcV3_g200m/vg-maps-new/inv_TV_rayleigh_sigma0.09_LC5/inv_TV_rayleigh_sigma0.09_LC5_T3.0.png'
+
+Launching inversion with sigma = 9.00e-02 LC=5.00e+00
+Elapsed time is 194.784145 seconds.
+Done.Elapsed time is 6361.284615 seconds.
+{Error: File:
+/home/users/s/savardg/matlab-swant/scripts/vg-map-inversion-new/main_aargau.m
+Line: 8 Column: 17
+Invalid text character. Check for unsupported symbol, invisible character, or
+pasting of non-ASCII characters.
+} 
