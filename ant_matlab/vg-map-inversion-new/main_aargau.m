@@ -5,7 +5,7 @@ function []=main_aargau(period) %period, sigma, LC)
 tstart = tic;
 
 LC_vec = [0.2 0.5 1 1.5 2 5];
-sigma_vec = [0.0` 0.05 0.1 0.5 1]
+sigma_vec = [0.0 0.05 0.1 0.5 1]
 
 wave = 'rayleigh';
 

@@ -1,3 +1,11 @@
+from noisepy import binstack
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+
+matplotlib.rcParams.update({'font.size': 24})
+import glob, os
+
 import pyasdf
 import numpy as np
 import matplotlib.pyplot as plt
@@ -606,3 +614,231 @@ def plot_gather_wiggle(npzfile, component, station, figsize=(12, 6), binned=True
 
             plt.show()
             plt.close()
+
+
+# *** Make bin stack for all 9 cross-components and plot
+dt = 0.04
+dr = 150
+components = ["ZZ", "RR", "TT", "ZR", "RZ", "RT", "TR", "TZ", "ZT"]
+
+Dlist = []
+Dfiltlist = []
+# fig, axs = plt.subplots(3,3,sharex=False,sharey=False, figsize=(15,15))
+for i, comp in enumerate(components):
+    irow = i // 3
+    icol = i % 3
+
+    # Get data
+    # print(glob.glob(os.path.join("/home/users/s/savardg/riehen/extract_ncfs",f"riehen_ncfs_Allstack_pws_{comp}.npz")))
+    # data = np.load(glob.glob(os.path.join("/home/users/s/savardg/scratch/extract_ncfs","aargau",f"aargau_ncfs_wCH_Allstack_pws_{comp}.npz"))[0])
+    # data = np.load(glob.glob(os.path.join("/home/users/s/savardg/scratch/extract_ncfs","riehen",f"riehen_ncfs_wCH_Allstack_pws_{comp}.npz"))[0])
+    fname = glob.glob(os.path.join("/home/users/s/savardg/scratch/extract_ncfs/hautesorne",
+                                   f"hautesorne_ncts_coh_normZ_Allstack_pws_{comp}.npz"))[0]
+    # fname = glob.glob(os.path.join("/home/users/s/savardg/scratch/extract_ncfs/hautesorne",f"hautesorne_ncts_1bit_Allstack_pws_{comp}.npz"))[0]
+    print(fname)
+    data = np.load(fname)
+
+    ncts = data['ncts']
+    r = data['r'] * 1e3  # Inter-station distances in m
+    t = data['t']
+
+    # Get binned stack
+    Mp, Msym = binstack.symmetric_stack_time(ncts, t, r, plot=False)
+    ncts_binned, ncts_sym_binned_nonan, edges, tsym, distsym, _ = binstack.binned_stack_time(Mp, Msym, dt, t, r, dr=dr,
+                                                                                             plot=False)
+
+    # *** Remove nan rows
+    distances = edges[1:].astype(np.float32).copy()
+    np.nan_to_num(ncts_binned, copy=False)
+    np.nan_to_num(ncts_sym_binned_nonan, copy=False)
+    #     ncts_binned_nonan = np.delete(ncts_binned,ibad,axis=0)
+    #     distances = np.delete(distances0,ibad,axis=0)
+    #     print(np.sum(ncts_binned))
+
+    # Plot
+    # D = ncts_binned/np.max(np.abs(ncts_binned))
+    D = ncts_sym_binned_nonan / np.max(np.abs(ncts_sym_binned_nonan))
+    # D_filt = bandpass(D,freqmin=.2,freqmax=1,df=int(1/dt),corners=4, zerophase=True)
+    # D_filt = bandpass(D,freqmin=.1,freqmax=1,df=int(1/dt),corners=4, zerophase=True)
+    # D_filt = bandpass(D,freqmin=.5,freqmax=1.5,df=int(1/dt),corners=4, zerophase=False)
+
+    Dlist.append(D)
+    # Dfiltlist.append(D_filt)
+
+# Get FK
+# ["ZZ", "RR", "TT", "ZR", "RZ", "RT",  "TR", "TZ", "ZT"]
+ZZ = Dlist[0]
+RR = Dlist[1]
+TT = Dlist[2]
+ZR = Dlist[3]
+RZ = Dlist[4]
+RT = Dlist[5]
+TR = Dlist[6]
+TZ = Dlist[7]
+ZT = Dlist[8]
+ZRpRZ = (ZR + RZ) * 0.5
+ZRmRZ = (ZR - RZ) * 0.5
+
+f, k, fkZZ, _ = binstack.fk_decomposition_pos(ZZ, dt=dt, dr=dr)
+f, k, fkRR, _ = binstack.fk_decomposition_pos(RR, dt=dt, dr=dr)
+f, k, fkTT, _ = binstack.fk_decomposition_pos(TT, dt=dt, dr=dr)
+f, k, fkZR, _ = binstack.fk_decomposition_pos(ZR, dt=dt, dr=dr)
+f, k, fkRZ, _ = binstack.fk_decomposition_pos(RZ, dt=dt, dr=dr)
+f, k, fkRT, _ = binstack.fk_decomposition_pos(RT, dt=dt, dr=dr)
+f, k, fkTR, _ = binstack.fk_decomposition_pos(TR, dt=dt, dr=dr)
+f, k, fkTZ, _ = binstack.fk_decomposition_pos(TZ, dt=dt, dr=dr)
+f, k, fkZT, _ = binstack.fk_decomposition_pos(ZT, dt=dt, dr=dr)
+
+f, k, fkZRpRZ, _ = binstack.fk_decomposition_pos(ZRpRZ, dt=dt, dr=dr)
+f, k, fkZRmRZ, _ = binstack.fk_decomposition_pos(ZRmRZ, dt=dt, dr=dr)
+
+
+# Plotting limits
+fmax = .99 #1.3 # Hz
+indf = max(np.argwhere(f<fmax))[0]
+kmax = .5 #1. # 1/km
+indk = max(np.argwhere(k<kmax))[0]
+ikmax, ifmax = np.argwhere(fkZZ==max(fkZZ.ravel()))[0]
+
+# Plot
+fig, axs = plt.subplots(3,3,sharex=True,sharey=True, figsize=(15,15))
+axs[0][0].pcolormesh(f[:indf], k[:indk], fkRR[:indk,:indf], cmap='jet',shading='auto')
+axs[0][0].set_title("RR")
+axs[0][1].pcolormesh(f[:indf], k[:indk], fkRT[:indk,:indf], cmap='jet',shading='auto')
+axs[0][1].set_title("RT")
+axs[0][2].pcolormesh(f[:indf], k[:indk], fkRZ[:indk,:indf], cmap='jet',shading='auto')
+axs[0][2].set_title("RZ")
+
+axs[1][0].pcolormesh(f[:indf], k[:indk], fkTR[:indk,:indf], cmap='jet',shading='auto')
+axs[1][0].set_title("TR")
+axs[1][1].pcolormesh(f[:indf], k[:indk], fkTT[:indk,:indf], cmap='jet',shading='auto')
+axs[1][1].set_title("TT")
+axs[1][2].pcolormesh(f[:indf], k[:indk], fkTZ[:indk,:indf], cmap='jet',shading='auto')
+axs[1][2].set_title("TZ")
+
+axs[2][0].pcolormesh(f[:indf], k[:indk], fkZR[:indk,:indf], cmap='jet',shading='auto')
+axs[2][0].set_title("ZR")
+axs[2][1].pcolormesh(f[:indf], k[:indk], fkZT[:indk,:indf], cmap='jet',shading='auto')
+axs[2][1].set_title("ZT")
+axs[2][2].pcolormesh(f[:indf], k[:indk], fkZZ[:indk,:indf], cmap='jet',shading='auto')
+axs[2][2].set_title("ZZ")
+
+for ax in axs.ravel():
+    ax.set_xlabel(r'Frequency (Hz)')
+    ax.set_ylabel(r'Wavenumber (1/km)')
+    ax.grid(c="w", ls=":", lw=.5)
+    ax.axvline(x=f[ifmax], c="w", ls=":")
+    ax.axhline(y=k[ikmax], c="w", ls=":")
+fig.tight_layout()
+plt.show()
+plt.close()
+
+
+# Plot (ZR +/- RZ) /2 comps
+fig, axs = plt.subplots(2,2,sharex=True,sharey=True, figsize=(15,15))
+plot_fk_comp(ZZ, dt=dt, dr=dr, ax=axs[0][0], title="ZZ")
+plot_fk_comp(ZRpRZ, dt=dt, dr=dr, ax=axs[0][1], title="(ZR + RZ)/ 2")
+plot_fk_comp(ZRmRZ, dt=dt, dr=dr, ax=axs[1][0], title="(ZR - RZ)/ 2")
+plot_fk_comp(TT, dt=dt, dr=dr, ax=axs[1][1], title="TT")
+axs[0][0].set_xlim((0,1.0))
+axs[0][0].set_ylim((0,0.5))
+fig.tight_layout()
+plt.show()
+plt.close()
+
+dt = 0.04
+dr = 150
+plt.rcParams.update({'font.size': 14})
+#              0      1     2     3    4     5      6    7     8
+components = ["ZZ", "RR", "TT", "ZR", "RZ", "RT", "TR", "TZ", "ZT"]
+# components = ["RR", "RT", "RZ", "TR", "TT", "TZ", "ZR", "ZT", "ZZ"]
+# components = ["ZZ", "RR", "TT"] #, "ZZ", "RR", "TT", "ZZ", "RR", "TT" ]
+
+fig, axs = plt.subplots(3, 3, sharex=False, sharey=False, figsize=(18, 15))
+
+maxT = 10
+maxD = 10000
+indT = np.argwhere(tsym < maxT).flatten()[-1]
+indD = np.argwhere(distsym < maxD).flatten()[-1]
+vscale = .2
+
+for i, comp in enumerate(components):
+    irow = i // 3
+    icol = i % 3
+
+    D = Dlist[i]
+    D_filt = bandpass(D, freqmin=1 / 1.2, freqmax=1 / 0.2, df=int(1 / dt), corners=4, zerophase=True)
+
+    axs[irow][icol].pcolormesh(tsym[:indT], distsym[:indD], D_filt[:indD, :indT], cmap='gray', vmin=-vscale,
+                               vmax=vscale, zorder=1, shading="auto")
+    # axs[irow][icol].pcolormesh(tsym[:indT],distsym[:indD],D_filt[:indD, :indT],cmap='gray', vmin=-1, vmax=1, zorder=1, shading="auto")
+    axs[irow][icol].set_title(f"{comp}")
+    axs[irow][icol].plot(t, 5710 * np.abs(t), c="r", lw=1.5, ls="--", zorder=2)  # average Vp aargau
+    axs[irow][icol].plot(t, 3340 * np.abs(t), c="b", lw=1.5, ls="--", zorder=2)  # average Vs aargau
+    axs[irow][icol].plot(t, 2000 * np.abs(t), c="g", lw=1.5, ls="--", zorder=2)  # 2 km/s reference
+    axs[irow][icol].set_xlabel("Lag time (s)")
+    axs[irow][icol].set_ylabel("Inter-station distance (m)")
+    axs[irow][icol].set_ylim(0, maxD)
+    axs[irow][icol].set_xlim(0, maxT)
+    # fig, axs = plt.subplots(1,1,sharex=False,sharey=False, figsize=(8,10))
+    # axs.pcolormesh(tsym,distsym*1e-3,D,cmap='gray', vmin=-1, vmax=1, zorder=1)
+    # # axs[irow][icol].pcolormesh(t,distances,D_filt,cmap='gray', vmin=-1, vmax=1, zorder=1)
+    # # axs[irow][icol].pcolormesh(t,distances,D,cmap='gray', vmin=-1, vmax=1, zorder=1)
+    # axs.set_title(f"{comp}")
+    # axs.plot(t, 5*np.abs(t), c="r",lw=1.5, ls="--", zorder=2)
+    # axs.plot(t, 3*np.abs(t), c="g", lw=1.5, ls="--", zorder=3)
+    # axs.plot(t, 1.5*np.abs(t), c="b", lw=1.5, ls="--", zorder=3)
+    # axs.set_xlabel("Lag time (s)")
+    # axs.set_ylabel("Inter-station distance (km)")
+    # # axs[0][0].set_xlim(-20,20)
+    # axs.set_xlim(0,20)
+    # axs.set_ylim(0,18000*1e-3)
+
+fig.suptitle("Haute Sorne NANT dataset")
+fig.tight_layout()
+plt.show()
+plt.close()
+
+# # PLOT ZR/RZ
+# ZZ = Dlist[0]
+# RR = Dlist[1]
+# TT = Dlist[2]
+# ZR = Dlist[6]
+# RZ = Dlist[2]
+# ZRpRZ = (ZR + RZ) * 0.5
+# ZRmRZ = (ZR - RZ) * 0.5
+
+# fig, axs = plt.subplots(2,2,sharex=True,sharey=True, figsize=(15,15))
+# plot_fk_comp(ZZ, dt=dt, dr=dr, ax=axs[0][0], title="ZZ")
+# plot_fk_comp(ZRpRZ, dt=dt, dr=dr, ax=axs[0][1], title="(ZR + RZ)/ 2")
+# plot_fk_comp(ZRmRZ, dt=dt, dr=dr, ax=axs[1][0], title="(ZR - RZ)/ 2")
+# plot_fk_comp(TT, dt=dt, dr=dr, ax=axs[1][1], title="TT")
+# fig, axs = plt.subplots(3,1,sharex=True,sharey=True, figsize=(8,15))
+# plot_fk_comp(ZZ, dt=dt, dr=dr, ax=axs[0], title="ZZ")
+# plot_fk_comp(RR, dt=dt, dr=dr, ax=axs[1], title="RR")
+# plot_fk_comp(TT, dt=dt, dr=dr, ax=axs[2], title="TT")
+# axs[0].set_xlim((0,1.0))
+# axs[0].set_ylim((0,0.6))
+# fig.tight_layout()
+# plt.show()
+# plt.close()
+
+# Plot FK
+# ZZ = Dlist[0]
+# RR = Dlist[1]
+# TT = Dlist[2]
+# fig, axs = plt.subplots(1,1,sharex=False,sharey=False, figsize=(8,8))
+# plot_fk_comp(ZZ, dt=dt, dr=dr, ax=axs, title="ZZ")
+# axs.set_xlim((0,1.0))
+# axs.set_ylim((0,0.5))
+# fig.tight_layout()
+# plt.show()
+# plt.close()
+
+# fig, axs = plt.subplots(1,1,sharex=False,sharey=False, figsize=(8,8))
+# plot_fk_comp(TT, dt=dt, dr=dr, ax=axs, title="TT")
+# axs.set_xlim((0,1.0))
+# axs.set_ylim((0,0.5))
+# fig.tight_layout()
+# plt.show()
+# plt.close()
