@@ -24,12 +24,12 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
-from phaseshift_dispersion import plot_stack_grid, save_ridges, configure_logging  # noqa: E402
+from phaseshift_dispersion import plot_stack_grid, save_picks, configure_logging  # noqa: E402
 
 STACK_KEYS = ("linear", "pws", "complex_pws", "root", "coverage")
 
 
-def replot_one(npz_path, outdir, comp, freqmax, fmin, min_sources):
+def replot_one(npz_path, outdir, comp, freqmax, fmin, min_sources, pick_min_score=0.5):
     d = np.load(npz_path, allow_pickle=True)
     f = d["f"]
     vel = d["vel"]
@@ -49,14 +49,16 @@ def replot_one(npz_path, outdir, comp, freqmax, fmin, min_sources):
         ("period", "linear", plim, "perlin", " | linear T"),
         ("period", "log", plim, "perlog", " | log T"),
     ]
-    ridges = None
+    picks = None
     for xaxis, xscale, xlim, tag, suffix in variants:
         out = os.path.join(outdir, f"stacked_{comp}_{tag}.png")
-        ridges = plot_stack_grid(out, stacks, f, vel, xaxis, comp, n_sources, min_sources,
-                                 xscale=xscale, xlim=xlim, title_suffix=suffix)
-    # Ridge curves are identical across axis variants; save once.
-    if ridges is not None:
-        save_ridges(os.path.join(outdir, f"ridges_{comp}.npz"), ridges, f, vel, comp)
+        # Picks are identical across axis variants; pass the cache so the (slow)
+        # per-column persistence run happens only once.
+        picks = plot_stack_grid(out, stacks, f, vel, xaxis, comp, n_sources, min_sources,
+                                xscale=xscale, xlim=xlim, title_suffix=suffix,
+                                pick_min_score=pick_min_score, picks_cache=picks)
+    if picks is not None:
+        save_picks(os.path.join(outdir, f"picks_{comp}.npz"), picks, f, vel, comp)
 
 
 def main(argv=None):
@@ -68,9 +70,17 @@ def main(argv=None):
     p.add_argument("--freqmax", type=float, default=5.0, help="Max frequency [Hz]")
     p.add_argument("--fmin", type=float, default=0.0, help="Min frequency [Hz]")
     p.add_argument("--min-sources", type=int, default=3, help="Coverage mask threshold")
+    p.add_argument("--pick-min-score", type=float, default=0.5,
+                   help="Topology picking: min persistence score (default 0.5)")
+    p.add_argument("--no-reference", action="store_true",
+                   help="Do not overlay the reference dispersion curve")
     p.add_argument("--log-level", default="INFO")
     args = p.parse_args(argv)
     configure_logging(args.log_level)
+
+    if args.no_reference:
+        import phaseshift_dispersion
+        phaseshift_dispersion._NO_REFERENCE = True
 
     comps = [c.strip().upper() for c in args.components.split(",") if c.strip()]
     for comp in comps:
@@ -79,7 +89,8 @@ def main(argv=None):
         if not os.path.isfile(npz):
             print(f"[skip] {npz} not found")
             continue
-        replot_one(npz, cdir, comp, args.freqmax, args.fmin, args.min_sources)
+        replot_one(npz, cdir, comp, args.freqmax, args.fmin, args.min_sources,
+                   pick_min_score=args.pick_min_score)
     return 0
 
 

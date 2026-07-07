@@ -1,0 +1,78 @@
+# Mode-separation workflow parameters (Nayak & Thurber 2020 VSG reference + V6 picking).
+# One file per network. Consumed by scripts/picking/{vsg_modesep, pick_reference_ridges,
+# dispersion_batch_modesep, network_station_qc, network_consistency_analysis,
+# network_pick_maps, lateral_structure_map}.py.
+#
+# Precedence: explicit CLI flag > this file > built-in default.
+# Live values below = Riehen; Aargau equivalents shown in trailing comments.
+
+network:
+  name: "Riehen"            # used in figure titles                          # aargau: "Aargau"
+  code: "RI"                # station-code prefix: the batch driver globs
+                            # {code}.*/{code}.*_{code}.*.h5 under stack_root,
+                            # and map annotations strip "{code}."            # aargau: "AA"
+
+paths:
+  # Output root of scripts/postprocess_stacks/phaseshift_dispersion.py:
+  # per-virtual-source panels {ZZ,RR,RZ,ZR}/sources/<NET>.<STA>.npz
+  vsg_dir: "/Users/genevievesavard/Data/riehen/phasevelocity_VSG"
+                            # aargau: /Users/genevievesavard/Data/aargau/phasevelocity_VSG
+  # Root of the stacked station-pair H5 files (input to dispersion_batch_modesep.py)
+  stack_root: "/Volumes/T7blue/riehen-data/STACK_CHRI_normZ"
+                            # aargau: /Volumes/T7blue/aargau-data/STACK_CHAA_normZ
+  # Analysis project root; all network products are written here
+  project_dir: "/Users/genevievesavard/Codes/extract_higher_modes/Projects/riehen"
+  dispersion_dir: null      # default: {project_dir}/dispersion_V6
+  ref_dir: null             # default: {project_dir}/vsg_modesep (stacks + reference curves)
+  # Optional layered-model reference CSV for figure overlays (cosmetic; null = skip
+  # the overlay and the branch-contrast printout)
+  model_reference_csv: null # aargau: {vsg_dir}/analysis/reference_curves.csv
+  # Optional faults shapefile (WGS84) for lateral_structure_map.py; needs geopandas
+  # (base anaconda env only). null = skip the fault-crossing analysis.
+  faults_shapefile: "/Volumes/T7Shield/riehen/Faults_serianex_trimmed/Faults.shp"
+                            # aargau: null
+
+vsg_modesep:                # network mode-separated stack (vsg_modesep.py)
+  sign: 1                   # +1 = Nayak & Thurber paper sign of the +/-pi/2 corrections;
+                            # rerun with -1 as a sanity check: the branches must swap
+  max_sources: null         # null = all sources; small int for quick tests
+  nfft: null                # null = derive from the stored f grid: round(1/(df*dt));
+                            # aargau/riehen phaseshift runs both used 4536
+  min_common_receivers: 20  # skip sources with fewer receivers common to ZZ/RR/RZ/ZR
+  plot_flim: [0.15, 2.0]    # frequency axis limits of the 3-panel stack figure [Hz]
+
+pick_windows:               # ridge-pick windows (pick_reference_ridges.py)
+                            # -- genuinely network-tuned: read them off the stacked
+                            # sign+1 figure before picking. QC gates: dominance =
+                            # in-window peak / column max; roughness = rolling mean|dc|.
+  fundamental:              # riehen: smooth branch ~2.7 km/s @0.25 Hz -> ~1.46 @2 Hz
+    img: "G_LR0"
+    fmin: 0.20              # [Hz]                                          # aargau: 0.20
+    fmax: 2.00              #                                               # aargau: 2.00
+    vmin: 1.30              # [km/s]                                        # aargau: 1.30
+    vmax: 3.10              #                                               # aargau: 3.10
+    dom_min: 0.60           #                                               # aargau: 0.60
+    rough_max: 0.030        # [km/s]                                        # aargau: 0.030
+  overtone:                 # riehen: faster branch ~4.5 -> 3.3 km/s over 0.24-1.0 Hz
+    img: "G_LR1"
+    fmin: 0.24              #                                               # aargau: 0.48
+    fmax: 1.05              #                                               # aargau: 1.20
+    vmin: 3.00              #                                               # aargau: 2.90
+    vmax: 4.70              #                                               # aargau: 4.30
+    dom_min: 0.60           #                                               # aargau: 0.60
+    rough_max: 0.060        # riehen's broad hi-vel peak jitters more than aargau's
+                            # (0.030 gave 0 picks there)                    # aargau: 0.030
+  rough_win: 9              # samples in the rolling roughness window
+  min_run: 10               # min samples per kept contiguous run (gaps <= 2 bridged)
+
+batch:                      # dispersion_batch_modesep.py
+  nproc: 10
+  limit: 0                  # >0: evenly-spread pilot subset of this many pairs
+
+analysis:                   # network_* analysis scripts
+  group_ref_band_fundamental: [0.7, 3.6]  # period band [s] where U_ref = dw/dk from the
+  group_ref_band_overtone: [1.1, 1.9]     # picked c_ref is trusted (same on both networks)
+  min_overtone_periods: 3   # "robust overtone path" threshold for the ray map
+  lateral_band: [1.5, 2.5]  # period band [s] for the lateral Vg maps
+  fault_main_name: "Rhine Valley Flexure" # highlighted fault; also defines the W/E
+                            # split of midpoints (null = no split panel)    # aargau: null

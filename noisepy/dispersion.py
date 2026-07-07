@@ -257,6 +257,124 @@ def disp_image_from_cwt(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, d
     return rcwt_new, per, vel, coi_new
 
 
+def synthesize_rayleigh_modes(zz, rr, rz, zr, receiver_side_flip=False):
+    '''
+    Nayak & Thurber (2020) multi-component Rayleigh-wave mode separation (their eqs 3 and 4).
+
+    Phase-correct the four radial-vertical cross-correlation components and stack them into two
+    traces: G_LR0, which constructively stacks the retrograde fundamental mode (and suppresses the
+    prograde 1st higher mode), and G_LR1, which does the reverse to enhance the 1st higher mode.
+    Feeding G_LR0 / G_LR1 to compute_cwt + disp_image_from_cwt gives FTAN images in which a single
+    mode dominates, so the ridge picker (extract_dispersion / extract_curves_topology) follows one
+    mode at a time instead of jumping between modes.
+
+        G_LR0 = ZZ + RR + IFFT( RZ e^{+i pi/2} + ZR e^{-i pi/2} )      (eq. 3)
+        G_LR1 = ZZ + RR + IFFT(-RZ e^{+i pi/2} - ZR e^{-i pi/2} )      (eq. 4)
+
+    Args:
+        zz, rr, rz, zr: one-sided (symmetric-fold, increasing-lag) cross-correlation traces of the
+            ZZ, RR, RZ and ZR components, all the same length. Convention (matches the NoisePy-ant
+            E-N-Z -> R-T-Z rotation): the first letter is the source component, the second the
+            receiver component, so RZ = R-at-source / Z-at-receiver = paper G_RZ, and ZR = paper
+            G_ZR. The four components must share a common amplitude normalization (the normZ
+            processing does this), since this is a waveform stack.
+        receiver_side_flip: which eigenfunction-sign assumption to use for G_LR1.
+            False (default) -> eq (4): the 1st-higher-mode vertical eigenfunction is flipped at
+            BOTH stations (same-medium assumption; components with a single vertical instance,
+            RZ and ZR, get the minus sign). Right choice when both stations sit in the same
+            geological setting (e.g. both in the basin).
+            True -> the paper's real-data variant (their section 3.1): the flip is assumed at the
+            RECEIVER station only (components with Z at the receiver, ZZ and RZ, are multiplied
+            by -1 before applying eq. 3). They used this for source stations on Coast Range hard
+            rock and receiver stations on Great Valley sediments; use it for pairs straddling a
+            strong structural boundary.
+
+    Returns:
+        (g0, g1): the fundamental (G_LR0) and 1st-higher-mode (G_LR1) Rayleigh traces, same length
+        as the inputs.
+
+    Note:
+        The +-pi/2 sign is the paper convention and has been validated empirically on these data
+        (G_LR0 tracks the ZZ fundamental). If a dataset's component convention differs, the sign of
+        the pi/2 shifts (equivalently swapping rz and zr) would need to flip.
+    '''
+    c0, c1 = phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=receiver_side_flip)
+    return np.sum(c0, axis=0), np.sum(c1, axis=0)
+
+
+def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
+    '''
+    The four phase-corrected R-Z components entering the Nayak & Thurber stacks, BEFORE summation.
+
+    Returns (comps0, comps1): two lists of four equal-length traces whose plain sums are G_LR0 and
+    G_LR1 (see synthesize_rayleigh_modes for the conventions and the receiver_side_flip variants).
+    Exposed separately so the stacking operator is a free choice: linear sum (paper eqs 3/4) or a
+    phase-weighted stack of the four traces (paper section 3.1 uses a t-f domain PWS on real data;
+    see tf_pws).
+    '''
+    zz = np.asarray(zz, dtype=float)
+    rr = np.asarray(rr, dtype=float)
+    n = len(zz)
+    rz90 = np.fft.irfft(np.fft.rfft(np.asarray(rz, dtype=float)) * np.exp(1j * np.pi / 2), n=n)
+    zr90 = np.fft.irfft(np.fft.rfft(np.asarray(zr, dtype=float)) * np.exp(-1j * np.pi / 2), n=n)
+    comps0 = [zz, rr, rz90, zr90]
+    if receiver_side_flip:
+        # section 3.1 variant: Z-at-receiver components (ZZ, RZ) flipped, then eq (3)
+        comps1 = [-zz, rr, -rz90, zr90]
+    else:
+        # eq (4): flip the single-vertical-instance components (RZ, ZR)
+        comps1 = [zz, rr, -rz90, -zr90]
+    return comps0, comps1
+
+
+def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
+    '''
+    Time-frequency phase-weighted stack (Schimmel & Gallart 2007) in the wavelet domain,
+    following the ts-PWS formulation of Ventosa et al. (GJI 2017; reference C implementation in
+    ~/Codes/ts-PWS): CWT each trace, weight the linear stack of coefficients by the phase
+    coherence of the ensemble, and invert back to the time domain.
+
+        W_lin(s,t)  = (1/K) sum_k W_k(s,t)
+        c(s,t)      = | (1/K) sum_k W_k/|W_k| |          (phase coherence, 0..1)
+        W_pws(s,t)  = W_lin * w(s,t)
+
+    with w = c^wu, or for wu=2 the unbiased estimator of Ventosa et al. (2017)
+    w = (K c^2 - 1)/(K - 1) clipped at 0, which removes the 1/K random-phase bias -- important
+    for small ensembles like the K=4 phase-corrected components of Nayak & Thurber (2020), whose
+    real-data processing uses exactly this kind of t-f PWS to suppress wave packets that are not
+    in phase across the four [R/Z] components.
+
+    Args:
+        traces: sequence of K equal-length 1-D arrays (e.g. from phase_corrected_components)
+        dt: sampling interval [s]
+        wu: phase-weight power (2 = standard)
+        unbiased: use the unbiased coherence weight (only defined for wu=2)
+        dj: wavelet scale resolution (same default as compute_cwt)
+
+    Returns:
+        1-D real array, same length as the inputs (amplitude scale is that of the mean stack).
+    '''
+    X = np.asarray(traces, dtype=float)
+    K, n = X.shape
+    Ws = None
+    for k in range(K):
+        W, sj, freq, coi, _, _ = pycwt.cwt(X[k], dt, dj, -1, -1, 'morlet')
+        if Ws is None:
+            Ws = np.empty((K,) + W.shape, dtype=complex)
+        Ws[k] = W
+    lin = Ws.mean(axis=0)
+    mag = np.abs(Ws)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        unit = np.where(mag > 0, Ws / mag, 0)
+    coh = np.abs(unit.mean(axis=0))                     # phase coherence in [0, 1]
+    if unbiased and wu == 2:
+        w = np.clip((K * coh ** 2 - 1.0) / (K - 1.0), 0.0, None)
+    else:
+        w = coh ** wu
+    rec = pycwt.icwt(lin * w, sj, dt, dj, 'morlet')
+    return np.real(rec)[:n]
+
+
 def phase_image_from_cwt(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3.,
                          normalize=True):
     '''
@@ -346,7 +464,7 @@ def compute_narrowband(ccf, dist, dt, Tmin=0.4, vmin=0.1, vmax=4.5, vave=3., alp
 
 
 def phase_velocity_image(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3.,
-                         phase_shift=-np.pi / 4.0, phase_offset=0.0,
+                         phase_shift=np.pi / 4.0, phase_offset=0.0,
                          group_per=None, group_vel=None):
     '''
     Proper phase-velocity image whose POSITIVE crests are the phase-velocity branches.
@@ -453,7 +571,8 @@ def get_disp_image_taper(ccf, dist, dt, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, d
 
 
 # function to extract the dispersion from the image
-def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
+def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5,
+                       segments=False, min_seg=5):
     '''
     this function takes the dispersion image from CWT as input, tracks the global maxinum on
     the wavelet spectrum amplitude and extract the sections with continous and high quality data
@@ -466,6 +585,14 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     vel:  vel vector of the 2D matrix
     maxgap: Maximum gap in group velocity between successive picks in samples
     minlambda: minimum multiple of wavelength (default 1.5 wavelength required)
+    segments: continuity policy. False (default) = original behaviour: a pick is kept only if
+        the following 15 samples contain no jump > maxgap, which discards everything up to
+        1.5 s of period BEFORE a genuine steep step of the dispersion curve (e.g. the
+        near-vertical fundamental-mode transition across a strong basin/bedrock contrast).
+        True = split the argmax curve at jumps > maxgap and keep EVERY continuous segment of
+        at least min_seg samples: steep but real branch steps are preserved, while short
+        unstable runs (spikes, body-wave blobs a few samples wide) are dropped.
+    min_seg: minimum segment length in samples (segments=True only).
 
     RETURNS:
     ----------------
@@ -494,14 +621,33 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
         elif dist / (per[ii] * gv[ii]) < minlambda:  # remove if number of wavelengths is less than threshold
             gv[ii] = 0
 
-    # Check the continuity of the dispersion curve
-    for ii in range(1, nper - minimum_output_length):
-        if gv[ii] == 0:
-            continue
-        for jj in range(minimum_output_length):
-            if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:  # If there is a large velocity gap, set to 0
-                gv[ii] = 0
-                break
+    if segments:
+        # Split the picked curve at velocity jumps and keep every continuous segment that is at
+        # least min_seg samples long. A steep (real) step in the curve then costs nothing but the
+        # single across-step pair, instead of the 15 preceding samples.
+        keep = np.zeros(nper, dtype=bool)
+        ii = 0
+        while ii < nper:
+            if gv[ii] == 0:
+                ii += 1
+                continue
+            jj = ii
+            while (jj + 1 < nper and gv[jj + 1] > 0
+                   and np.abs(gv[jj + 1] - gv[jj]) <= maxgap * dvel):
+                jj += 1
+            if (jj - ii + 1) >= min_seg:
+                keep[ii:jj + 1] = True
+            ii = jj + 1
+        gv = np.where(keep, gv, 0)
+    else:
+        # Check the continuity of the dispersion curve (original 15-sample look-ahead)
+        for ii in range(1, nper - minimum_output_length):
+            if gv[ii] == 0:
+                continue
+            for jj in range(minimum_output_length):
+                if np.abs(gv[ii + jj] - gv[ii + 1 + jj]) > maxgap * dvel:  # large velocity gap
+                    gv[ii] = 0
+                    break
 
     # Remove discarded picks set to 0
     indx = np.where(gv > 0)[0]
@@ -516,6 +662,8 @@ def extract_dispersion(amp, per, vel, dist, vmax=5., maxgap=3, minlambda=1.5):
     # decreasing point; this is the intended midpoint-deviation test.
     igood = list(range(len(pick_per)))
     for ii in range(2, len(pick_per) - 1):
+        if segments and (indx[ii + 1] - indx[ii - 1]) != 2:
+            continue    # neighbours span a segment boundary -- midpoint test not meaningful
         midpoint = 0.5 * (pick_gv[ii - 1] + pick_gv[ii + 1])
         if np.abs(pick_gv[ii] - midpoint) > maxgap * dvel:
             igood.remove(ii)
@@ -930,15 +1078,20 @@ def phase_at(cwt_data, period, U, dist):
     return measure_point(cwt_data, period, U, dist)['phase']
 
 
-def phase_velocity(phi_tu, U, dist, period, c_ref, phase_shift=-np.pi / 4.0,
+def phase_velocity(phi_tu, U, dist, period, c_ref, phase_shift=np.pi / 4.0,
                    phase_offset=0.0, n_search=6):
     """
     Phase velocity from the analytic-signal phase, with the 2*pi*N ambiguity resolved by a
     reference curve (Bensen et al. 2007 eqs. 10-11).
 
-        s_c(N) = 1/U + (w*dist)^-1 * (phi(t_u) + phase_offset + 2*pi*N + phase_shift)
+        s_c(N) = 1/U + (w*dist)^-1 * (-phi(t_u) + phase_offset + 2*pi*N + phase_shift)
         c(N)   = 1 / s_c(N)
 
+    The measured phase enters NEGATED: the Morlet-filtered analytic signal of an arrival with
+    far-field spectrum e^{-i(kr - pi/4)} is W(t) ~ e^{i(w t - k r + pi/4)}, so
+    k r = w t_u - phi(t_u) + pi/4 + 2*pi*N, i.e. phase_shift = +pi/4 for ZZ-convention
+    components. Validated on a synthetic of exactly known c(T) (ladder contains the true value
+    to ~0.003 km/s); the previous +phi / -pi/4 form tilted the fringe ladder the wrong way.
     The integer N is chosen so c(N) is closest to the reference phase velocity c_ref(period).
     Source phase phi_s = 0 (ambient noise).
 
@@ -961,7 +1114,7 @@ def phase_velocity(phi_tu, U, dist, period, c_ref, phase_shift=-np.pi / 4.0,
         return np.nan, 0
     omega = 2.0 * np.pi / period
     s_u = 1.0 / U
-    base = phi_tu + phase_offset + phase_shift
+    base = -phi_tu + phase_offset + phase_shift
     Ns = np.arange(-n_search, n_search + 1)
     s_c = s_u + (base + 2.0 * np.pi * Ns) / (omega * dist)
     with np.errstate(divide='ignore', invalid='ignore'):
@@ -1014,7 +1167,7 @@ def load_reference_curve(source, key=None):
     return _load_entry(source)
 
 
-def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=-np.pi / 4.0,
+def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.0,
                         phase_offset=0.0, n_search=8, smooth_weight=3.0, max_step=None):
     """
     Resolve the 2*pi*N phase-velocity ambiguity jointly over a whole dispersion curve.
@@ -1022,7 +1175,9 @@ def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=-np.pi / 4
     For each pick i there is a closed-form ladder of candidate phase velocities (one per
     integer N, the fringes of the phase image):
 
-        c_i(N) = 1 / ( 1/U_i + (phi_i + phase_offset + phase_shift + 2*pi*N) / (w_i*dist) )
+        c_i(N) = 1 / ( 1/U_i + (-phi_i + phase_offset + phase_shift + 2*pi*N) / (w_i*dist) )
+
+    (measured phase negated -- see phase_velocity for the convention derivation/validation).
 
     A single per-period argmin against the reference can hop to a neighbouring branch wherever
     the reference is locally off by more than half the branch spacing. Instead we pick the
@@ -1063,7 +1218,7 @@ def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=-np.pi / 4
 
     Ns = np.arange(-n_search, n_search + 1)
     omega = 2.0 * np.pi / T
-    s = 1.0 / U[:, None] + (phi[:, None] + phase_offset + phase_shift
+    s = 1.0 / U[:, None] + (-phi[:, None] + phase_offset + phase_shift
                             + 2.0 * np.pi * Ns[None, :]) / (omega[:, None] * dist)
     with np.errstate(divide='ignore', invalid='ignore'):
         c = np.where(s > 0, 1.0 / s, np.nan)               # candidate velocities (m x K)
@@ -1098,6 +1253,194 @@ def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=-np.pi / 4
             out_N[order[i]] = Ns[k]
         k = back[i, k]
     return out_c, out_N
+
+
+def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.0,
+                               phase_offset=0.0, n_search=8, seg_dU=0.25, seg_gap=2.5):
+    '''
+    Single-N phase-velocity resolution by continuous frequency-unwrapping (Bensen et al. 2007:
+    "the 2*pi ambiguity inherent to any phase spectrum", their eq. 11 -- N is ONE integer for
+    the unwrapped spectrum, chosen against a reference, NOT a free integer per period).
+
+    Steps:
+      1. kr_raw_i = w_i * dist/U_i + (-phi_i + phase_offset + phase_shift)   (principal value)
+      2. unwrap along ascending frequency: the measured group slowness is the derivative of the
+         phase spectrum (dk/dw = 1/U), so the predicted increment between adjacent picks is
+         d(kr) ~ dist * dw * mean(1/U); each pick's integer is set to bring kr_raw within pi of
+         that prediction -- this enforces the continuity the physics requires and eliminates
+         ridge-hopping.
+      3. one GLOBAL integer M for the whole curve: choose M minimising the median relative
+         distance between c_i(M) = w_i*dist/(kr_i + 2*pi*M) and the reference curve.
+
+    Segmentation: the one-N continuity argument holds within ONE wave packet's phase spectrum.
+    Where the picked group curve jumps (mixed-geology paths: the argmax switches between two
+    arrivals) or has a period gap, the phases on either side belong to different packets and
+    must NOT be glued into a single continuum -- the unwrap breaks there and each segment gets
+    its own global integer (seg_dU, seg_gap control the break criteria).
+
+    Returns (c_phase, N_amb) aligned with the inputs; NaN/0 where undefined. N_amb is the total
+    per-pick integer (unwrap steps + M) for bookkeeping -- its steps across period compensate
+    principal-value wraps only; the physical ambiguity resolved is one M per segment.
+    '''
+    periods = np.asarray(periods, dtype=float)
+    phases = np.asarray(phases, dtype=float)
+    gv = np.asarray(gv, dtype=float)
+    m = len(periods)
+    out_c = np.full(m, np.nan)
+    out_N = np.zeros(m, dtype=int)
+    ok = np.isfinite(periods) & np.isfinite(phases) & np.isfinite(gv) & (periods > 0) & (gv > 0)
+    if ok.sum() < 2:
+        return out_c, out_N
+    idx = np.where(ok)[0]
+    w = 2.0 * np.pi / periods[idx]
+    order = np.argsort(w)
+    idx = idx[order]
+    w = w[order]
+    U = gv[idx]
+    phi = phases[idx]
+
+    kr_raw = w * dist / U + (-phi + phase_offset + phase_shift)
+    T = 2.0 * np.pi / w
+    cref = np.array([float(c_ref(t)) for t in T]) if c_ref is not None else \
+        np.full(len(w), np.nan)
+
+    # segment boundaries: group-velocity jump (packet switch) or period gap
+    dTmed = np.median(np.abs(np.diff(T))) if len(T) > 1 else 0.0
+    brk = np.zeros(len(idx), dtype=bool)
+    for i in range(1, len(idx)):
+        if np.abs(U[i] - U[i - 1]) > seg_dU or \
+           (dTmed > 0 and np.abs(T[i] - T[i - 1]) > seg_gap * dTmed):
+            brk[i] = True
+    seg_id = np.cumsum(brk)
+
+    steps = np.zeros(len(idx), dtype=int)
+    kr = kr_raw.copy()
+    c_out = np.full(len(idx), np.nan)
+    N_out = np.zeros(len(idx), dtype=int)
+    for s in range(seg_id.max() + 1):
+        ii = np.where(seg_id == s)[0]
+        # unwrap within the segment (group slowness = dk/dw as predictor)
+        for j in ii[1:]:
+            pred = kr[j - 1] + dist * (w[j] - w[j - 1]) * 0.5 * (1.0 / U[j] + 1.0 / U[j - 1])
+            steps[j] = int(np.round((pred - kr_raw[j]) / (2.0 * np.pi)))
+            kr[j] = kr_raw[j] + 2.0 * np.pi * steps[j]
+        # one global integer per segment, median-anchored to the reference
+        best_M, best_cost = None, np.inf
+        for M in range(-n_search, n_search + 1):
+            denom = kr[ii] + 2.0 * np.pi * M
+            with np.errstate(divide='ignore', invalid='ignore'):
+                c = np.where(denom > 0, w[ii] * dist / denom, np.nan)
+            cost = np.nanmedian(np.abs(c - cref[ii]) / cref[ii])
+            if np.isfinite(cost) and cost < best_cost:
+                best_cost, best_M = cost, M
+        if best_M is None:
+            continue
+        denom = kr[ii] + 2.0 * np.pi * best_M
+        with np.errstate(divide='ignore', invalid='ignore'):
+            c_out[ii] = np.where(denom > 0, w[ii] * dist / denom, np.nan)
+        N_out[ii] = steps[ii] + best_M
+    out_c[idx] = c_out
+    out_N[idx] = N_out
+    return out_c, out_N
+
+
+def phase_from_group(pick_per, pick_gv, dist, phases, phase_shift=np.pi / 4.0,
+                     phase_offset=0.0, cmin=0.5, cmax=5.0, n_scan=2001):
+    '''
+    Unique phase-velocity curve predicted from a picked group-velocity curve.
+
+    Since U = dw/dk, the wavenumber follows by integration,
+
+        k(w) = k_ref + int_{w_ref}^{w} dw' / U(w'),      c(w) = w / k(w),
+
+    which determines c(T) only UP TO the integration constant k_ref (differentiation destroys
+    the absolute phase). k_ref is resolved here from the waveform itself: the analytic-signal
+    phases measured at the group arrivals constrain the slowness to a discrete fringe ladder
+    (mod 2*pi/(w*dist), Bensen et al. 2007 eqs 10-11), and a 1-D scan picks the k_ref whose
+    rigid group-integrated curve best matches the ladder in the circular (mod-rung) sense.
+    Group shape + measured phase anchor -> a single curve, no external reference needed.
+    IMPORTANT degeneracy: shifting k_ref by exactly 2*pi/dist moves the predicted slowness by
+    one full rung at EVERY frequency simultaneously, so the circular misfit is periodic in
+    k_ref and all rung-aliases fit the measured phases identically (and share identical group
+    velocity -- the constant is precisely what differentiation destroys). The fit therefore
+    determines k_ref only mod 2*pi/dist; the alias is selected by physics: the curve must
+    satisfy cmin <= c <= cmax and c >= U (normal dispersion; small tolerance allowed), and
+    among the feasible aliases the one closest above U is taken. This usually leaves exactly
+    one candidate, but sanity-check against an independent reference (FK) where available --
+    strongly inversely-dispersive branches could in principle defeat the c >= U selector.
+
+    Args:
+        pick_per, pick_gv: picked group curve (period [s], U [km/s]); any order, one per period
+        dist: inter-station distance [km]
+        phases: analytic-signal phase at the group arrival per pick [rad] (measure_point);
+            nan entries are ignored in the anchor fit
+        phase_shift, phase_offset: as in phase_velocity (component's initial phase term)
+        cmin, cmax: physical bounds for the reference-frequency phase velocity in the scan
+        n_scan: k_ref scan resolution
+
+    Returns:
+        c_pred: predicted phase velocity aligned with the input picks (nan where undefined)
+    '''
+    from scipy.integrate import cumulative_trapezoid
+
+    per = np.asarray(pick_per, dtype=float)
+    U = np.asarray(pick_gv, dtype=float)
+    phi = np.asarray(phases, dtype=float)
+    c_pred = np.full(len(per), np.nan)
+    ok = np.isfinite(per) & np.isfinite(U) & (per > 0) & (U > 0)
+    if ok.sum() < 3:
+        return c_pred
+    idx = np.where(ok)[0]
+    w = 2.0 * np.pi / per[idx]
+    order = np.argsort(w)                    # ascending omega
+    idx = idx[order]
+    w = w[order]
+    Uo = U[idx]
+    phio = phi[idx]
+
+    kint = cumulative_trapezoid(1.0 / Uo, w, initial=0.0)     # k(w) - k_ref
+    # fringe ladder from the measured phases: base slowness and rung spacing per pick
+    # (phase negated -- see phase_velocity for the convention derivation/validation)
+    s0 = 1.0 / Uo + (-phio + phase_offset + phase_shift) / (w * dist)
+    rung = 2.0 * np.pi / (w * dist)
+    have_phase = np.isfinite(s0)
+
+    if not have_phase.any():
+        return c_pred
+
+    # Step 1: fine offset within ONE rung period (cost is exactly periodic in 2*pi/dist).
+    alias_step = 2.0 * np.pi / dist
+    k_lo = w[0] / cmax
+    kref_grid = np.linspace(k_lo, k_lo + alias_step, n_scan, endpoint=False)
+    costs = np.empty(n_scan)
+    for i, kref in enumerate(kref_grid):
+        s_pred = (kref + kint) / w
+        r = np.mod(s_pred - s0 + 0.5 * rung, rung) - 0.5 * rung   # circular residual per rung
+        costs[i] = np.nanmean((r[have_phase] / rung[have_phase]) ** 2)
+    k_fine = kref_grid[int(np.argmin(costs))]
+
+    # Step 2: pick the rung alias by physics. All k_fine + m*alias_step fit the phases
+    # identically; require cmin <= c <= cmax and c >= U (normal dispersion, 3% tolerance),
+    # then take the feasible alias closest above U.
+    U_tol = 0.97
+    best = None
+    m = 0
+    while k_fine + m * alias_step <= w[0] / cmin:
+        k_m = k_fine + m * alias_step
+        with np.errstate(divide='ignore', invalid='ignore'):
+            c_m = w / (k_m + kint)
+        m += 1
+        if np.any(~np.isfinite(c_m)) or c_m.max() > cmax or c_m.min() < cmin:
+            continue
+        if np.any(c_m < U_tol * Uo):                      # violates c >= U
+            continue
+        gap = float(np.mean(c_m - Uo))                    # supersonic gap above the group curve
+        if best is None or gap < best[0]:
+            best = (gap, c_m)
+    if best is None:
+        return c_pred                                     # no physically admissible alias
+    c_pred[idx] = best[1]
+    return c_pred
 
 
 def group_from_phase(periods, c_phase):
@@ -1140,7 +1483,7 @@ def group_from_phase(periods, c_phase):
 
 
 def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
-                                  phase_shift=-np.pi / 4.0, phase_offset=0.0,
+                                  phase_shift=np.pi / 4.0, phase_offset=0.0,
                                   use_period='nominal', joint=True, smooth_weight=3.0,
                                   phase_max_step=None):
     """
@@ -1192,7 +1535,14 @@ def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
         valid = np.isfinite(phases) & np.isfinite(T_omega) & (T_omega > 0)
         idx = np.where(valid)[0]
         if len(idx):
-            if joint:
+            if joint == 'unwrap':
+                # single-N resolution via continuous frequency-unwrapping (Bensen 2007 eq. 11)
+                c_sub, N_sub = resolve_phase_curve_unwrap(
+                    T_omega[idx], phases[idx], Uref[idx], dist, c_ref,
+                    phase_shift=phase_shift, phase_offset=phase_offset)
+                c_phase[idx] = c_sub
+                N_amb[idx] = N_sub
+            elif joint:
                 c_sub, N_sub = resolve_phase_curve(
                     T_omega[idx], phases[idx], Uref[idx], dist, c_ref,
                     phase_shift=phase_shift, phase_offset=phase_offset,

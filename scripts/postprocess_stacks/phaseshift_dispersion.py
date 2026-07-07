@@ -204,15 +204,52 @@ def read_pair_lags(sfile, dtype, comps, polarity_fix=True):
     return out
 
 
-def select_lag(causal, acausal, src_is_first, lag):
+# Rayleigh vertical (Z) and radial (R) motion are in 90-degree phase quadrature, so in an
+# ISOTROPIC, equipartitioned ambient field the vertical-radial CROSS components are ODD in lag
+# (SPAC kernel J1(kr), correct fold (causal-acausal)/2), while the diagonal autocorrelations
+# (ZZ, RR) and Love TT are EVEN (J0 kernel, (causal+acausal)/2).
+#
+# EMPIRICAL CAVEAT (Aargau, June 2026): the field there is strongly DIRECTIONAL — per-pair
+# corr(causal, acausal) ~ 0 for every component, i.e. the two lag sides are largely independent
+# one-sided EGFs, not +/- copies. In that regime each lag side carries a one-sided Rayleigh
+# cross arrival that ADDS under (causal+acausal)/2 (additive folding gave a HIGHER, cleaner
+# dispersion ridge than the odd fold, and the odd fold cancelled in the cross-SOURCE PWS step).
+# So the EVEN ("additive") fold is the operational default here; the textbook ODD fold is opt-in
+# via --cross-fold odd for genuinely isotropic fields. (Separately, the J0-vs-J1 kernel mismatch
+# biases cross-component velocity at low kr; that needs a J1-kernel F-J transform, not re-folding.)
+ODD_LAG_COMPONENTS = frozenset({"ZR", "RZ"})
+CROSS_FOLD = "even"   # "even" = additive (default, directional fields); "odd" = (c-a)/2
+
+
+def fold_sym(comp, causal, acausal):
+    """Lag-symmetric stack. Cross comps use CROSS_FOLD ('even' additive, or 'odd' (c-a)/2).
+
+    For the odd fold the `(causal-acausal)/2` result is referenced to the FIRST station of the
+    pair; `select_lag` negates it when the chosen virtual source is the second station so a
+    gather stacks coherently. The even (additive) fold is orientation-free.
+    """
+    if comp in ODD_LAG_COMPONENTS and CROSS_FOLD == "odd":
+        return 0.5 * (causal - acausal)
+    return 0.5 * (causal + acausal)
+
+
+def select_lag(causal, acausal, src_is_first, lag, comp=None):
     """Pick the trace for the requested lag convention, oriented for virtual source `src`.
 
-    'sym'     -> 0.5*(causal+acausal): folded, order-independent (best SNR).
+    'sym'     -> parity-correct fold (fold_sym): (c+a)/2 for even comps, (c-a)/2 for the
+                 odd vertical-radial cross terms. Order-independent, best SNR.
     'causal'  -> source->receiver one-sided gather (reciprocity picks the correct side).
     'acausal' -> receiver->source one-sided gather (the opposite branch).
     """
     if lag == "sym":
-        return 0.5 * (causal + acausal)
+        folded = fold_sym(comp, causal, acausal)
+        # fold_sym references the odd (c-a)/2 to the FIRST station in the file. A virtual
+        # source is the second station in ~half its pairs; because the cross term is
+        # antisymmetric, swapping source<->receiver flips its sign. Orient every trace to
+        # the source so the gather stacks coherently (even comps are orientation-free).
+        if comp in ODD_LAG_COMPONENTS and CROSS_FOLD == "odd" and not src_is_first:
+            folded = -folded
+        return folded
     sr = causal if src_is_first else acausal   # source -> receiver
     return sr if lag == "causal" else (acausal if src_is_first else causal)
 
@@ -236,7 +273,7 @@ def build_source_gathers(index, src, selected, dtype, comps, polarity_fix,
         for comp, (causal, acausal, dist, dt, ngood) in comp_data.items():
             if dist < min_offset or ngood < min_ngood:
                 continue
-            trace = select_lag(causal, acausal, src_is_first, lag)
+            trace = select_lag(causal, acausal, src_is_first, lag, comp)
             a_ = acc[comp]
             if a_["dt"] is None:
                 a_["dt"], a_["nt"] = dt, trace.shape[0]
@@ -362,9 +399,12 @@ def _disp_axes(f, vel, xaxis):
     return f, "Frequency [Hz]"
 
 
+_NO_REFERENCE = False  # set to True by --no-reference flag
+
+
 def _ref_phase_curve(component):
     """Reference phase-velocity curve (fundamental mode) for the overlay, or None."""
-    if reference_curves is None:
+    if _NO_REFERENCE or reference_curves is None:
         return None
     wave = "love" if component.upper() in ("TT", "RT", "TR", "TZ", "ZT") else "rayleigh"
     try:
@@ -465,11 +505,19 @@ def plot_wiggle_gather(ax, t, x, sym, tmax, dt, fmin, fmax):
            xlabel="Lag time [s]", ylabel="Offset [km]", title="Symmetric gather (wiggle)")
 
 
+# Per-source figure display settings (diagnostic panels only; the transform itself is unfiltered).
+WIGGLE_BAND = (0.2, 5.0)       # Hz, band-pass applied to the wiggle gather for legibility
+SOURCE_DISP_FMAX = 2.0         # Hz, upper limit of the per-source dispersion panel (log f axis)
+
+
 def plot_source_png(outpath, gather, E, f, vel, xaxis, component, coords,
                     basemap_name, map_pad, use_map, tmax_plot):
-    """Three-panel per-source figure: map | gather wiggle | dispersion image."""
+    """Three-panel per-source figure: map | gather wiggle | dispersion image.
+
+    The wiggle gather is band-passed to WIGGLE_BAND; the dispersion panel shows a
+    logarithmic frequency axis capped at SOURCE_DISP_FMAX (the `xaxis` argument is
+    retained for signature compatibility but the per-source panel is always log-f)."""
     amp = normalize_per_freq(np.abs(E))
-    xv, xlabel = _disp_axes(f, vel, xaxis)
     ref = _ref_phase_curve(component)
     x = gather["x"]
     t = gather["t_sym"]
@@ -484,18 +532,19 @@ def plot_source_png(outpath, gather, E, f, vel, xaxis, component, coords,
     ax_map.set_title(f"{gather['src']}  ({len(x)} receivers)")
 
     ax_g = fig.add_subplot(gs[1])
-    plot_wiggle_gather(ax_g, t, x, gather["sym"], tmax, gather["dt"], f.min(), f.max())
+    plot_wiggle_gather(ax_g, t, x, gather["sym"], tmax, gather["dt"], *WIGGLE_BAND)
 
+    # Dispersion panel: logarithmic frequency axis, capped at SOURCE_DISP_FMAX.
     ax_d = fig.add_subplot(gs[2])
-    if xaxis == "period":
-        order = np.argsort(xv)
-        pm = ax_d.pcolormesh(xv[order], vel, amp[:, order], cmap="jet", shading="auto")
-    else:
-        pm = ax_d.pcolormesh(xv, vel, amp, cmap="jet", shading="auto")
-    _overlay_reference(ax_d, ref, xaxis, (vel.min(), vel.max()))
+    keep = (f > 0) & (f <= SOURCE_DISP_FMAX)
+    fk = f[keep]
+    pm = ax_d.pcolormesh(fk, vel, amp[:, keep], cmap="jet", shading="auto")
+    _overlay_reference(ax_d, ref, "freq", (vel.min(), vel.max()))
     fig.colorbar(pm, ax=ax_d, label="normalised |E|", pad=0.02)
-    ax_d.set(xlabel=xlabel, ylabel="Phase velocity [km/s]",
-             ylim=(vel.min(), vel.max()), title="Phase-shift dispersion")
+    ax_d.set_xscale("log")
+    ax_d.set(xlabel="Frequency [Hz]", ylabel="Phase velocity [km/s]",
+             xlim=(fk.min(), SOURCE_DISP_FMAX), ylim=(vel.min(), vel.max()),
+             title="Phase-shift dispersion")
     if ref is not None:
         ax_d.legend(loc="upper right", fontsize=7)
 
@@ -505,87 +554,148 @@ def plot_source_png(outpath, gather, E, f, vel, xaxis, component, coords,
     plt.close(fig)
 
 
-def viterbi_ridge(img, vel, smooth_weight=1.0, max_step=0.2):
+def save_source_npz(outdir, comp, gather, E, f, vel, coords):
+    """Save per-source gather + dispersion image as a compressed NPZ for later replotting.
+
+    Saved to <outdir>/<comp>/sources/<NET>.<STA>.npz.  Float64 waveforms are cast to float32
+    and the complex E image is split into E_real / E_imag (float32) to keep files small and
+    avoid portability issues with complex128 in older numpy versions.
+
+    Coordinates are extracted from the `coords` dict (NET.STA -> (lon, lat)) and stored inline
+    so that plot_source_gather.py needs no external CSV.
     """
-    Track the brightest continuous velocity ridge across frequency columns by Viterbi DP.
+    sdir = os.path.join(outdir, comp, "sources")
+    os.makedirs(sdir, exist_ok=True)
+    src = gather["src"]
+    rx_codes = gather["codes"]
 
-    img : (nv, nf) RAW (not per-frequency-normalised) image — global normalisation is applied
-    internally so that the emission scale is meaningful across all frequencies. Running Viterbi
-    on a per-frequency-normalised image destroys the inter-frequency amplitude signal: noisy
-    columns all peak at 1 and the emission reward for being on the ridge vanishes, causing the
-    path to flatten wherever it started.
+    # Extract source and receiver coordinates (fall back to NaN if missing from CSV).
+    src_lon, src_lat = coords.get(src, (np.nan, np.nan))
+    rx_lons = np.array([coords.get(c, (np.nan, np.nan))[0] for c in rx_codes])
+    rx_lats = np.array([coords.get(c, (np.nan, np.nan))[1] for c in rx_codes])
 
-    Emission : -A_glob (prefer bright cells); globally normalised to [-1, 0].
-    Transition: smooth_weight * |Δv| [km/s], hard cap at max_step km/s per column.
-    Returns ridge velocity per frequency column (nf,).
+    np.savez_compressed(
+        os.path.join(sdir, f"{src}.npz"),
+        sym=gather["sym"].astype(np.float32),
+        x=gather["x"],
+        t_sym=gather["t_sym"],
+        dt=gather["dt"],
+        f=f,
+        vel=vel,
+        E_real=E.real.astype(np.float32),
+        E_imag=E.imag.astype(np.float32),
+        src=np.str_(src),
+        rx_codes=np.array(rx_codes, dtype=object),
+        src_lon=src_lon,
+        src_lat=src_lat,
+        rx_lons=rx_lons,
+        rx_lats=rx_lats,
+    )
+
+
+def _continuity_filter(idx_f, vels, scores, neighbor_cols=5, neighbor_dv=0.12, min_neighbors=4):
+    """Keep only picks supported by picks at similar velocity in nearby frequency columns.
+
+    A real dispersion branch is laterally continuous: each of its picks has neighbours
+    within ±neighbor_dv km/s over the ±neighbor_cols adjacent columns. Salt-and-pepper
+    picks from incoherent columns are isolated and get dropped.
     """
-    A = np.asarray(img, dtype=float)
-    # Per-column contrast enhancement: subtract the noise floor (10th-percentile over velocity)
-    # so that cells are penalised by how much they stand above the local background, not by
-    # their absolute amplitude. A uniformly bright column (noise plateau) maps to ~zero
-    # everywhere after this step, and the path simply coasts through it on smoothness.
-    floor = np.percentile(A, 10, axis=0, keepdims=True)   # (1, nf) noise estimate per column
-    A = np.maximum(A - floor, 0.0)
-    peak = A.max()
-    if peak > EPS:
-        A = A / peak                            # global [0, 1] normalisation
-    nv, nf = A.shape
-    V = np.asarray(vel, dtype=float)
-    emis = -A                                   # prefer bright cells
-    dV = np.abs(V[:, None] - V[None, :])        # (nv x nv)
-    trans = smooth_weight * dV
-    trans[dV > max_step] = 1e9                  # hard continuity cap
-    cost = emis[:, 0].copy()
-    back = np.zeros((nf, nv), dtype=int)
-    for j in range(1, nf):
-        total = cost[:, None] + trans + emis[:, j][None, :]
-        back[j] = np.argmin(total, axis=0)
-        cost = np.min(total, axis=0)
-    k = int(np.argmin(cost))
-    ridge = np.zeros(nf)
-    for j in range(nf - 1, -1, -1):
-        ridge[j] = V[k]
-        k = back[j, k]
-    return ridge
+    keep = np.zeros(idx_f.size, dtype=bool)
+    for i in range(idx_f.size):
+        near = (np.abs(idx_f - idx_f[i]) <= neighbor_cols) & (np.abs(idx_f - idx_f[i]) > 0)
+        n = np.count_nonzero(near & (np.abs(vels - vels[i]) <= neighbor_dv))
+        keep[i] = n >= min_neighbors
+    return idx_f[keep], vels[keep], scores[keep]
 
 
-def extract_ridges(raw_img, vel, smooth_weight=1.0, max_step=0.2):
-    """Return (argmax_vel, viterbi_vel) per frequency column from the RAW (non-normalised) image.
+def extract_picks_topology(raw_img, vel, min_score=0.5):
+    """Pick dispersion branches per frequency column by topological persistence (findpeaks).
 
-    Both argmax and Viterbi operate on raw amplitudes so that low-SNR frequency columns are
-    naturally down-weighted rather than being artificially equalised by per-frequency normalisation.
+    Unlike a single-ridge tracker, persistence picking returns EVERY peak whose
+    score exceeds `min_score`, so multiple coexisting branches (e.g. fundamental +
+    first overtone) are picked simultaneously rather than forcing one curve that
+    jumps between modes at an osculation point.
+
+    Each column is normalised to its own max before scoring, so the persistence
+    score (0-1) measures peak prominence relative to that column's dynamic range
+    and `min_score` means the same thing at every frequency. Because that makes
+    noise peaks in incoherent columns score high too, a continuity filter then
+    drops picks with no support at similar velocity in adjacent columns.
+
+    raw_img : (nv, nf) RAW (not per-frequency-normalised) stacked image.
+    Returns dict of scattered picks {'idx_f', 'vel', 'score'} (1-D, same length).
     """
+    from findpeaks import findpeaks
+    logging.getLogger("findpeaks").setLevel(logging.WARNING)
+    logging.getLogger("findpeaks.stats").setLevel(logging.WARNING)
+
     A = np.ma.filled(raw_img, 0.0) if np.ma.isMaskedArray(raw_img) else np.asarray(raw_img, float)
-    argmax_vel = np.asarray(vel)[np.argmax(A, axis=0)]
-    vit_vel = viterbi_ridge(A, vel, smooth_weight, max_step)
-    return argmax_vel, vit_vel
+    nv, nf = A.shape
+    fp = findpeaks(method="topology", verbose="silent")
+    max_col_picks = 4   # a column with more "significant" peaks than this is incoherent speckle
+    out_j, out_v, out_s = [], [], []
+    for j in range(nf):
+        X = A[:, j]
+        peak = X.max()
+        if peak <= EPS:
+            continue
+        try:
+            df = fp.fit(X / peak)["persistence"]
+        except Exception as exc:  # noqa: BLE001 - degenerate column
+            logger.debug("findpeaks failed on column %d: %s", j, exc)
+            continue
+        col = []
+        for y, score in zip(df["y"], df["score"]):
+            iy = int(y)
+            if iy <= 0 or iy >= nv - 1 or score < min_score:  # skip image-edge picks
+                continue
+            col.append((j, float(vel[iy]), float(score)))
+        # Real branch structure means 1-3 prominent peaks per column. Many peaks all
+        # clearing min_score = incoherent speckle column -> contributes no picks.
+        if len(col) > max_col_picks:
+            continue
+        for j_, v_, s_ in col:
+            out_j.append(j_)
+            out_v.append(v_)
+            out_s.append(s_)
+    idx_f, vels, scores = _continuity_filter(
+        np.asarray(out_j, dtype=int), np.asarray(out_v), np.asarray(out_s))
+    return {"idx_f": idx_f, "vel": vels, "score": scores}
 
 
-def save_ridges(outpath, ridges, f, vel, component):
-    """Save the extracted argmax/Viterbi ridges (per stacking method) for later re-plotting.
+def save_picks(outpath, picks, f, vel, component):
+    """Save the topology picks (per stacking method) for later re-plotting / curve fitting.
 
-    Stores frequency [Hz], period [s] and per-method <key>_argmax / <key>_viterbi velocity
-    arrays so picks can be reloaded without recomputing the images."""
+    Stores the f/period/vel axes plus per-method scattered picks as <key>_f [Hz],
+    <key>_period [s], <key>_vel [km/s], <key>_score (persistence, 0-1)."""
     f = np.asarray(f, dtype=float)
     with np.errstate(divide="ignore"):
         period = np.where(f > 0, 1.0 / f, np.nan)
     arrays = {"f": f, "period": period, "vel": np.asarray(vel), "component": component}
-    for key, rd in ridges.items():
-        arrays[f"{key}_argmax"] = np.asarray(rd["argmax"])
-        arrays[f"{key}_viterbi"] = np.asarray(rd["viterbi"])
+    for key, pk in picks.items():
+        pf = f[pk["idx_f"]]
+        arrays[f"{key}_f"] = pf
+        with np.errstate(divide="ignore"):
+            arrays[f"{key}_period"] = np.where(pf > 0, 1.0 / pf, np.nan)
+        arrays[f"{key}_vel"] = pk["vel"]
+        arrays[f"{key}_score"] = pk["score"]
     os.makedirs(os.path.dirname(os.path.abspath(outpath)), exist_ok=True)
     np.savez(outpath, **arrays)
-    logger.info("Saved ridges -> %s", outpath)
+    logger.info("Saved topology picks -> %s", outpath)
 
 
 def plot_stack_grid(outpath, stacks, f, vel, xaxis, component, n_sources, min_sources,
                     xscale="linear", xlim=None, title_suffix="", overlay_ridge=True,
-                    ridge_smooth=1.0, ridge_maxstep=0.2):
-    """2x2 grid comparing the four stacking strategies, with argmax + Viterbi ridges overlaid.
+                    pick_min_score=0.5, picks_cache=None):
+    """2x2 grid comparing the four stacking strategies, with topology picks overlaid.
+
+    Multi-branch picking: every persistence peak with score >= pick_min_score is shown
+    (marker size scales with score), so coexisting modes appear as separate point clouds.
 
     xscale : 'linear' or 'log' for the x-axis. xlim : optional (lo, hi) in the x-units
-    (Hz for xaxis='freq', s for xaxis='period'). Returns dict[key] = {'argmax','viterbi'}
-    velocity arrays (aligned to f) for saving."""
+    (Hz for xaxis='freq', s for xaxis='period'). picks_cache : optional dict of picks
+    from a previous call (identical across axis variants) to skip recomputation.
+    Returns dict[key] = {'idx_f','vel','score'} scattered picks for saving."""
     xv, xlabel = _disp_axes(f, vel, xaxis)
     ref = _ref_phase_curve(component)
     mask = stacks["coverage"] < min_sources
@@ -595,7 +705,7 @@ def plot_stack_grid(outpath, stacks, f, vel, xaxis, component, n_sources, min_so
               ("complex_pws", "Complex-PWS"),
               ("root", "Nth-root")]
 
-    ridges = {}
+    picks = picks_cache if picks_cache is not None else {}
     fig, axes = plt.subplots(2, 2, figsize=(15, 11), sharex=True, sharey=True)
     order = np.argsort(xv) if xaxis == "period" else None
     for ax, (key, title) in zip(axes.ravel(), panels):
@@ -607,13 +717,16 @@ def plot_stack_grid(outpath, stacks, f, vel, xaxis, component, n_sources, min_so
             pm = ax.pcolormesh(xv, vel, img, cmap="jet", shading="auto")
         _overlay_reference(ax, ref, xaxis, (vel.min(), vel.max()))
 
-        # Ridge extraction on the RAW image — not the display-normalised one.
-        amax, avit = extract_ridges(raw_img, vel, ridge_smooth, ridge_maxstep)
-        ridges[key] = {"argmax": amax, "viterbi": avit}
-        if overlay_ridge:
-            ax.scatter(xv, amax, s=5, c="white", edgecolors="k", linewidths=0.2,
-                       alpha=0.55, zorder=4, label="argmax")
-            ax.plot(xv, avit, "-", color="k", lw=1.6, zorder=5, label="Viterbi ridge")
+        # Topology picking on the RAW image — not the display-normalised one.
+        if key not in picks:
+            picks[key] = extract_picks_topology(raw_img, vel, pick_min_score)
+        pk = picks[key]
+        if overlay_ridge and pk["idx_f"].size:
+            # Marker size scales with persistence score within [min_score, 1].
+            s = 4 + 26 * (pk["score"] - pick_min_score) / max(1 - pick_min_score, EPS)
+            ax.scatter(xv[pk["idx_f"]], pk["vel"], s=s, c="white", edgecolors="k",
+                       linewidths=0.3, alpha=0.8, zorder=5,
+                       label=f"topology picks (score>={pick_min_score:g})")
 
         fig.colorbar(pm, ax=ax, label="normalised", pad=0.02)
         ax.set(title=title, ylim=(vel.min(), vel.max()))
@@ -632,7 +745,7 @@ def plot_stack_grid(outpath, stacks, f, vel, xaxis, component, n_sources, min_so
     fig.savefig(outpath, dpi=130, bbox_inches="tight")
     plt.close(fig)
     logger.info("Wrote stacked dispersion image -> %s", outpath)
-    return ridges
+    return picks
 
 
 # ---------------------------------------------------------------------------
@@ -679,10 +792,22 @@ def build_arg_parser():
     p.add_argument("--min-ngood", type=int, default=1, help="Skip pairs with ngood below this")
     p.add_argument("--min-sources", type=int, default=3,
                    help="Mask stacked cells covered by fewer sources")
+    p.add_argument("--pick-min-score", type=float, default=0.5,
+                   help="Topology picking: min persistence score (0-1) for a peak to be "
+                        "kept; picks all branches above this (default 0.5)")
     p.add_argument("--tmax-plot", type=float, default=40.0, help="Max lag shown in gather panel [s]")
     p.add_argument("--no-polarity-fix", action="store_true",
                    help="Disable the cross-network (CH/RI) sign flip")
+    p.add_argument("--cross-fold", choices=["even", "odd"], default="even",
+                   help="Lag fold for the vertical-radial cross comps (ZR/RZ): 'even' = "
+                        "additive (c+a)/2 (default, best for directional ambient fields); "
+                        "'odd' = (c-a)/2 (textbook J1 antisymmetric fold, isotropic fields)")
+    p.add_argument("--no-reference", action="store_true",
+                   help="Do not overlay the reference dispersion curve")
     p.add_argument("--no-per-source", action="store_true", help="Skip per-source PNGs")
+    p.add_argument("--save-sources", action="store_true",
+                   help="Save per-source gather + dispersion image as NPZ "
+                        "(written to <output-dir>/<comp>/sources/<STA>.npz)")
     p.add_argument("--no-map", action="store_true", help="Skip basemap tiles (plain scatter)")
     p.add_argument("--basemap", default="OpenTopoMap", help="contextily provider name")
     p.add_argument("--map-pad", type=float, default=0.15, help="Map bbox padding fraction")
@@ -699,6 +824,10 @@ def build_arg_parser():
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     configure_logging(args.log_level)
+
+    global _NO_REFERENCE, CROSS_FOLD
+    _NO_REFERENCE = args.no_reference
+    CROSS_FOLD = args.cross_fold
 
     stackdir = os.path.abspath(args.stackdir)
     comps = [c.strip().upper() for c in args.component.split(",") if c.strip()]
@@ -783,6 +912,8 @@ def main(argv=None):
                                   grid["nfft"], vel, args.amp_mode)
             accumulate(states[comp], E, args.root_n)
             n_used[comp] += 1
+            if args.save_sources:
+                save_source_npz(args.output_dir, comp, g, E, grid["f"], vel, coords)
             if not args.no_per_source:
                 sdir = os.path.join(comp_dir(comp), "sources")
                 os.makedirs(sdir, exist_ok=True)
@@ -806,14 +937,15 @@ def main(argv=None):
         stack_png = (args.output_plot if (single and args.output_plot)
                      else os.path.join(cdir, f"stacked_{comp}.png"))
         os.makedirs(os.path.dirname(os.path.abspath(stack_png)), exist_ok=True)
-        ridges = plot_stack_grid(stack_png, stacks, grid["f"], vel, args.xaxis, comp,
-                                 n_used[comp], args.min_sources)
+        picks = plot_stack_grid(stack_png, stacks, grid["f"], vel, args.xaxis, comp,
+                                n_used[comp], args.min_sources,
+                                pick_min_score=args.pick_min_score)
         npz = (args.output_data if (single and args.output_data)
                else os.path.join(cdir, f"stacks_{comp}.npz"))
         os.makedirs(os.path.dirname(os.path.abspath(npz)), exist_ok=True)
         np.savez(npz, f=grid["f"], vel=vel, component=comp, n_sources=n_used[comp],
                  **{k: np.asarray(v) for k, v in stacks.items()})
-        save_ridges(os.path.join(cdir, f"ridges_{comp}.npz"), ridges, grid["f"], vel, comp)
+        save_picks(os.path.join(cdir, f"picks_{comp}.npz"), picks, grid["f"], vel, comp)
         logger.info("Component %s: %d sources -> %s", comp, n_used[comp], npz)
 
     return rc

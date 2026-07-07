@@ -14,7 +14,7 @@ Rough structure (to be improved...):
     * `make_map_background`: utility script to create an image to use as background for plotting in Matlab
 * `scripts`:
     * `raw2stack`: Follows old version of NoisePy: scripts S0B (miniseed -> pyasdf), S1 (raw data -> cross-correlations) and S2 (stacking).
-    * `picking`: Do FTAN and dispersion curve picking.
+    * `picking`: Do FTAN and dispersion curve picking (classic group velocity, and the V6 mode-separated fundamental + 1st higher mode workflow).
     * `postprocess_stacks`:
         * `beamforming.py` Beamforming from stacked cross-correlation gather (Bowden 2021)
         * `compare_stacking` Compare stacking methods
@@ -64,10 +64,20 @@ Rough structure (to be improved...):
 4. Make plots of (ZR+RZ)/2 and (ZR-RZ)/2 with scripts in `scripts/FK/plot_takagi.py`
 
 ### FTAN and picking
-Run scripts in `scripts/picking`. 
-1. Run `dispersion_curves_V2.py` for each station pair (each stack H5 file), use the slurm script for efficient job scheduling (`dispersion.slurm`).
+Run scripts in `scripts/picking` — see [`scripts/picking/README.md`](scripts/picking/README.md) for
+the full script inventory, the V1→V6 evolution, and configuration.
+
+**Classic** (single-component group velocity):
+1. Run `dispersion_curves_V2.py` for each station pair (each stack H5 file), use the slurm script for efficient job scheduling (`dispersion.slurm`). `dispersion_curves_V5.py` adds phase velocity + Love in one pass.
 2. Merge the output files into one big data table (csv file) for analysis with Pandas using `step1_merge_picks.py`
 3. Create histograms of picks given some filtering threshold with `step2_pick_histograms.py`
+
+**Mode-separated (V6)** — recovers the Rayleigh fundamental **and 1st higher mode** (Nayak & Thurber 2020),
+configured per network via [`param_files/modesep_params.yaml`](param_files/modesep_params.yaml):
+`vsg_modesep.py` → `pick_reference_ridges.py` (data-derived reference curves) → `dispersion_batch_modesep.py`
+(full-network batch + inline `validate_modes.py`) → `network_station_qc.py` / `network_consistency_analysis.py`
+/ `network_pick_maps.py` → optional `lateral_structure_map.py`. See
+[`scripts/picking/VSG_REFERENCE_METHODOLOGY.md`](scripts/picking/VSG_REFERENCE_METHODOLOGY.md).
 
 ### Group velocity maps and 3D Vs inversion [MATLAB]
 
