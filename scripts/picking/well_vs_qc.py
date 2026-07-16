@@ -128,6 +128,13 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
         prod = args.production_root.format(net=net)
         pr.PROD_ROOT[net] = prod
         pr.PROD_ROOT[(net, "love")] = prod
+        # Also register the station cache next to the production root. period_resolution's legacy
+        # fallback (tomo/swtomotv-output/cache/...) was removed in the reorg and now RAISES, so
+        # without this the driver aborts before writing a config. The cache lives at
+        # <production_root>/../cache/stations_in_grid.csv (swtomotv writes it beside output_root).
+        _cache = os.path.join(os.path.dirname(prod.rstrip("/")), "cache", "stations_in_grid.csv")
+        if os.path.exists(_cache):
+            pr.CACHE_CSV[net] = _cache
         cell = vi.load_cell_curves(prod, ix, iy, waves=("fund", "overtone", "love"))
     else:
         prod = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/1_velocity_maps/_archive/swtomotv-output/production"
