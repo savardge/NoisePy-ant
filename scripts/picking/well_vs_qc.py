@@ -162,6 +162,10 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
     # the measure/tag MUST be in the workdir name: parallel group/phase/both runs of the same
     # (well, waveset, criterion) would otherwise share one bh_results dir and collide.
     _wtag = f"_{getattr(args, 'tag', None) or getattr(args, 'measure', 'group')}"
+    # bounded noise runs are PAIRED against free runs of the same cell -- keep them collision-free
+    # even when the caller forgot a distinct --tag
+    if getattr(args, "noise_regime", "free") != "free":
+        _wtag += f"_{args.noise_regime}"
     workdir = os.path.join(os.path.dirname(out_npz),
                            f"work_{'_'.join(waves)}_{criterion}{_wtag}_{ix}_{iy}")
     os.makedirs(workdir, exist_ok=True)
@@ -196,6 +200,11 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
     if getattr(args, "radial", False):           # per-layer signed gamma=(Vsh-Vsv)/Vsv (fork ext.)
         cfg["radial_anisotropy"] = True
         cfg["radial_prior"] = list(getattr(args, "radial_prior", None) or (-0.35, 0.35))
+    if getattr(args, "noise_regime", "free") != "free":
+        # bounded: sigma ~ U(0.5*S_min, 3*S_min) per target instead of the free U(1e-4, 0.5).
+        # Run PAIRED with a free run of the same cell; see run_bayhunter_cell's noise-regime
+        # block for the rationale (free = silent data exclusion, bounded = loud rail verdict).
+        cfg["noise_regime"] = args.noise_regime
     if getattr(args, "use_mp", False):
         # REAL multiprocessing via fork. BayHunter's mp_inversion does NOT deadlock on macOS (the
         # old comment was wrong): it fails under the macOS-default SPAWN because Process(target=)
@@ -385,6 +394,18 @@ def _noise_panel(ax, r):
             ax.axvline(b, color="k", lw=0.8, ls=":")
         ax.set_xlim(0, prior[1] * 1.05)
         ax.text(prior[1], ax.get_ylim()[1], " prior\n bound", fontsize=6, va="top", color="0.3")
+    elif prior is not None and prior.ndim == 2:
+        # BOUNDED regime: per-target (lo, hi) around each curve's own S_min. Draw each target's
+        # bounds in its colour; a posterior pressed against its upper bound is the loud
+        # "cannot fit this curve within plausible errors" verdict the regime exists to produce.
+        for i, w in enumerate(waves[:len(prior)]):
+            c = cols.get(w.replace("_phase", ""), "0.5")
+            ls = "--" if w.endswith("_phase") else "-"
+            for b in prior[i]:
+                ax.axvline(b, color=c, lw=0.7, ls=":", alpha=0.7)
+        ax.set_xlim(0, np.nanmax(prior) * 1.1)
+        ax.text(0.98, 0.98, "bounded regime\n(per-target bounds)", fontsize=6, va="top",
+                ha="right", transform=ax.transAxes, color="0.3")
     ax.set(xlabel=r"noise $\sigma$ [km/s]  (median, inflation vs our $S_{min}$)", ylabel="density")
     ax.legend(fontsize=6, frameon=False)
     ax.set_title(r"hierarchical noise $\sigma$ posterior", fontsize=10)
@@ -845,6 +866,13 @@ def main():
                          "(BayHunter fork radial_anisotropy mode)")
     ap.add_argument("--radial-prior", default=None,
                     help="'lo,hi' gamma prior bounds (default -0.35,0.35; NB gamma railed at the old -0.20 floor at several cells -- a clipped gamma is not an estimate)")
+    ap.add_argument("--noise-regime", choices=["free", "bounded"], default="free",
+                    help="hierarchical noise sigma prior: 'free' = U(1e-4,0.5) per target "
+                         "(historical; the sampler may silently inflate a curve's noise away, "
+                         "measured 6.4x on joint phase), 'bounded' = U(0.5*S_min, 3*S_min) per "
+                         "target (still hierarchical; a sigma railed at the upper bound is a "
+                         "LOUD cannot-fit verdict). Run PAIRED with free; the difference is the "
+                         "diagnostic. Auto-tags the workdir/outputs.")
     ap.add_argument("--use-mp", action="store_true",
                     help="run chains with REAL multiprocessing (forces the fork start method). "
                          "~nthreads x faster; posterior statistically identical to serial. Keep "
@@ -882,6 +910,11 @@ def main():
     if args.radial_prior:
         args.radial_prior = [float(x) for x in args.radial_prior.split(",")]
     TAG = f"_{args.tag}" if args.tag else ""
+    # bounded-noise runs are paired against free runs of the SAME cell: without a distinct tag
+    # the bounded run would find the free run's npz and silently return it (run_cell_ensemble
+    # skips existing out_npz), so the "pair" would be one run read twice.
+    if args.noise_regime != "free" and args.noise_regime not in TAG:
+        TAG += f"_{args.noise_regime}"
     well_filter = set(w.strip() for w in args.wells.split(",")) if args.wells else None
     # The hardcoded default only exists if nothing has moved. After the tomo reorg the old path is
     # gone, and `makedirs(exist_ok=True)` would silently RECREATE it and write a fresh, empty,

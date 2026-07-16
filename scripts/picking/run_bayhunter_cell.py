@@ -242,10 +242,31 @@ def main(cfgpath):
     # graben Love/Rayleigh tension is a fixed-ratio artifact (saturated fill -> high Vp/Vs).
     vpvs_prior = cfg.get("vpvs", 1.73)
     vpvs_prior = tuple(vpvs_prior) if isinstance(vpvs_prior, (list, tuple)) else float(vpvs_prior)
+    # ---- hierarchical noise regime ------------------------------------------------------------
+    # "free" (default, historical): sigma ~ U(1e-4, 0.5) per target -- the sampler may inflate
+    # any curve's noise ~indefinitely, which measured 6.4x on Riehen-2 joint phase and silently
+    # degrades a joint inversion to group-only while every chi_eff reads ~1 (see
+    # bayhunter-noise-model notes). "bounded": sigma ~ U(f_lo*S_min, f_hi*S_min) PER TARGET
+    # (default factors 0.5/3.0) -- still hierarchical, so honest under-estimation of errors can
+    # be absorbed, but a curve can no longer be declared 6-15x noisier than measured (= data
+    # exclusion). A sigma posterior pressed against the upper bound is then a LOUD "cannot fit
+    # both within plausible errors" verdict instead of a silent reweighting. Run PAIRED with
+    # "free"; the difference between the pair is the diagnostic, not either run alone.
+    noise_regime = str(cfg.get("noise_regime", "free"))
+    if noise_regime == "bounded":
+        f_lo, f_hi = (float(x) for x in cfg.get("noise_bound_factors", (0.5, 3.0)))
+        smins = [float(np.nanmin(obs[w][2])) for w in waves]     # per-target stated S_min
+        swd_sigma_prior = [(f_lo * s, f_hi * s) for s in smins]  # JointTarget order == waves
+        print(f"  noise regime BOUNDED: sigma ~ U({f_lo}*S_min, {f_hi}*S_min) per target; "
+              f"S_min = {np.round(smins, 4)}", flush=True)
+    elif noise_regime == "free":
+        swd_sigma_prior = (1e-4, 0.5)
+    else:
+        raise SystemExit(f"unknown noise_regime {noise_regime!r} (use 'free' or 'bounded')")
     priors = {"vpvs": vpvs_prior, "layers": tuple(cfg["n_layers"]), "vs": (vmin, vmax),
               "z": (0.0, depth_max), "triangular_zprop": False, "mohoest": None,
               "mantle": None, "rfnoise_corr": 0.9, "swdnoise_corr": 0.0,
-              "rfnoise_sigma": (1e-5, 0.1), "swdnoise_sigma": (1e-4, 0.5),
+              "rfnoise_sigma": (1e-5, 0.1), "swdnoise_sigma": swd_sigma_prior,
               "swdnoise_sigma_c1": (1e-5, 0.02), "swdnoise_sigma_c2": (1e-5, 0.02)}
     initparams = {"nchains": N, "iter_burnin": int(cfg["iter_burnin"]),
                   "iter_main": int(cfg["iter_main"]),
@@ -535,6 +556,27 @@ def main(cfgpath):
         if preds:
             pred[w] = np.array(preds)
 
+    # Bounded-regime verdict: fraction of each target's sigma posterior within 5% of its UPPER
+    # prior bound. A railed sigma means the sampler wanted to disbelieve that curve even more
+    # than the bounded prior allows -- i.e. "cannot fit this curve within plausible errors":
+    # the conflict the free regime absorbs silently, made loud. NaN under the free regime and
+    # for legacy npz (consumers must not read absence as "no railing").
+    noise_rail_frac = np.full(len(waves), np.nan)
+    if noise_regime == "bounded" and noise_post.size:
+        for i in range(len(waves)):
+            col = 4 * i + 1                              # [corr, sigma, c1, c2] per target
+            if col >= noise_post.shape[1]:
+                break
+            s = noise_post[:, col]
+            s = s[np.isfinite(s)]
+            if s.size:
+                noise_rail_frac[i] = float(np.mean(s >= 0.95 * swd_sigma_prior[i][1]))
+        railed = [w for w, f in zip(waves, noise_rail_frac) if np.isfinite(f) and f > 0.3]
+        print(f"  noise rail check: frac(sigma >= 0.95*hi) = "
+              f"{dict(zip(waves, np.round(noise_rail_frac, 2)))}"
+              + (f"  -> RAILED: {railed} (fit is prior-constrained, conflict is real)"
+                 if railed else "  -> none railed (fits within plausible errors)"), flush=True)
+
     d = dict(engine="bayhunter", depth=dep,
              vs_mean=np.nanmean(prof, 0), vs_median=p[2],
              vs_p025=p[0], vs_p16=p[1], vs_p84=p[3], vs_p975=p[4],
@@ -544,6 +586,8 @@ def main(cfgpath):
              vpvs_post=np.asarray(vpvs, float),      # posterior Vp/Vs (const array if fixed)
              noise_post=noise_post.astype(np.float32),   # (nmodels, 4*ntargets) hierarchical noise
              noise_sigma_prior=np.asarray(priors["swdnoise_sigma"], float),
+             noise_regime=noise_regime,              # "free" | "bounded" (paired-run diagnostic)
+             noise_rail_frac=noise_rail_frac,        # per-target frac(sigma>=0.95*hi); NaN if free
              obssig_min=np.array([np.nanmin(obs[w][2]) for w in waves], float),  # per-wave S_min
              radial=int(RADIAL),
              gamma_p025=gp[0], gamma_p16=gp[1], gamma_median=gp[2],
