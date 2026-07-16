@@ -22,6 +22,46 @@ birth/death when anisotropy is on (`len(self.anisomods) > 0`, SingleChain.py:93-
 
 Reading cannot settle (3); this test can.
 
+VERDICT AS OF 2026-07-16 -- THE FIX IS NOT A ONE-LINER. DO NOT PATCH `D` AND CALL IT DONE.
+-------------------------------------------------------------------------------------------
+Measured (400k main iters, theta=1.5, layers=(1,6), azimuthal anisotropy ON; TVD = total
+variation distance of the sampled k-distribution from the uniform prior; control floor 0.0109
+over 3 seeds, PASS threshold 0.0326):
+
+    isotropic control (D dead)  TVD 0.005-0.011   PASS  <- harness is sound; reference sampler
+    (a) current  raw ratio      TVD 0.187         FAIL  biased LOW  k (0.271 -> 0.070)
+    (b) E10/E11  logged         TVD 0.048         FAIL  biased low  k (0.200 -> 0.142)
+    (c) no D                    TVD 0.142         FAIL  biased HIGH k (0.092 -> 0.238)
+    (d) derived log((k+1)/(k+1-l))                TVD 0.433  FAIL  biased HIGH k -- sign wrong
+
+NONE of them recovers the prior. So the defect is NOT confined to the `D` term, and no choice of
+`D` alone repairs it. Two structural causes, both measured:
+
+  * ASYMMETRIC ELIGIBILITY. _model_layerbirth:350 always inserts an ISOTROPIC cell (psi2amp = 0);
+    _model_layerdeath:365 may only remove one of the (k-l) ISOTROPIC cells. The reverse of a birth
+    is therefore a 1-of-(k+1-l) choice, not the 1-of-(k+1) that Bodin 2012's cancellation assumes
+    -- which is why vanilla (isotropic, no D) is exact but the anisotropic path is not.
+  * THE ANISOTROPY MOVES ARE THEMSELVES UNBALANCED. aniso_birth/aniso_death take the plain
+    likelihood-ratio branch (SingleChain.py:670), so under a flat likelihood alpha = 0 and they
+    are ALWAYS accepted: l performs an unweighted random walk instead of sampling its prior.
+    Measured l/k = 0.50 at EVERY k (0.481, 0.500, 0.507, 0.488, 0.497, 0.521 for k = 2..7), i.e.
+    the configuration space grows with k, and with D = 0 the sampler targets P(k) ~ 1.2^k rather
+    than the uniform p(k) the `layers` prior states. Bodin 2016 E12-E17 does reduce the
+    anisotropy move to a bare likelihood ratio -- but only because THEIR prior carries the
+    matching C(k,l) combinatorial term. Whether this fork's prior does is exactly the open
+    question, and it cannot be answered from the code.
+
+CONSEQUENCE. Every anisotropic/radial run's layer-count AND anisotropic-occupancy posterior is
+biased, and gamma is spike-and-slab, so occupancy is precisely the quantity of interest. Isotropic
+runs are untouched -- proven by TIER 1, not assumed.
+
+WHAT IS NEEDED. A derivation of the anisotropic trans-dimensional acceptance for THIS fork's
+parameterization (continuous z, Gaussian Vs birth proposal, isotropic-only layer death, psi2amp ~
+U(0, 0.1) spike-and-slab), i.e. a decision about what prior over (k, l, config) the fork intends.
+That is an author-level question, not a code-reading one. This test is the oracle that will settle
+it: add the candidate to `_D` (and, if the aniso moves need one, to the 'aniso' branch of
+`_patch_acceptance`) and require TVD within the control floor.
+
 THE TIERS
 ---------
 TIER 1 -- isotropic no-op. With `anisomods = []` the `D` branch is dead (D = 0 = log 1), so any
