@@ -116,6 +116,10 @@ class _Stub:
 
     def __init__(self, rng, anisomods):
         self.anisomods = anisomods
+        # the continuous-zeta refactor gates D on initparams['azimuthal_anisotropy'] instead of
+        # len(anisomods); the stub carries both so it can drive the pre- and post-refactor code
+        self.initparams = {"azimuthal_anisotropy": bool(anisomods)}
+        self.radial = False
         self.fixedvelmodel = False
         self.propdist = np.array([0.05, 0.3, rng.uniform(0.01, 0.5), 0.005, 0.01])
         self.dv = rng.uniform(0.5, 4.0)
@@ -208,6 +212,8 @@ def tier2_reciprocity():
 def _patch_acceptance(variant):
     """Swap get_acceptance_probability's D term for `variant`, leaving A/B/C untouched."""
     from BayHunter.SingleChain import SingleChain
+    if not hasattr(SingleChain, "_orig_get_acceptance_probability"):
+        SingleChain._orig_get_acceptance_probability = SingleChain.get_acceptance_probability
 
     def get_acceptance_probability(self, modify):
         if (modify in ["vsmod", "zvmod", "noise", "vpvs"] or "aniso" in modify
@@ -234,16 +240,19 @@ def _patch_acceptance(variant):
     SingleChain.get_acceptance_probability = get_acceptance_probability
 
 
-def _flat_likelihood_chain(nmain, seed, layers=(1, 6), aniso="azimuthal", theta=1.5):
+def _flat_likelihood_chain(nmain, seed, layers=(1, 6), aniso="azimuthal", theta=1.5,
+                           collect_gamma=False):
     """One chain against a CONSTANT likelihood -> it must sample the PRIOR.
 
-    aniso="azimuthal" activates the `D` branch (anisomods non-empty, SingleChain.py:93-98) while
-    keeping the prior over k UNIFORM. The radial path is deliberately NOT used here: its
-    _validmodel enforces Vsh = Vs*(1+gamma) in [vsmin, vsmax] (SingleChain.py, radial branch),
-    which couples gamma to Vs, so P(valid | k) falls with k and the true prior over k is no longer
-    uniform -- there would be nothing clean to test against. Azimuthal draws psi2amp ~ U(0, 0.1)
-    (_model_azianiso_birth) and _validmodel checks exactly [0, 0.1], so every proposal is valid and
-    P(valid | k) = 1. `D` is the same code path either way, so this tests it faithfully.
+    aniso="azimuthal" activates the spike-and-slab `D` branch while keeping the prior over k
+    UNIFORM: psi2amp ~ U(0, 0.1) (_model_azianiso_birth) and _validmodel checks exactly [0, 0.1],
+    so every proposal is valid, P(valid | k) = 1, and the analytic uniform is the right reference.
+
+    aniso="radial" runs the CONTINUOUS-gamma sampler (post CONTINUOUS_ZETA_PLAN.md). Here the
+    analytic uniform is NOT the reference: _validmodel enforces Vsh = Vs*(1+gamma) in
+    [vsmin, vsmax], which couples gamma to Vs and makes P(valid | k) fall with k. tier_radial
+    therefore compares against a REJECTION SAMPLE of the same constrained prior instead.
+    Pass collect_gamma=True to also get the per-layer gamma samples and the chain object.
 
     aniso=None is the ISOTROPIC control: `D` is dead, making it the reference Bodin-2012 sampler.
 
@@ -281,7 +290,8 @@ def _flat_likelihood_chain(nmain, seed, layers=(1, 6), aniso="azimuthal", theta=
           "lvz": None, "hvz": None,                      #    so the prior over k is UNIFORM
           "rcond": 1e-5, "station": "t", "savepath": f"/tmp/bal_{seed}/", "maxmodels": 100000,
           "parallel_tempering": False, "t1chains": 1, "maxtemp": 2.0,
-          "azimuthal_anisotropy": (aniso == "azimuthal"), "radial_anisotropy": False,
+          "azimuthal_anisotropy": (aniso == "azimuthal"),
+          "radial_anisotropy": (aniso == "radial"),
           "radial_overdisperse": False}
     opt = MCMC_Optimizer(target, initparams=ip, priors=priors, random_seed=seed)
     ch = opt.chains[0]
@@ -293,10 +303,17 @@ def _flat_likelihood_chain(nmain, seed, layers=(1, 6), aniso="azimuthal", theta=
     # silently wrong). That bug would corrupt exactly the statistic under test. Reading
     # currentmodel per iteration is immune to it and IS the stationary trace by definition.
     ktrace = np.empty(ch.iter_phase2, dtype=np.int16)
+    gammas = [] if collect_gamma else None
     while ch.iiter < ch.iter_phase2:
         ch.iterate()
         if ch.iiter > 0:
-            ktrace[ch.iiter - 1] = len(ch.currentmodel) // 4
+            k = len(ch.currentmodel) // 4
+            ktrace[ch.iiter - 1] = k
+            # every 20th iteration, snapshot all layers' gamma (the psi2amp block)
+            if collect_gamma and ch.iiter % 20 == 0:
+                gammas.append(np.array(ch.currentmodel[2 * k:3 * k]))
+    if collect_gamma:
+        return ktrace, (np.concatenate(gammas) if gammas else np.array([])), ch
     return ktrace
 
 
@@ -357,10 +374,94 @@ def tier3_prior_recovery(nmain, seed, layers=(1, 6), nctrl=3):
     return out
 
 
+def _rejection_prior(ch, layers, nkeep, rng):
+    """Rejection sample of the radial prior AS IMPLEMENTED: k ~ U, (vs, z, gamma) ~ U(box),
+    keep iff ch._validmodel accepts. This is the exact stationary distribution the flat-likelihood
+    sampler must reproduce -- including the Vsh = Vs*(1+gamma) truncation, which makes both the
+    k-marginal non-uniform (P(valid|k) falls with k) and the gamma-marginal non-flat. Using the
+    chain's own _validmodel means the reference tracks the code, not our reading of it.
+    """
+    lo, hi = layers[0] + 1, layers[1] + 1
+    vsmin, vsmax = ch.priors["vs"]
+    zmin, zmax = ch.priors["z"]
+    glo, ghi = ch.priors.get("radial", (-0.35, 0.35))
+    ks, gs = [], []
+    while len(ks) < nkeep:
+        k = int(rng.integers(lo, hi + 1))
+        vs = rng.uniform(vsmin, vsmax, k)
+        z = np.sort(rng.uniform(zmin, zmax, k))
+        g = rng.uniform(glo, ghi, k)
+        model = np.concatenate((vs, z, g, np.zeros(k)))
+        if ch._validmodel(model):
+            ks.append(k)
+            gs.append(g)
+    return np.array(ks), np.concatenate(gs)
+
+
+def tier_radial(nmain, seed, layers=(1, 6)):
+    """Continuous-gamma radial sampler vs a rejection sample of its own prior.
+
+    Flat likelihood => the sampler's stationary distribution IS the prior. Two marginals checked:
+    k (layer count; inherits vanilla isotropic birth/death, so this doubles as the regression that
+    removing the D term changed nothing) and gamma (aggregated over layers; must match the
+    Vs-truncated prior, NOT a flat one). Verdict = TVD vs the rejection reference, floored by the
+    TVD between two independent MCMC seeds (the sampler's own noise at this run length).
+    """
+    # This tier tests the LIVE deployed code -- undo any tier3 monkeypatch, whose old
+    # len(anisomods)>0 gate would wrongly re-enable D under continuous radial (anisomods is
+    # ['aniso_ampmod'], non-empty).
+    from BayHunter.SingleChain import SingleChain
+    if hasattr(SingleChain, "_orig_get_acceptance_probability"):
+        SingleChain.get_acceptance_probability = SingleChain._orig_get_acceptance_probability
+
+    lo, hi = layers[0] + 1, layers[1] + 1
+    kedges = np.arange(lo, hi + 2) - 0.5
+    print(f"\nTIER RADIAL -- continuous-gamma prior recovery ({nmain:,} main iters, k={lo}..{hi})")
+
+    runs = []
+    for s in (seed, seed + 1):
+        kt, gam, ch = _flat_likelihood_chain(nmain, s, layers, aniso="radial",
+                                             collect_gamma=True)
+        half = kt.size // 2
+        runs.append((kt[half:], gam[gam.size // 2:], ch))
+
+    rng = np.random.default_rng(seed)
+    kref, gref = _rejection_prior(runs[0][2], layers, nkeep=200_000, rng=rng)
+
+    glo, ghi = runs[0][2].priors.get("radial", (-0.35, 0.35))
+    gedges = np.linspace(glo, ghi, 21)
+
+    def h(x, edges):
+        c, _ = np.histogram(x, bins=edges)
+        return c / max(1, c.sum())
+
+    hk = [h(r[0], kedges) for r in runs]
+    hg = [h(r[1], gedges) for r in runs]
+    hkr, hgr = h(kref, kedges), h(gref, gedges)
+
+    floor_k = 0.5 * np.abs(hk[0] - hk[1]).sum()      # seed-to-seed = the sampler's own noise
+    floor_g = 0.5 * np.abs(hg[0] - hg[1]).sum()
+    out = {}
+    for name, hs, hr, floor in (("k", hk, hkr, floor_k), ("gamma", hg, hgr, floor_g)):
+        tvd = max(0.5 * np.abs(hs[i] - hr).sum() for i in range(2))   # worst of the two seeds
+        thresh = max(2.0 * floor, 0.02)
+        ok = tvd <= thresh
+        out[name] = (tvd, floor, ok)
+        print(f"  {name:<6} TVD vs rejection prior = {tvd:.4f}   seed-to-seed floor = {floor:.4f}"
+              f"   threshold = {thresh:.4f}   {'PASS' if ok else 'FAIL'}")
+    print(f"  k dist    MCMC: " + " ".join(f"{x:.3f}" for x in hk[0]))
+    print(f"  k dist    prior: " + " ".join(f"{x:.3f}" for x in hkr)
+          + "   (non-uniform BY DESIGN: Vsh truncation lowers P(valid|k) as k grows)")
+    print(f"  gamma     MCMC p16/p50/p84: {np.percentile(runs[0][1], [16, 50, 84]).round(3)}")
+    print(f"  gamma     prior p16/p50/p84: {np.percentile(gref, [16, 50, 84]).round(3)}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tier", type=int, choices=[1, 2, 3], default=None)
+    ap.add_argument("--tier", type=int, choices=[1, 2, 3, 4], default=None,
+                    help="4 = continuous-gamma radial prior recovery (tier_radial)")
     ap.add_argument("--ndraw", type=int, default=100_000)
     ap.add_argument("--nmain", type=int, default=400_000)
     ap.add_argument("--seed", type=int, default=42)
@@ -372,6 +473,8 @@ def main():
         tier2_reciprocity()
     if a.tier in (None, 3):
         tier3_prior_recovery(a.nmain, a.seed)
+    if a.tier in (None, 4):
+        tier_radial(a.nmain, a.seed)
 
 
 if __name__ == "__main__":

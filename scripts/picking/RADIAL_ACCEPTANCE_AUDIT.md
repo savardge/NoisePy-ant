@@ -148,6 +148,18 @@ this requires deciding what prior over `(k, l, config)` the fork intends: an aut
 The oracle above is what will settle it — add the candidate to `test_acceptance._D` and require TVD
 within the control floor.
 
+**RESOLUTION for the radial path (2026-07-16, `CONTINUOUS_ZETA_PLAN.md`).** The spike-and-slab
+parameterization was retired rather than repaired: radial γ is now a **continuous per-layer
+parameter** (born layers draw γ from the prior; death may remove any cell; the only remaining
+anisotropy move is a continuous, adaptively-scaled γ perturbation), matching standard practice
+(Esteve et al., Vienna Basin; Tomar 2016; Mordret 2015). Birth-from-prior makes the γ proposal and
+prior ratios cancel, so layer birth/death keeps the **vanilla isotropic acceptance with no `D`
+term**. Verified by `test_acceptance.py --tier 4` against a rejection sample of the code's own
+(Vsh-truncated) prior: **k TVD 0.027 (threshold 0.051), γ TVD 0.020 (threshold 0.048), PASS** at
+400k iterations, with Tier 1 still bitwise (100,000/100,000) — the isotropic path is untouched.
+The **azimuthal** spike-and-slab path remains broken as described above, now carries an explicit
+UNVALIDATED warning in `SingleChain.py`, and keeps its (wrong) `D` only because it is out of scope.
+
 **Consequence for existing results.** Every anisotropic/radial run's layer-count **and**
 γ-occupancy posterior is biased. γ is spike-and-slab, so occupancy is precisely the quantity of
 interest. **The synthetic gates inherit the same bug**, so this does not surface as a null-case
