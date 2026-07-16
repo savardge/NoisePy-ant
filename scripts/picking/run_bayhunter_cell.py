@@ -262,9 +262,13 @@ def main(cfgpath):
                   "azimuthal_anisotropy": False}                # isotropic (Vs) or radial below
     # RADIAL anisotropy: psi2amp block = signed per-layer gamma=(Vsh-Vsv)/Vsv (fork extension);
     # Love targets forward on Vsh, Rayleigh on Vsv. cfg["radial_prior"] = [lo, hi].
+    # Fallback MUST equal the (-0.35, 0.35) used by well_vs_qc.py and SingleChain.py's own
+    # .get default -- an older (-0.15, 0.25) here meant a cfg that omitted the key silently got
+    # a NARROWER prior than every other entry point (and -0.15/-0.20 floors have already railed
+    # real posteriors; see radial-anisotropy notes).
     if cfg.get("radial_anisotropy", False):
         initparams["radial_anisotropy"] = True
-        priors["radial"] = tuple(cfg.get("radial_prior", (-0.15, 0.25)))
+        priors["radial"] = tuple(cfg.get("radial_prior", (-0.35, 0.35)))
 
     # ---- optional REAL multiprocessing -------------------------------------------------------
     # BayHunter's mp_inversion does NOT deadlock on macOS -- the long-standing comment here was
@@ -478,6 +482,20 @@ def main(cfgpath):
     gprof = np.array(gprof) if gprof else np.zeros((0, len(dep)))
     gp = (np.nanpercentile(gprof, [2.5, 16, 50, 84, 97.5], axis=0) if len(gprof)
           else np.full((5, len(dep)), np.nan))
+    # CONTINUOUS gamma (CONTINUOUS_ZETA_PLAN.md): significance is the SIGN posterior, not
+    # spike occupancy. P(gamma>0)(z) near 0.5 = data don't constrain the sign; near 0/1 = they
+    # do. The old gamma_frac_nonzero is meaningless here (gamma is never exactly 0 -> ~1
+    # everywhere); it is no longer saved, and consumers treat its absence as "continuous run".
+    gamma_p_pos = (np.nanmean(gprof > 0, axis=0) if len(gprof)
+                   else np.full(len(dep), np.nan))
+    # Voigt-referenced zeta for direct comparison with the literature (Esteve et al. Vienna
+    # Basin; Tomar 2016): zeta = (Vsh-Vsv)/V_VOIGT with V_VOIGT = sqrt((2Vsv^2+Vsh^2)/3).
+    # With Vsh = Vsv(1+gamma) this is a pure function of gamma -- zeta =
+    # gamma/sqrt((2+(1+gamma)^2)/3) -- applied PER MODEL then summarized, so the percentiles
+    # are the true posterior of zeta, not a transform of gamma's percentiles.
+    zprof = gprof / np.sqrt((2.0 + (1.0 + gprof) ** 2) / 3.0) if len(gprof) else gprof
+    zp = (np.nanpercentile(zprof, [2.5, 16, 50, 84, 97.5], axis=0) if len(zprof)
+          else np.full((5, len(dep)), np.nan))
 
     # predicted dispersion for a subsample (posterior predictive band), per wave.
     # NOTE: computed with disba (not surf96) -- surf96's group-velocity root-finder can HANG
@@ -530,8 +548,9 @@ def main(cfgpath):
              radial=int(RADIAL),
              gamma_p025=gp[0], gamma_p16=gp[1], gamma_median=gp[2],
              gamma_p84=gp[3], gamma_p975=gp[4],     # gamma(z)=(Vsh-Vsv)/Vsv (NaN if not radial)
-             gamma_frac_nonzero=(np.nanmean(np.abs(gprof) > 1e-6, axis=0)
-                                 if len(gprof) else np.full(len(dep), np.nan)),
+             gamma_p_pos=gamma_p_pos,               # P(gamma>0)(z): sign significance (continuous)
+             zeta_p025=zp[0], zeta_p16=zp[1], zeta_median=zp[2],
+             zeta_p84=zp[3], zeta_p975=zp[4],       # Voigt-referenced zeta(z), lit-comparable
              chain_disagree=conv["chain_disagree"], frac_chains_ok=conv["frac_chains_ok"],
              burnin_delta_frac=conv["burnin_delta_frac"], n_chains_used=conv["n_chains"])
     for w in waves:

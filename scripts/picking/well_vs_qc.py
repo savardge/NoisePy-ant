@@ -578,9 +578,13 @@ def plot_well(net, well, ix, iy, dist_km, npz, overlay, out_png, vs_bounds, dept
     ax_if.set_title("interface prob.", fontsize=9)
     ax_if.tick_params(labelleft=False, labelsize=7)
 
-    # --- radial anisotropy gamma(z) = (Vsh-Vsv)/Vsv: 68/95% bands + P(gamma!=0) ---
-    # NOTE gamma is spike-and-slab (layers are isotropic unless the data demand otherwise), so the
-    # MEDIAN is often exactly 0 while the signal lives in the tails: read the bands + P together.
+    # --- radial anisotropy gamma(z) = (Vsh-Vsv)/Vsv: 68/95% bands + sign significance ---
+    # CONTINUOUS gamma (post CONTINUOUS_ZETA_PLAN.md): every layer carries gamma, so significance
+    # is the SIGN posterior P(gamma>0) -- ~0.5 where the data do not constrain the sign, near 0/1
+    # where they do -- and the median is a real estimate (no spike at 0 pinning it). Legacy
+    # spike-and-slab npz instead carry gamma_frac_nonzero = P(gamma!=0) (occupancy), which is only
+    # plotted for those files and is labelled as such; on continuous runs it would be ~1
+    # everywhere and mean nothing.
     if ax_ga is not None:
         gm, g16, g84 = r["gamma_median"], r["gamma_p16"], r["gamma_p84"]
         ax_ga.fill_betweenx(z, r["gamma_p025"], r["gamma_p975"], color="tab:orange", alpha=0.15,
@@ -591,10 +595,18 @@ def plot_well(net, well, ix, iy, dist_km, npz, overlay, out_png, vs_bounds, dept
         ax_ga.set(ylim=(0, depth_max), xlabel="$\\gamma=(V_{SH}-V_{SV})/V_{SV}$")
         ax_ga.invert_yaxis(); ax_ga.tick_params(labelleft=False, labelsize=7)
         ax_ga.legend(fontsize=6, loc="lower left")
-        if "gamma_frac_nonzero" in r.files:                    # P(gamma!=0) on a twin x-axis
+        if "gamma_p_pos" in r.files:                           # P(gamma>0) on a twin x-axis
+            axp = ax_ga.twiny()
+            axp.plot(r["gamma_p_pos"], z, color="tab:blue", lw=1.2, ls=":")
+            axp.axvline(0.5, color="tab:blue", lw=0.5, alpha=0.4)
+            axp.set_xlim(0, 1); axp.set_xlabel("P($\\gamma>0$)", fontsize=7, color="tab:blue")
+            axp.tick_params(axis="x", labelsize=6, colors="tab:blue")
+            axp.invert_yaxis()
+        elif "gamma_frac_nonzero" in r.files:                  # legacy spike-and-slab npz
             axp = ax_ga.twiny()
             axp.plot(r["gamma_frac_nonzero"], z, color="tab:blue", lw=1.2, ls=":")
-            axp.set_xlim(0, 1); axp.set_xlabel("P($\\gamma\\neq0$)", fontsize=7, color="tab:blue")
+            axp.set_xlim(0, 1)
+            axp.set_xlabel("P($\\gamma\\neq0$) (legacy)", fontsize=7, color="tab:blue")
             axp.tick_params(axis="x", labelsize=6, colors="tab:blue")
             axp.invert_yaxis()
         ax_ga.set_title("radial anisotropy", fontsize=9)
