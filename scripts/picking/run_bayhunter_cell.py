@@ -28,6 +28,7 @@ import numpy as np
 from BayHunter import Targets, MCMC_Optimizer, PlotFromStorage, ModelMatrix, Model
 
 from noisepy.vs_reliability import DELTA_LOGL as vr_DELTA_LOGL
+from noisepy import pt_defaults
 
 BH_MODE = {"fund": 1, "overtone": 2, "love": 1}     # surf96 mode: 1=fundamental, 2=first higher
 # wave key -> (disba/surf96 wave type, disba mode index); mirrors vs_inversion.WAVEDEF.
@@ -69,6 +70,91 @@ def _chain_median_at_t1(likefile):
     if not m.any():
         return -np.inf          # never sampled cold -> a genuine outlier, not a silent nan
     return np.median(likes[m])
+
+
+def _git(repo, *args):
+    """git output for `repo`, or None if unavailable (not a repo, no git, detached env...)."""
+    try:
+        import subprocess
+        return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True,
+                              check=True, timeout=10).stdout.strip()
+    except Exception:
+        return None
+
+
+def _sha256(path):
+    import hashlib
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return ""
+
+
+def _provenance(initparams, opt, outlier_delta):
+    """Everything needed to reconstruct, from the npz alone, WHAT ran and HOW it was tempered.
+
+    Consumers MUST treat a MISSING key as "legacy run, unknown" -- never as "PT off". A pre-2026-07
+    npz has no pt_enabled and may well have been a PT run; silently reading it as non-PT is exactly
+    the error this block exists to prevent.
+    """
+    import importlib
+    import BayHunter
+    # the MODULE, not the class: `from BayHunter import SingleChain` binds the class (re-exported
+    # by BayHunter/__init__.py), which has no __file__.
+    _sc_mod = importlib.import_module("BayHunter.SingleChain")
+    bh_dir = os.path.dirname(os.path.abspath(BayHunter.__file__))
+    prov = {}
+    pt = bool(initparams.get("parallel_tempering", False))
+    prov["pt_enabled"] = int(pt)
+    prov["pt_t1chains"] = int(initparams.get("t1chains", -1)) if pt else -1
+    prov["pt_maxtemp"] = float(initparams.get("maxtemp", np.nan)) if pt else np.nan
+    # The REALISED ladder, not just the two knobs: _create_temperature_ladder
+    # (mcmcOptimizer.py:184-198) silently clamps t1chains > nchains to all-ones with only a logger
+    # warning, so PT can be a complete no-op while pt_enabled=1. Only the ladder itself shows that.
+    lad = getattr(opt, "temperatures", None)
+    prov["pt_ladder"] = (np.asarray(lad[:, 0], np.float32) if lad is not None
+                         else np.array([], np.float32))
+    prov["pt_swaps_accepted"] = int(getattr(opt, "accepted_temperature_swaps", -1))
+    prov["pt_swaps_total"] = int(getattr(opt, "total_temperature_swaps", -1))
+    # Thinned per-chain temperature history -> ROUND-TRIP RATE (T=1 -> T_max -> T=1), which is the
+    # only statistic that says whether the ladder actually TRANSPORTS states from the hot end down
+    # to T=1. Swap acceptance cannot: a ladder crammed into [1,2] posts a healthy-looking rate
+    # while melting nothing. Raw is (nchains x iterations) ~15 MB at 16x240k, so stride it to
+    # ~1000 columns (~64 kB) -- round trips are slow, so nothing is lost.
+    if pt and lad is not None:
+        stride = max(1, lad.shape[1] // 1000)
+        hist = np.asarray(lad[:, ::stride], np.float32)
+        prov["pt_temp_history"] = hist
+        prov["pt_temp_history_stride"] = int(stride)
+        rt, tot = pt_defaults.round_trips(hist)
+        prov["pt_round_trips"] = np.asarray(rt, int)
+        print(f"  PT ladder: T={np.round(np.unique(hist[:, 0]), 2)}  "
+              f"round trips {tot} total ({tot / max(1, hist.shape[0]):.2f}/chain)", flush=True)
+    else:
+        prov["pt_temp_history"] = np.empty((0, 0), np.float32)
+        prov["pt_temp_history_stride"] = -1
+        prov["pt_round_trips"] = np.array([], int)
+    prov["outlier_delta"] = float(outlier_delta)
+    # the module that was IMPORTED -- not src/ -- because that is what actually executed
+    prov["singlechain_sha256"] = _sha256(os.path.abspath(_sc_mod.__file__).replace(".pyc", ".py"))
+    # The BayHunter commit comes from the stamp deploy.sh leaves in site-packages, NOT from asking
+    # git about the import path: the fork is installed as a COPY, so the deployed tree lives
+    # outside the checkout and is not a git repo at all -- `git -C site-packages rev-parse HEAD`
+    # simply fails, which is why this used to record an empty sha. If the stamp is absent the code
+    # was deployed by hand rather than by deploy.sh, and "" is the honest answer.
+    info = {}
+    try:
+        with open(os.path.join(bh_dir, ".deploy_info.json")) as f:
+            info = json.load(f)
+    except Exception:
+        pass
+    prov["bayhunter_git_sha"] = str(info.get("git_sha", ""))
+    prov["bayhunter_dirty"] = int(bool(info["dirty"])) if "dirty" in info else -1
+    prov["bayhunter_deployed_utc"] = str(info.get("deployed_utc", ""))
+    prov["driver_git_sha"] = _git(os.path.dirname(os.path.abspath(__file__)),
+                                  "rev-parse", "HEAD") or ""
+    return prov
 
 
 def _use_abs_outlier_cut(obj, delta):
@@ -169,8 +255,10 @@ def main(cfgpath):
                   "lvz": frac, "hvz": frac,                     # <- the <=maxfrac constraint
                   "rcond": 1e-5, "station": "cell", "savepath": savepath, "maxmodels": 50000,
                   "parallel_tempering": bool(cfg.get("parallel_tempering", False)),
-                  "t1chains": int(cfg.get("t1chains", max(1, N // 2))),
-                  "maxtemp": float(cfg.get("maxtemp", 2.0)),
+                  # defaults live in noisepy.pt_defaults (single source of truth -- they used to be
+                  # duplicated here and in well_vs_qc.py and could diverge silently)
+                  **dict(zip(("t1chains", "maxtemp"),
+                             pt_defaults.resolve(cfg.get("t1chains"), cfg.get("maxtemp"), N))),
                   "azimuthal_anisotropy": False}                # isotropic (Vs) or radial below
     # RADIAL anisotropy: psi2amp block = signed per-layer gamma=(Vsh-Vsv)/Vsv (fork extension);
     # Love targets forward on Vsh, Rayleigh on Vsv. cfg["radial_prior"] = [lo, hi].
@@ -316,17 +404,38 @@ def main(cfgpath):
     # which is how runs keeping 5/16 (and 1/16) chains reached publication figures unnoticed.
     # Saved unconditionally: whether the main phase is still climbing is the single most
     # important thing to know about a posterior, and it must be visible on the plot itself.
-    def _thin_traces(seq, n=400):
-        out = []
-        for l in seq:
+    def _thin_traces(seq, n=400, companion=None):
+        """Thin each chain's trace to n samples. If `companion` is given (same chain order), it
+        is thinned with the SAME indices, so companion[i][j] still describes seq[i][j].
+
+        The pairing is why this takes a companion instead of being called twice: chain_like_p2 and
+        chain_temps_p2 are only meaningful together, and independently-computed index sets would
+        silently mislabel which samples were hot -- worse than not saving temperatures at all.
+        """
+        out, out_c = [], []
+        for i, l in enumerate(seq):
             l = np.asarray(l, float)
+            c = None if companion is None else companion[i]
+            c = None if c is None else np.asarray(c, float)
             if l.size == 0:
-                out.append(np.full(n, np.nan)); continue
-            v = l[np.linspace(0, l.size - 1, min(n, l.size)).astype(int)]
+                out.append(np.full(n, np.nan))
+                out_c.append(np.full(n, np.nan))
+                continue
+            idx = np.linspace(0, l.size - 1, min(n, l.size)).astype(int)
+            v = l[idx]
+            # a temperatures file that is absent (pre-PT run) or shape-mismatched yields NaN, which
+            # downstream reads as "unknown", never as "cold"
+            vc = c[idx] if (c is not None and c.shape == l.shape) else np.full(idx.size, np.nan)
             if v.size < n:
                 v = np.pad(v, (0, n - v.size), constant_values=np.nan)
+                vc = np.pad(vc, (0, n - vc.size), constant_values=np.nan)
             out.append(v)
-        return np.array(out, dtype=np.float32) if out else np.empty((0, n), np.float32)
+            out_c.append(vc)
+        arr = np.array(out, dtype=np.float32) if out else np.empty((0, n), np.float32)
+        if companion is None:
+            return arr
+        arr_c = np.array(out_c, dtype=np.float32) if out_c else np.empty((0, n), np.float32)
+        return arr, arr_c
     chain_vs_profiles = np.array(diag["vs_profile"]) if diag["vs_profile"] \
         else np.empty((0, len(dep_diag)))
     chain_vs_p16 = np.array(diag["vs_p16"]) if diag.get("vs_p16") \
@@ -436,7 +545,13 @@ def main(cfgpath):
     d["chain_idx"] = chain_idx
     d["chain_loglike_med"] = chain_loglike_med
     d["chain_like_p1"] = _thin_traces(diag["likes_p1"])   # (nchain, 400) burn-in trace
-    d["chain_like_p2"] = _thin_traces(diag["likes_p2"])   # (nchain, 400) main-phase trace
+    # main-phase trace WITH its per-sample temperature, thinned on the same indices. Under PT a
+    # chain's p2likes mixes every temperature it held (temperatures SWAP between chains) and a
+    # T>1 sample comes from a FLATTENED posterior, so it fits worse BY CONSTRUCTION. Without the
+    # companion, plots and drift statistics show hot and cold samples indistinguishably and a
+    # healthy chain looks like it is wandering. NaN where the run predates PT.
+    d["chain_like_p2"], d["chain_temps_p2"] = _thin_traces(
+        diag["likes_p2"], companion=diag.get("temps_p2"))
     d["iter_burnin"] = int(initparams.get("iter_burnin", 0))
     d["iter_main"] = int(initparams.get("iter_main", 0))
     d["chain_vs_depth"] = dep_diag
@@ -455,6 +570,17 @@ def main(cfgpath):
         d["n_chains_kept"] = rel["n_kept"]
         d["frac_kept"] = rel["frac_kept"]
         d["confidence"] = rel["confidence"]
+
+    # ---- PROVENANCE: what code, and what tempering, actually produced this file --------------
+    # Without this you cannot tell from a result npz whether PT was on, let alone which ladder or
+    # which acceptance ratio ran -- and the raw chain dir (with p2temperatures) is deleted below,
+    # so nothing else survives to tell you. Two shas, deliberately:
+    #   bayhunter_git_sha  describes the REPO
+    #   singlechain_sha256 describes the module that was actually IMPORTED
+    # They differ whenever src/ was edited but not redeployed -- the fork is pip-installed as a
+    # COPY, so that failure is silent (see BayHunter_Aniso/check_deploy.py). The git sha alone
+    # would happily certify a run that used stale code; the module sha256 is what catches it.
+    d.update(_provenance(initparams, opt, float(cfg.get("outlier_delta", vr_DELTA_LOGL))))
 
     # optional full-ensemble dump for per-well QC (Vs density, interface prob, misfit hist)
     if cfg.get("save_ensemble"):

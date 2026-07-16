@@ -8,10 +8,11 @@ fundamental + 1st-overtone Rayleigh GROUP-velocity curves with BayHunter, using
   * everything else identical (fund+overtone, iter_burnin/iter_main, Vs bounds, 20 layers)
 
 and sweep ONLY the number of chains: 4 / 8 / 16 / 24.  This isolates the one variable
-that governs BayHunter's own outlier-chain removal (save_final_distribution(dev=0.05)
-drops any chain whose post-burnin median log-likelihood is > 5% below the best chain --
-the direct analog of invert_section.py's 2x-best-chi2 filter used in the HVC
-CHAINCOUNT_effect.png).  The group-only inversion of shallow structure is non-unique, so
+that governs the outlier-chain removal (a chain is dropped when its post-burnin median
+log-likelihood is more than DELTA_LOGL below the best chain's -- the direct analog of
+invert_section.py's 2x-best-chi2 filter used in the HVC CHAINCOUNT_effect.png; note this
+is an ABSOLUTE log-likelihood difference, having replaced BayHunter's scale-dependent
+relative dev=0.05).  The group-only inversion of shallow structure is non-unique, so
 independent chains settle in different local modes; more chains = more independent hits on
 the good-mode basin => a more robust, stable posterior.
 
@@ -20,7 +21,7 @@ Two phases:
           per-chain files persist (needed to show which chains were kept/dropped).
   plot -- one figure per net, one row per well, three columns mirroring CHAINCOUNT_effect.png:
             1. per-chain post-burnin median log-like at each chain count -- green = kept by
-               the dev=0.05 outlier filter, red = dropped; label = kept/total;
+               the absolute Delta-logL outlier filter, red = dropped; label = kept/total;
             2. filtered posterior Vs(z) median at 4/8/16/24 chains + 24-chain 16-84% band
                + the well log -- shows the profile STABILISES once enough chains find the
                good mode;
@@ -45,6 +46,7 @@ import matplotlib.pyplot as plt
 
 from noisepy import vs_inversion as vi
 from noisepy import period_resolution as pr
+from noisepy.vs_reliability import DELTA_LOGL
 
 import well_vs_qc as wq   # WELLS, overlay_curves, stations_hull
 
@@ -54,7 +56,11 @@ NCS = [4, 8, 16, 24]
 CCOL = {4: "#9ecae1", 8: "#4292c6", 16: "#08519c", 24: "black"}
 WAVES = ("fund", "overtone")
 CRIT = "physical"
-DEV = 0.05                 # BayHunter save_final_distribution dev -> outlier-chain threshold
+# Outlier-chain threshold: ABSOLUTE Delta-logL from the best chain (scale-free), shared with
+# run_bayhunter_cell._use_abs_outlier_cut and vs_reliability.assess so this sweep, the
+# posterior, and the reliability flags all describe the same set of chains. Replaces
+# BayHunter's relative dev=0.05, whose tolerance is dev*|best| and so drifts with the
+# likelihood scale -- fatal for a study whose whole purpose is comparing chain counts.
 
 
 # ----------------------------------------------------------------------------- cell selection
@@ -110,12 +116,19 @@ def run_one(net, well, ix, iy, nc, outdir, args, waves=WAVES):
 
 # ----------------------------------------------------------------------------- per-chain readout
 def chain_stats(r):
-    """Per-chain post-burnin median log-like + median Vs(z), and the dev=0.05 kept-mask,
-    read from the result npz (chain_* arrays dumped by run_bayhunter_cell).
+    """Per-chain post-burnin median log-like + median Vs(z) + kept-mask, from the result npz.
 
-    Mirrors BayHunter's own get_outliers: keep chains whose post-burnin median log-like is
-    within DEV (5%) of the best chain's. Returns (loglike_med[nc], kept[nc], vsprof[nc,ndep],
-    depth[ndep])."""
+    Keeps chains within an ABSOLUTE Delta-logL of the best chain -- the same scale-free rule the
+    runner builds the posterior with (run_bayhunter_cell._use_abs_outlier_cut) and that
+    vs_reliability.assess reports. This used to mirror BayHunter's relative `dev` rule
+    (|1 - like/best| <= 0.05), which is not scale-free: its tolerance in real log units is
+    dev*|best|, so across runs of identical construction here (best spanning -34..+97) it ranged
+    from 0.11 to 4.84 logL, and near best~0 it explodes. A likelihood RATIO is the meaningful
+    quantity; a relative deviation is not. This study SWEEPS chain counts, so a rule whose
+    strictness drifts with the likelihood scale would confound the very comparison it exists for.
+
+    Uses the run's own `outlier_delta` where recorded, else vs_reliability.DELTA_LOGL.
+    Returns (loglike_med[nc], kept[nc], vsprof[nc,ndep], depth[ndep])."""
     meds = np.asarray(r["chain_loglike_med"], float) if "chain_loglike_med" in r.files \
         else np.array([])
     vsprof = np.asarray(r["chain_vs_profiles"], float) if "chain_vs_profiles" in r.files \
@@ -123,9 +136,9 @@ def chain_stats(r):
     dep = np.asarray(r["chain_vs_depth"], float) if "chain_vs_depth" in r.files else np.array([])
     if meds.size == 0:
         return meds, np.array([], bool), vsprof, dep
-    # log-likes are negative, best = max (closest to 0). Keep |1 - like/best| <= DEV.
+    delta = float(r["outlier_delta"]) if "outlier_delta" in r.files else float(DELTA_LOGL)
     best = np.nanmax(meds)
-    kept = np.abs(1.0 - meds / best) <= DEV if best else np.ones(len(meds), bool)
+    kept = (best - meds) <= delta if np.isfinite(best) else np.ones(len(meds), bool)
     return meds, kept, vsprof, dep
 
 
@@ -161,14 +174,14 @@ def plot_net(net, wells_cells, outdir, args):
             ax.scatter(x[~kept], meds[~kept], c="tab:red", s=40, zorder=3, lw=1.0, marker="x",
                        label="dropped" if nc == NCS[0] else None)
             best = np.nanmax(meds)
-            thr = best * (1 + DEV) if best < 0 else best * (1 - DEV)   # 5%-of-best boundary
+            thr = best - DELTA_LOGL          # absolute Delta-logL boundary, same rule as the mask
             ax.hlines(thr, nc - 1.7, nc + 1.7, color=CCOL[nc], lw=1.3, ls="--")
             ax.text(nc, np.nanmax(meds), f"{int(kept.sum())}/{len(kept)}", ha="center",
                     va="bottom", fontsize=9, color=CCOL[nc])
         ax.set_xticks(NCS)
         ax.set_xlabel("number of chains")
         ax.set_ylabel("per-chain post-burnin median log-like")
-        ax.set_title(f"{name}: chain fits (dashed = 5%-of-best outlier filter)")
+        ax.set_title(f"{name}: chain fits (dashed = ΔlogL ≤ {DELTA_LOGL:g} outlier filter)")
         ax.legend(fontsize=8, loc="lower right")
         ax.grid(alpha=0.2)
 
@@ -243,7 +256,7 @@ def plot_net(net, wells_cells, outdir, args):
     fig.suptitle(
         f"{net.capitalize()} -- effect of BayHunter chain count on well-adjacent Vs inversion\n"
         f"physical period-trim  |  +/-50% LVZ/HVZ (lvz=hvz=0.5)  |  fund+overtone group  |  "
-        f"outlier-chain filter dev={DEV}\n"
+        f"outlier-chain filter: ΔlogL ≤ {DELTA_LOGL:g} from best chain\n"
         "more chains = more independent hits on the good-mode basin -> more robust, stable posterior",
         fontsize=12)
     out_png = os.path.join(outdir, f"CHAINCOUNT_wells_{net}.png")

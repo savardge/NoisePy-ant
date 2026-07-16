@@ -30,6 +30,8 @@ from scipy.spatial import ConvexHull
 
 from noisepy import vs_inversion as vi
 from noisepy import period_resolution as pr
+from noisepy import vs_reliability as vr
+from noisepy import pt_defaults
 
 # per-cell period-trimming criteria (see noisepy/period_resolution.py); "none" = untrimmed baseline
 CRIT_LABEL = {"none": "untrimmed", "combined": "A: combined", "physical": "B: physical",
@@ -201,11 +203,16 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
         cfg["use_mp"] = True
         cfg["mp_nthreads"] = int(getattr(args, "mp_nthreads", 0) or 0)
     if getattr(args, "parallel_tempering", False):
-        # PT costs half the posterior: only t1chains/nchains of the samples sit at T=1, and
-        # BayHunter keeps ONLY those (Plotting.py:271). Budget chains accordingly.
+        # PT costs posterior samples: only t1chains/nchains of them sit at T=1 and BayHunter keeps
+        # ONLY those (Plotting.py:271) -- ~19% at the t1chains=3 default, so ~2.7x fewer than the
+        # old 8/16. Budget --n-chains / --iter-main accordingly. Defaults + rationale live in
+        # noisepy.pt_defaults; `None` (not 0) means "unset", so --t1chains 0 is no longer silently
+        # swallowed by an `or`.
+        t1, mt = pt_defaults.resolve(getattr(args, "t1chains", None),
+                                     getattr(args, "maxtemp", None), args.n_chains)
         cfg["parallel_tempering"] = True
-        cfg["t1chains"] = int(getattr(args, "t1chains", None) or max(1, args.n_chains // 2))
-        cfg["maxtemp"] = float(getattr(args, "maxtemp", None) or 2.0)
+        cfg["t1chains"] = t1
+        cfg["maxtemp"] = mt
     cfgpath = os.path.join(workdir, "config.json")
     json.dump(cfg, open(cfgpath, "w"))
     env = dict(os.environ, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES", VECLIB_MAXIMUM_THREADS="1",
@@ -215,30 +222,74 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
     return out_npz
 
 
-def _chain_kept(r, dev=0.05):
-    """Which chains BayHunter's dev-filter keeps (same rule as save_final_distribution).
+def _chain_kept(r, legacy_dev=None):
+    """Which chains are actually IN the posterior, using the rule that actually built it.
 
-    WARNING -- `dev` is RELATIVE: |1 - loglike/best|. Its strictness therefore depends entirely
-    on the ABSOLUTE SCALE of the log-likelihood, which scales with the number of data points and
-    sigma. The BayHunter docs flag that it must be tuned per dataset; two ways it misfires here:
+    The point of this function is to mirror the ensemble, so it must track what the runner does.
+    run_bayhunter_cell._use_abs_outlier_cut replaces BayHunter's get_outliers with an ABSOLUTE
+    Delta-logL cut (`best - median <= outlier_delta`), so since then the posterior has NOT been
+    built with `dev` and reproducing the relative rule here misdescribed the ensemble it claims to
+    mirror. It now reads the run's own `outlier_delta` (saved into the npz), falling back to
+    vs_reliability.DELTA_LOGL for npz written before that key existed.
 
-      * loglike near zero or negative -> the ratio explodes. Boettstein group+phase has
-        best = -5.4, so a chain at -5.8 (only 0.4 log units worse, i.e. the same basin) scores
-        dev = 0.075 and is discarded. dev=0.05 kept 1/16 chains -- an artifact, not a finding.
-      * loglike large -> dev is very permissive and lets stranded chains through.
+    `dev` is RELATIVE (|1 - loglike/best|), so its tolerance in real log units is dev*|best| and
+    its strictness depends entirely on the likelihood SCALE:
+      * best near zero -> the ratio explodes. Boettstein group+phase has best = -5.4, so a chain
+        at -5.8 -- 0.4 log units away, plainly the same basin -- scores dev = 0.075 and is cut;
+        dev=0.05 kept 1/16 chains, an artifact, not a finding.
+      * best large -> dev is very permissive and lets stranded chains through.
+    A likelihood RATIO is the meaningful quantity; a relative deviation is not.
 
-    Use `_chain_clusters` for the honest answer; this function exists only to reproduce what
-    BayHunter's ensemble ACTUALLY contains (the posterior was built with whatever dev was used).
+    Pass `legacy_dev` (e.g. 0.05) ONLY to regenerate a pre-2026-07 figure with its original rule.
+
+    Returns (loglike, kept_mask, label) -- label names the rule, for stamping on the figure so a
+    regenerated panel is distinguishable from an old one on sight.
     """
     if "chain_loglike_med" not in r.files:
-        return None, None
+        return None, None, ""
     ll = np.asarray(r["chain_loglike_med"], float)
     if ll.size == 0:
-        return None, None
+        return None, None, ""
     best = np.nanmax(ll)
-    kept = np.abs(1.0 - ll / best) <= dev if np.isfinite(best) and best != 0 \
-        else np.ones(ll.size, bool)
-    return ll, kept
+    if not np.isfinite(best):
+        return ll, np.ones(ll.size, bool), "all (best non-finite)"
+    if legacy_dev is not None:
+        kept = (np.abs(1.0 - ll / best) <= legacy_dev if best != 0
+                else np.ones(ll.size, bool))
+        return ll, kept, f"legacy dev={legacy_dev:g}"
+    delta = float(r["outlier_delta"]) if "outlier_delta" in r.files else float(vr.DELTA_LOGL)
+    return ll, (best - ll) <= delta, f"ΔlogL ≤ {delta:g}"
+
+
+def _temp_note(r):
+    """Short label describing the temperature provenance of chain_like_p2, for figure titles.
+
+    Three distinguishable states, and the distinction matters: a legacy npz predates the
+    temperature companion, so we CANNOT know whether it was a PT run -- saying nothing would let a
+    temperature-mixed trace pass as a clean one.
+    """
+    if "chain_temps_p2" not in r.files:
+        return "" if "pt_enabled" in r.files and not int(r["pt_enabled"]) \
+            else "  [temperature-mixed? legacy npz]"
+    t = np.asarray(r["chain_temps_p2"], float)
+    if not np.isfinite(t).any():
+        return ""                                  # no tempering info recorded => PT was off
+    return "  [T=1 samples only]" if np.nanmax(t) > 1.0 else ""
+
+
+def _t1_mask(r, i):
+    """Boolean mask selecting chain i's T=1 samples in chain_like_p2 (all True if not tempered).
+
+    Under PT a sample at T>1 is drawn from a FLATTENED posterior and fits worse BY CONSTRUCTION,
+    so any statistic over a raw p2 trace penalises a chain for having been hot. Only T=1 samples
+    enter the posterior (Plotting.py:271), so only they should enter its diagnostics.
+    """
+    if "chain_temps_p2" not in r.files:
+        return None
+    t = np.asarray(r["chain_temps_p2"], float)
+    if i >= t.shape[0] or not np.isfinite(t[i]).any():
+        return None
+    return t[i] == 1.0
 
 
 def _chain_clusters(r, dlog=None):
@@ -355,7 +406,7 @@ def _convergence_panel(ax, r, dev=0.05):
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title("convergence", fontsize=10)
         return
-    ll, kept = _chain_kept(r, dev)
+    ll, kept, rule = _chain_kept(r, dev)
     nb = int(r["iter_burnin"]) if "iter_burnin" in r.files else p1.shape[1]
     nm = int(r["iter_main"]) if "iter_main" in r.files else p2.shape[1]
     x1 = np.linspace(0, nb, p1.shape[1])
@@ -382,8 +433,13 @@ def _convergence_panel(ax, r, dev=0.05):
     ax.text(nb, ax.get_ylim()[0], "burn-in ", fontsize=7, va="bottom", ha="right", color="0.3")
     ax.set(xlabel="iteration", ylabel="log-likelihood")
     nk = int(kept.sum()) if kept is not None else -1
-    ax.set_title(f"convergence — {nk}/{p1.shape[0]} chains kept "
-                 f"(blue=kept, red=discarded)", fontsize=9)
+    # Stamp the RULE on the panel: the kept/discarded split moved from a relative dev to an
+    # absolute Delta-logL cut, and a regenerated figure is otherwise indistinguishable from an old
+    # one. Also flag a temperature-mixed trace: under PT a chain's p2 mixes every temperature it
+    # held, so hot excursions are plotted next to cold samples and read as wander.
+    tmix = _temp_note(r)
+    ax.set_title(f"convergence — {nk}/{p1.shape[0]} chains kept ({rule})"
+                 f"{tmix}\n(blue=kept, red=discarded)", fontsize=8)
 
 
 def _convergence_text(r, dev=0.05):
@@ -394,19 +450,29 @@ def _convergence_text(r, dev=0.05):
     main phase inherits a transient. The 2:1 burnin:main ratio is only meaningful once this
     is small -- ratio alone guarantees nothing.
     """
-    ll, kept = _chain_kept(r, dev)
+    ll, kept, rule = _chain_kept(r, dev)
     def g(k):
         return float(np.asarray(r[k]).ravel()[0]) if k in r.files else np.nan
     nb, nm = g("iter_burnin"), g("iter_main")
     cd, bd = g("chain_disagree"), g("burnin_delta_frac")
     nk = int(kept.sum()) if kept is not None else -1
     nc = int(len(kept)) if kept is not None else -1
-    # main-phase drift: is the likelihood still climbing after burn-in?
+    # main-phase drift: is the likelihood still climbing after burn-in? Computed over T=1 samples
+    # only where the temperature companion exists -- a hot sample sits far below the cold ones by
+    # construction, so a temperature-mixed trace manufactures "drift" out of healthy tempering.
     drift = np.nan
     if "chain_like_p2" in r.files:
         p2 = np.asarray(r["chain_like_p2"], float)
-        rows = [p2[i] for i in range(p2.shape[0])
-                if (kept is None or (i < len(kept) and kept[i])) and np.isfinite(p2[i]).any()]
+        rows = []
+        for i in range(p2.shape[0]):
+            if kept is not None and i < len(kept) and not kept[i]:
+                continue
+            row = p2[i]
+            m = _t1_mask(r, i)
+            if m is not None:
+                row = np.where(m, row, np.nan)
+            if np.isfinite(row).any():
+                rows.append(row)
         if rows:
             m = np.nanmean(np.vstack(rows), axis=0)
             m = m[np.isfinite(m)]
@@ -776,10 +842,17 @@ def main():
                     help="enable parallel tempering. NB the runner drives chains in LOCKSTEP when "
                          "this is on (BayHunter's swap needs all chains at the same iteration); "
                          "and only the t1chains at T=1 contribute to the posterior, so PT buys "
-                         "mixing at the cost of ~half the samples for the same compute")
+                         f"mixing at the cost of samples (~{pt_defaults.PT_T1CHAINS}/nchains kept). "
+                         "Judge the ladder by pt_round_trips in the npz, NOT by swap acceptance")
     ap.add_argument("--t1chains", type=int, default=None,
-                    help="number of chains held at T=1 (default nchains//2)")
-    ap.add_argument("--maxtemp", type=float, default=None, help="top of the temperature ladder (default 2.0)")
+                    help=f"chains held at T=1 (default {pt_defaults.PT_T1CHAINS}; see "
+                         f"noisepy/pt_defaults.py). Equal-T chains never swap with each other, so "
+                         f"extra T=1 chains add no mixing")
+    ap.add_argument("--maxtemp", type=float, default=None,
+                    help=f"top of the temperature ladder (default {pt_defaults.PT_MAXTEMP}). Set "
+                         f"this from the BARRIER HEIGHT: maxtemp=2 only halves logL differences, "
+                         f"so it melts nothing. High swap acceptance is a symptom of a too-tight "
+                         f"ladder, not health")
     ap.add_argument("--measure", default="group", choices=("group", "phase", "both"),
                     help="which measurement set to invert (waves/radial unchanged): group (legacy) "
                          "| phase (needs --phase-root) | both (joint). Run all three to compare "

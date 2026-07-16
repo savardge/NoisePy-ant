@@ -175,6 +175,16 @@ def confidence(frac_kept, reln_frac, n_kept):
     reln_frac  : fraction of the data-sensitive depth band that is chain-resolved
                  (z_reliable_max / min(z_floor, depth_max)) -- how much of what the data can
                  see the chains actually agree on.
+
+    UNDER PARALLEL TEMPERING, `n_kept` counts chains that were EVER at T=1, not the instantaneous
+    ladder width -- and that is the right definition, not a workaround. Temperatures SWAP between
+    chains (mcmcOptimizer._swap_temperatures), so with t1chains=3 of 16 it is not 3 fixed chains
+    that stay cold: over a full run nearly every chain visits T=1 and contributes valid cold
+    samples to the posterior. This falls out for free because the upstream `loglike_med` is
+    bh_diagnostics.chain_medians_t1, i.e. a median over each chain's T=1 samples only, which
+    returns -inf for a chain that never went cold -- so such a chain fails `best - ll <= delta` and
+    is excluded, while every chain that did go cold is counted. The `n_kept >= 8` gate below is
+    therefore NOT a function of t1chains, and PT does not silently downgrade cells.
     """
     if n_kept >= 8 and frac_kept >= 0.5 and reln_frac >= 0.8:
         return "high"
@@ -194,9 +204,17 @@ def assess(depth, p16, p50, p84, loglike_med, periods=None, velocities=None,
     Returns a dict with rho(z), reliable mask/interval, and scalar QC (frac_kept, confidence).
     """
     loglike_med = np.asarray(loglike_med, float)
-    best = np.nanmax(loglike_med)
-    kept = (best - loglike_med) <= delta if np.isfinite(best) \
-        else np.ones(len(loglike_med), bool)
+    best = np.nanmax(loglike_med) if loglike_med.size else np.nan
+    if np.isfinite(best):
+        # -inf entries (chains that never sampled at T=1 under PT, per
+        # bh_diagnostics.median_at_t1) give inf > delta and are correctly dropped here.
+        kept = (best - loglike_med) <= delta
+    elif loglike_med.size and np.all(np.isneginf(loglike_med)):
+        # every chain -inf => not "no information, keep everything" but "NO chain ever sampled at
+        # T=1", which is a broken run. Keeping all of them would launder it into a confident cell.
+        kept = np.zeros(loglike_med.size, bool)
+    else:
+        kept = np.ones(len(loglike_med), bool)
     n_kept = int(kept.sum())
     frac_kept = n_kept / max(1, len(loglike_med))
     z_floor = wavelength_floor(periods, velocities) if periods is not None else None
