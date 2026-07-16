@@ -49,9 +49,9 @@ for vf in sorted(glob.glob(os.path.join(V6, "*", "*_modes_validated.csv"))):
     snr = pd.to_numeric(v.snr_fund, errors="coerce")
     rows.append(dict(
         pair=pr, s1=s1, s2=s2, n=n,
-        frac_fund=(v.fund_flag == "ok").mean(),
-        frac_ot=(v.ot_flag == "ok").mean(),
-        frac_mix=(v.ot_flag == "mode_mixing").mean(),
+        frac_fund=v.fund_use.mean(),          # fund_use / ot_use are the validator's
+        frac_ot=v.ot_use.mean(),              # "use for tomography" booleans (== flag=="ok")
+        frac_mix=(v.ot_flag == "mode_mixing").mean(),   # specific failure mode: no boolean for it
         snr=np.nanmedian(snr) if np.isfinite(snr).any() else np.nan,
         frac_glr0=np.isfinite(pd.to_numeric(v.U_fund, errors="coerce")).mean()))
 P = pd.DataFrame(rows)

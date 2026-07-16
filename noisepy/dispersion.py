@@ -1010,8 +1010,15 @@ def measure_point(cwt_data, period, U, dist, refine=True, half=8):
     phase = float((phase_unwrapped_at_peak + np.pi) % (2.0 * np.pi) - np.pi)
     omega_inst = (phase_unw[itp + 1] - phase_unw[itp - 1]) / (2.0 * dt)
     T_inst = 2.0 * np.pi / omega_inst if omega_inst > 0 else np.nan
+    # The phase was read on scale row j, whose true Fourier frequency is freq[j]. The nominal
+    # `period` label can differ from 1/freq[j] by up to ~half the (log) scale spacing -- large
+    # at long periods where scales are sparse, so several nominal periods can snap to one scale
+    # (identical measurement, mislabelled). Return the scale identity so callers can use the
+    # frequency actually measured (f_scale) and de-duplicate picks that share a scale.
+    f_scale = float(cwt_data['freq'][j])
     return {'t_peak': float(t_peak), 'U': float(dist / t_peak), 'phase': phase,
-            'omega_inst': float(omega_inst), 'T_inst': float(T_inst)}
+            'omega_inst': float(omega_inst), 'T_inst': float(T_inst),
+            'scale_j': int(j), 'f_scale': f_scale}
 
 
 def instantaneous_period_at(cwt_data, period, U, dist):
@@ -1079,7 +1086,7 @@ def phase_at(cwt_data, period, U, dist):
 
 
 def phase_velocity(phi_tu, U, dist, period, c_ref, phase_shift=np.pi / 4.0,
-                   phase_offset=0.0, n_search=6):
+                   phase_offset=0.0, n_search=8):
     """
     Phase velocity from the analytic-signal phase, with the 2*pi*N ambiguity resolved by a
     reference curve (Bensen et al. 2007 eqs. 10-11).
@@ -1101,10 +1108,14 @@ def phase_velocity(phi_tu, U, dist, period, c_ref, phase_shift=np.pi / 4.0,
         dist: inter-station distance [km]
         period: period [s] (nominal or corrected; sets w = 2*pi/period)
         c_ref: callable c_ref(period) -> reference phase velocity [km/s] (may return nan)
-        phase_shift: stationary-phase term. -pi/4 for vertical Rayleigh (ZZ),
-            +pi/4 for radial; pass the appropriate value for Love (see Snieder 2004 / Lin 2007).
+        phase_shift: stationary-phase term, in this code's NEGATED-phase convention (see the
+            derivation above and the synthetic validation). +pi/4 for the ZZ-convention
+            Rayleigh components used here (ZZ, RR, and the mode-separated G_LR0/G_LR1); the
+            corrected-cross-component values are RZ -pi/4, ZR +3*pi/4 (negatives of the Nayak
+            2020 p.1591 table, which is written in the +phi convention). NOTE: an earlier
+            docstring gave "-pi/4 for ZZ" -- that was the pre-fix +phi form and is WRONG here.
         phase_offset: calibration constant for the Morlet phase convention [rad].
-        n_search: search N in [-n_search, n_search].
+        n_search: search N in [-n_search, n_search] (matches resolve_phase_curve[_unwrap]).
 
     Returns:
         (c, N): phase velocity [km/s] and chosen integer N, or (np.nan, 0) if unresolved.
@@ -1497,8 +1508,15 @@ def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
         dist: inter-station distance [km]
         c_ref: reference phase-velocity callable, or None to skip phase velocity
         phase_shift, phase_offset: passed to phase_velocity
-        use_period: 'nominal', 'centroid' or 'inst' — which period to assign omega in the
-            phase-velocity formula (and to report as the measurement period downstream)
+        use_period: which period sets omega in the phase-velocity formula AND labels the
+            measurement downstream:
+              'scale'    — 1/f_scale, the true Fourier frequency of the CWT scale the phase was
+                           read on (RECOMMENDED). The phase is a single-scale measurement, so its
+                           self-consistent frequency is the scale's, not the nominal pick's; using
+                           it also lets duplicate nominal periods that snap to one scale collapse.
+              'nominal'  — the picked period (legacy default; at long periods several picks share
+                           one scale -> identical phase mislabelled at distinct periods).
+              'centroid' — Shapiro centroid period; 'inst' — Levshin instantaneous period.
 
         joint: if True, resolve the 2*pi*N ambiguity jointly across all picks (Viterbi,
             curve-continuity + reference), which tracks one branch and avoids per-period
@@ -1506,7 +1524,10 @@ def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
         smooth_weight: curve-continuity weight passed to resolve_phase_curve (joint mode)
 
     Returns:
-        dict of equal-length arrays: T_centroid, T_inst, phase_velocity, N_ambiguity
+        dict of equal-length arrays: T_centroid, T_inst, phase_velocity, N_ambiguity,
+        U_from_phase, T_scale (=1/f_scale, the frequency actually measured -> the period the phase
+        velocity should be assigned to) and scale_j (CWT scale index; picks sharing a scale_j are
+        the SAME measurement and should be de-duplicated before tomography/inversion).
     """
     n = len(pick_per)
     T_centroid = np.full(n, np.nan)
@@ -1518,6 +1539,8 @@ def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
     phases = np.full(n, np.nan)
     Uref = np.full(n, np.nan)
     T_omega = np.full(n, np.nan)
+    T_scale = np.full(n, np.nan)
+    scale_j = np.full(n, -1, dtype=int)
     for i in range(n):
         T = float(pick_per[i])
         U = float(pick_gv[i])
@@ -1528,38 +1551,47 @@ def measure_corrections_and_phase(cwt_data, pick_per, pick_gv, dist, c_ref=None,
         T_inst[i] = m['T_inst']
         phases[i] = m['phase']
         Uref[i] = m['U']        # refined group velocity (dist/t_peak), self-consistent with phase
-        T_omega[i] = {'nominal': T, 'centroid': T_centroid[i], 'inst': T_inst[i]}[use_period]
+        T_scale[i] = 1.0 / m['f_scale'] if m['f_scale'] > 0 else np.nan
+        scale_j[i] = m['scale_j']
+        T_omega[i] = {'nominal': T, 'centroid': T_centroid[i], 'inst': T_inst[i],
+                      'scale': T_scale[i]}[use_period]
 
-    # Pass 2: resolve the 2*pi*N ambiguity.
+    # Pass 2: resolve the 2*pi*N ambiguity. Resolve on UNIQUE scales only (picks that snapped to
+    # the same CWT scale are one measurement; feeding the duplicates in creates degenerate
+    # zero-frequency-step transitions and multi-counts), then broadcast the result back so the
+    # output stays aligned with the input picks (callers de-duplicate via scale_j).
     if c_ref is not None:
-        valid = np.isfinite(phases) & np.isfinite(T_omega) & (T_omega > 0)
+        valid = np.isfinite(phases) & np.isfinite(T_omega) & (T_omega > 0) & (scale_j >= 0)
         idx = np.where(valid)[0]
         if len(idx):
+            uj, first = np.unique(scale_j[idx], return_index=True)
+            rep = idx[first]                                    # one representative pick per scale
             if joint == 'unwrap':
-                # single-N resolution via continuous frequency-unwrapping (Bensen 2007 eq. 11)
                 c_sub, N_sub = resolve_phase_curve_unwrap(
-                    T_omega[idx], phases[idx], Uref[idx], dist, c_ref,
+                    T_omega[rep], phases[rep], Uref[rep], dist, c_ref,
                     phase_shift=phase_shift, phase_offset=phase_offset)
-                c_phase[idx] = c_sub
-                N_amb[idx] = N_sub
             elif joint:
                 c_sub, N_sub = resolve_phase_curve(
-                    T_omega[idx], phases[idx], Uref[idx], dist, c_ref,
+                    T_omega[rep], phases[rep], Uref[rep], dist, c_ref,
                     phase_shift=phase_shift, phase_offset=phase_offset,
                     smooth_weight=smooth_weight, max_step=phase_max_step)
-                c_phase[idx] = c_sub
-                N_amb[idx] = N_sub
             else:
-                for i in idx:
-                    c_phase[i], N_amb[i] = phase_velocity(
+                c_sub = np.full(len(rep), np.nan)
+                N_sub = np.zeros(len(rep), dtype=int)
+                for kk, i in enumerate(rep):
+                    c_sub[kk], N_sub[kk] = phase_velocity(
                         phases[i], Uref[i], dist, T_omega[i], c_ref,
                         phase_shift=phase_shift, phase_offset=phase_offset)
+            by_scale = {int(j): (c_sub[kk], int(N_sub[kk])) for kk, j in enumerate(uj)}
+            for i in idx:                                       # broadcast to every sharing pick
+                c_phase[i], N_amb[i] = by_scale[int(scale_j[i])]
 
     # Group velocity predicted from the extracted phase curve (Bensen eq. 7) -- a consistency
     # check against the directly-measured group ridge (large misfit => wrong branch / bad pick).
     U_from_phase = group_from_phase(T_omega, c_phase)
     return {'T_centroid': T_centroid, 'T_inst': T_inst,
-            'phase_velocity': c_phase, 'N_ambiguity': N_amb, 'U_from_phase': U_from_phase}
+            'phase_velocity': c_phase, 'N_ambiguity': N_amb, 'U_from_phase': U_from_phase,
+            'T_scale': T_scale, 'scale_j': scale_j}
 
 
 def get_mean(inst_periods, group_velocity):

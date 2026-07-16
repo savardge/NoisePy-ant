@@ -1,3 +1,39 @@
+"""Love-wave (TT) group-velocity picking with cross-component SNR context.
+
+*** KNOWN BUGS (audit 2026-07-10) — DO NOT reuse the QC columns of existing V4 outputs.
+*** Superseded by dispersion_curves_V6_modesep.py, which has corrected 'other'-SNR logic.
+
+1. CRITICAL — stale `comp` at the per-pick SNR call (`nb_filt_gauss(CCFdata["ccf"][lag][comp], ...)`
+   inside the picking loop): picking is done on TT, but `comp` is a leftover loop variable that
+   holds "TZ" on the first lag/pick_method block and "TR" afterwards (reassigned by the inner
+   `for comp in ["TZ","ZT","RT","TR"]` loop). The per-pick `snr_nbG`/`snr_bb` written to the CSV
+   are therefore the SNR of a CROSS-TERM, not of the picked TT trace. Downstream, step1_merge_picks.py
+   thresholds `snr_nbG > 5`, so the "SNR5.0" merged files were filtered on TZ/TR SNR — nearly the
+   opposite of the intended Love QC. Symptom in outputs: `component` column reads "TR"/"TZ" and
+   `snr_nbG == snr_nbG_other` on many rows.
+
+2. CRITICAL — hardcoded "TZ" inside `for comp in ["TZ","ZT","RT","TR"]`: both lines of the loop
+   body index CCFdata["SNRnb"][lag]["TZ"], so `snr_nb_other` is the TZ narrowband SNR repeated
+   four times; ZT/RT/TR are never examined. The intended per-period max over the four cross-terms
+   was never computed. (This loop is also what corrupts `comp` for bug 1 and makes the CSV
+   `component` column meaningless.)
+
+3. `except` block around the pick extraction has no `continue`: on failure, the previous
+   iteration's stale `nper/gv/score` are re-written under the new lag/pick_method metadata
+   (duplicate phantom picks), or a NameError is raised on the first iteration.
+
+4. If any of TZ/ZT/RT/TR is missing from the ASDF file, the read loop `continue`s past it, but
+   the `snr_bb_other = np.max([...])` line then raises an unhandled KeyError, killing the pair.
+
+Design weaknesses (not bugs): `snr_bb_other` is a broadband max (one strong cross-term at any
+period condemns all periods — the QC should be per-period); an SNR ratio only proxies an energy
+ratio if noise floors are comparable across components (better: ratio of narrowband signal-window
+envelope maxima TT vs max(RT,TR), which nb_filt_gauss already returns and this script discards);
+single-ridge argmax cannot handle the two-branch reality on TT (Love fundamental + Rayleigh
+overtone leakage / Love overtone), so it jumps between branches per period; `score` mixes
+incomparable quantities between argmax and topology pick methods; station misorientation
+information is never used.
+"""
 import numpy as np
 import os
 import pyasdf

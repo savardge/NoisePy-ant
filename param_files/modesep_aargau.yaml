@@ -1,0 +1,40 @@
+# Mode-separation workflow parameters for the Aargau network (CHAA, prefix AA).
+# Companion to modesep_params.yaml (Riehen). See scripts/picking/README.md.
+# Precedence: explicit CLI flag > this file > built-in default.
+
+network:
+  name: "Aargau"
+  code: "AA"
+
+paths:
+  vsg_dir: "/Users/genevievesavard/Data/aargau/phasevelocity_VSG"
+  stack_root: "/Volumes/T7blue/aargau-data/STACK_CHAA_normZ"
+  project_dir: "/Users/genevievesavard/Codes/extract_higher_modes/Projects/aargau"
+  dispersion_dir: null      # default: {project_dir}/dispersion_V6
+  ref_dir: null             # default: {project_dir}/vsg_modesep
+  model_reference_csv: "/Users/genevievesavard/Data/aargau/phasevelocity_VSG/analysis/reference_curves.csv"
+  faults_shapefile: null    # no mapped faults for Aargau -> lateral map runs maps-only
+
+vsg_modesep:
+  sign: 1
+  max_sources: null
+  nfft: null                # derive from the stored f grid (Aargau run used 4536)
+  min_common_receivers: 20
+  plot_flim: [0.15, 2.0]
+
+pick_windows:               # Aargau-tuned (differs from Riehen's overtone window)
+  fundamental: {img: "G_LR0", fmin: 0.20, fmax: 2.00, vmin: 1.30, vmax: 3.10, dom_min: 0.60, rough_max: 0.030}
+  overtone:    {img: "G_LR1", fmin: 0.48, fmax: 1.20, vmin: 2.90, vmax: 4.30, dom_min: 0.60, rough_max: 0.030}
+  rough_win: 9
+  min_run: 10
+
+batch:
+  nproc: 10
+  limit: 0
+
+analysis:
+  group_ref_band_fundamental: [0.7, 3.6]
+  group_ref_band_overtone: [1.1, 1.9]
+  min_overtone_periods: 3
+  lateral_band: [1.5, 2.5]
+  fault_main_name: null     # no fault split

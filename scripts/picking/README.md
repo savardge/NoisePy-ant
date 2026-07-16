@@ -57,6 +57,27 @@ Steps 1–2 (the VSG reference-curve construction) are documented in full in
 [`VSG_REFERENCE_METHODOLOGY.md`](VSG_REFERENCE_METHODOLOGY.md). Single-pair spot checks with
 quicklook plots: `python dispersion_curves_V6_modesep.py <pair.h5> [--config …]`.
 
+### The `*_modes_validated.csv` output (what to feed tomography)
+
+One row per period. **For tomography keep `fund_use == 1` (fundamental) and `ot_use == 1`
+(overtone)** — those are the only picks corroborated by independent single-component measurements
+at SNR ≥ 3; every other flag value is a documented reason the pick was *not* trusted.
+
+| column | meaning |
+|--------|---------|
+| `period`, `distance` | period [s], inter-station distance [km] |
+| `U_fund`, `snr_fund` | fundamental (G_LR0) group velocity [km/s] and its narrowband SNR |
+| `n_support_fund` | # of {ZZ, RR, all4} argmax ridges agreeing with `U_fund` (0–3); "ok" needs ≥ 2 |
+| `fund_flag`, `fund_use` | quality flag (glossary below) and the 1/0 use flag (`1 == fund_flag=="ok"`) |
+| `U_overtone`, `snr_ot` | 1st-higher-mode (G_LR1) group velocity and its SNR (NaN where not kept) |
+| `n_support_ot` | # of {ZZ, RR} topology branches witnessing the overtone (0–2) |
+| `ot_flag`, `ot_use` | quality flag (glossary below) and the 1/0 use flag (`1 == ot_flag=="ok"`) |
+
+`fund_flag`: `ok` (use) · `unconfirmed` (too few witnesses) · `low_snr` · `not_measured`.
+`ot_flag`: `ok` (use) · `unresolved_from_fund` (osculation / path too short) · `no_raw_witness` ·
+`mode_mixing` (±π/2 stacks didn't separate) · `fund_unsupported` · `no_fund_reference` ·
+`not_measured`. Full definitions are in the `validate_modes.py` module docstring.
+
 ## 4. Script inventory
 
 ### Mode-separated (V6) workflow & config

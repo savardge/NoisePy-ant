@@ -143,13 +143,15 @@ def process(path):
         all4 = (imgs["ZZ"][0] * imgs["RR"][0] * imgs["RZ"][0] * imgs["ZR"][0]) ** 0.25
         imgs["all4"] = (all4, imgs["ZZ"][1])
 
-        snr_g0 = None
-        try:
-            snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(
-                sig["G_LR0"], dt, 1.0 / per_grid, dist, alpha=gauss_alpha, vmin=vmin, vmax=vmax)
-            snr_g0 = (per_grid, snr_nbG, snr_bb)
-        except Exception:
-            pass
+        # narrowband SNR bank for the fundamental (G_LR0) and the overtone (G_LR1) stacks
+        snr_bank = {"G_LR0": None, "G_LR1": None}
+        for _c in ("G_LR0", "G_LR1"):
+            try:
+                snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(
+                    sig[_c], dt, 1.0 / per_grid, dist, alpha=gauss_alpha, vmin=vmin, vmax=vmax)
+                snr_bank[_c] = (per_grid, snr_nbG, snr_bb)
+            except Exception:
+                pass
 
         tau_max = dist / TAU_MAX_FACTOR
         rows = []
@@ -188,8 +190,7 @@ def process(path):
                     phase_shift=PHASE_SHIFT_COMPONENT[comp], phase_offset=PHASE_OFFSET,
                     use_period="nominal", joint=False)
                 cph, Namb = corr["phase_velocity"], corr["N_ambiguity"]
-            emit(gp, gv, sc, comp, "argmax", cph, Namb,
-                 snr_g0 if comp == "G_LR0" else None)
+            emit(gp, gv, sc, comp, "argmax", cph, Namb, snr_bank.get(comp))
             if comp in ("ZZ", "RR"):
                 tp, tv, ts = dispersion.extract_curves_topology(amp, per, vel, limit=min_score)
                 tp, tv, ts = dispersion.remove_picks_coi(np.asarray(tp), np.asarray(tv),

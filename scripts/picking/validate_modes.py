@@ -19,9 +19,47 @@ Robustness uses the votes already in the CSV: velocities are aggregated (median)
 stack methods (pws/linear/nroot) for the chosen lag, and the cross-stack spread is reported.
 
 Outputs next to the input CSV:
-  <spair>_modes_validated.csv : period, U_fund, conf_fund, fund_flag,
-                                U_overtone, conf_overtone, ot_flag, snr_fund
+  <spair>_modes_validated.csv : one row per period (columns below)
   <spair>_modeQA.png          : all component picks overlaid with the confirmed modes circled.
+
+--------------------------------------------------------------------------------------------
+modes_validated.csv columns
+--------------------------------------------------------------------------------------------
+  period          period [s]
+  distance        inter-station distance [km]
+  U_fund          fundamental (G_LR0) group velocity [km/s]; NaN if not measured
+  snr_fund        fundamental narrowband SNR (snr_nbG) at this period
+  n_support_fund  # of independent witnesses {ZZ, RR, all4} argmax agreeing with U_fund
+                  within TOL_V (0-3); the fundamental is "ok" when this is >= MIN_SUPPORT_FUND
+  fund_flag       fundamental quality flag (glossary below)
+  fund_use        1/0  -- 1 => use this fundamental pick for tomography (== fund_flag=="ok")
+  U_overtone      1st-higher-mode (G_LR1) group velocity [km/s]; NaN unless resolved AND kept
+  snr_ot          overtone narrowband SNR; NaN where U_overtone is NaN
+  n_support_ot    # of {ZZ, RR} topology branches witnessing the overtone (0-2)
+  ot_flag         overtone quality flag (glossary below)
+  ot_use          1/0  -- 1 => use this overtone pick for tomography (== ot_flag=="ok")
+
+USE FOR TOMOGRAPHY: keep rows with fund_use==1 (fundamental) and ot_use==1 (overtone).
+Those are the only picks corroborated by independent single-component measurements at SNR>=3;
+every other flag value is a documented reason the pick was NOT trusted (not a usable pick).
+
+fund_flag glossary:
+  ok            confirmed: SNR>=3 AND >= MIN_SUPPORT_FUND of {ZZ,RR,all4} argmax agree  <- USE
+  unconfirmed   G_LR0 measured but too few independent witnesses agree -> not trusted
+  low_snr       narrowband SNR < SNR_MIN -> not trusted
+  not_measured  no G_LR0 argmax pick at this period
+
+ot_flag glossary:
+  ok                  confirmed distinct higher mode: separated from the fundamental, witnessed
+                      by a raw topology branch, and passing the G_LR mutual-suppression test  <- USE
+  unresolved_from_fund  G_LR1 too close to U_fund to be a separate arrival (osculation / path
+                        too short to time-separate the modes) -> U_overtone blanked
+  no_raw_witness      separated, but no single-component topology branch confirms it
+  mode_mixing         separated & witnessed, but the +-pi/2 stacks did not mutually suppress
+                      (leakage) -> not a clean overtone here
+  fund_unsupported    the fundamental anchor itself is unseen in any raw component (images absent)
+  no_fund_reference   no fundamental measured at this period to compare against -> U_overtone blank
+  not_measured        no G_LR1 argmax pick at this period
 
 Usage:  python validate_modes.py <dispersion_all.csv | directory_of_such_csvs>
 """
@@ -122,37 +160,38 @@ def validate_csv(csv_path, plot=True, verbose=True):
     periods = sorted(set(g0) | set(g1))
     out_rows = []
     for T in periods:
-        U0 = U0std = snr0 = np.nan
-        conf_f = 0
-        fund_flag = "no_glr0"
+        U0 = snr0 = np.nan
+        n_sup_f = 0                            # # of {ZZ,RR,all4} argmax ridges agreeing with G_LR0
+        fund_flag = "not_measured"
         if T in g0:
-            U0, U0std, snr0 = g0[T]
-            conf_f = sum(1 for c in FUND_SUPPORTERS
-                         if T in fund_argmax[c] and abs(fund_argmax[c][T][0] - U0) <= TOL_V)
+            U0, _, snr0 = g0[T]
+            n_sup_f = sum(1 for c in FUND_SUPPORTERS
+                          if T in fund_argmax[c] and abs(fund_argmax[c][T][0] - U0) <= TOL_V)
             if not (snr0 >= SNR_MIN):          # NaN-safe: NaN SNR must NOT pass the gate
                 fund_flag = "low_snr"
-            elif conf_f >= MIN_SUPPORT_FUND:
+            elif n_sup_f >= MIN_SUPPORT_FUND:
                 fund_flag = "ok"
             else:
                 fund_flag = "unconfirmed"
 
-        U1 = U1std = np.nan
-        conf_o = 0
-        ot_flag = "no_glr1"
+        U1 = snr1 = np.nan
+        n_sup_o = 0                            # # of {ZZ,RR} topology branches supporting G_LR1
+        ot_flag = "not_measured"
         if T in g1:
-            U1, U1std, _ = g1[T]
+            U1, _, snr1 = g1[T]
             if np.isnan(U0):
-                ot_flag = "no_fundamental_ref"
+                ot_flag = "no_fund_reference"
+                U1 = snr1 = np.nan
             else:
                 # resolution-adaptive separation requirement (see RES_FACTOR note above)
                 sep_req = max(SEP_MIN, RES_FACTOR * U0 ** 2 * T / dist)
                 if (U1 - U0) <= sep_req:       # not resolved as a distinct faster mode
-                    ot_flag = "unseparated"
-                    U1 = np.nan                # do not report a velocity we don't trust as a mode
+                    ot_flag = "unresolved_from_fund"
+                    U1 = snr1 = np.nan         # do not report a velocity we don't trust as a mode
                 else:
                     # (1) The overtone pick must be OBSERVED in the raw data: a single-component
                     # topology branch near U1 and away from U0.
-                    conf_o = 0
+                    n_sup_o = 0
                     fund_support = False
                     for c in OT_SUPPORTERS:
                         br = ot_topo.get(c, {}).get(T, np.empty(0))
@@ -160,9 +199,9 @@ def validate_csv(csv_path, plot=True, verbose=True):
                             if np.any(np.abs(br - U0) <= TOL_V):
                                 fund_support = True
                             if np.any((np.abs(br - U1) <= TOL_V) & (np.abs(br - U0) > sep_req)):
-                                conf_o += 1
-                    if conf_o < MIN_SUPPORT_OT:
-                        ot_flag = "glr1_unconfirmed"
+                                n_sup_o += 1
+                    if n_sup_o < MIN_SUPPORT_OT:
+                        ot_flag = "no_raw_witness"
                     # (2) Anchor validity. Preferred: MUTUAL SUPPRESSION on the G_LR images --
                     # a genuine prograde overtone is suppressed in the retrograde stack (G_LR0
                     # weak at U1) and vice versa (G_LR1 weak at U0). This is the discriminating
@@ -181,12 +220,20 @@ def validate_csv(csv_path, plot=True, verbose=True):
                     elif fund_support:
                         ot_flag = "ok"
                     else:
-                        ot_flag = "glr0_unsupported"   # U0 anchor unseen in any raw component
+                        ot_flag = "fund_unsupported"   # U0 anchor unseen in any raw component
 
-        out_rows.append((T, U0, U0std, conf_f, fund_flag, U1, U1std, conf_o, ot_flag, snr0))
+        # fund_use / ot_use are the single-column answer to "use this pick for tomography?"
+        # Written as int 1/0 (not bool) so they round-trip unambiguously through CSV and are a
+        # valid boolean mask via (col == 1) even for empty files.
+        fund_use = int(fund_flag == "ok")
+        ot_use = int(ot_flag == "ok")
+        out_rows.append((T, dist,
+                         U0, snr0, n_sup_f, fund_flag, fund_use,
+                         U1, snr1, n_sup_o, ot_flag, ot_use))
 
-    cols = ["period", "U_fund", "U_fund_std", "conf_fund", "fund_flag",
-            "U_overtone", "U_ot_std", "conf_overtone", "ot_flag", "snr_fund"]
+    cols = ["period", "distance",
+            "U_fund", "snr_fund", "n_support_fund", "fund_flag", "fund_use",
+            "U_overtone", "snr_ot", "n_support_ot", "ot_flag", "ot_use"]
     out = pd.DataFrame(out_rows, columns=cols)
 
     base = csv_path.replace("_dispersion_all.csv", "")

@@ -69,12 +69,12 @@ for vf in glob.glob(os.path.join(V6, "*", "*_modes_validated.csv")):
         continue
     if len(v) == 0:
         continue
-    a = v[(v.fund_flag == "ok") & (v.period >= BAND[0]) & (v.period <= BAND[1])]
+    a = v[(v.fund_use == 1) & (v.period >= BAND[0]) & (v.period <= BAND[1])]  # fund_use "use" flag
     lo1, la1 = coords[s1]; lo2, la2 = coords[s2]
     rows.append(dict(pair=pr, lo1=lo1, la1=la1, lo2=lo2, la2=la2,
                      mlon=(lo1 + lo2) / 2, mlat=(la1 + la2) / 2,
                      Uf=a.U_fund.mean() if len(a) else np.nan,
-                     n_ot=int((v.ot_flag == "ok").sum())))
+                     n_ot=int((v.ot_use == 1).sum())))
 df = pd.DataFrame(rows)
 
 # ---------------- faults + crossing test (optional) ----------------

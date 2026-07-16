@@ -76,8 +76,8 @@ for f in files:
     except Exception:
         continue
     d["phase_velocity"] = pd.to_numeric(d["phase_velocity"], errors="coerce")
-    okf = set(v[v.fund_flag == "ok"].period.round(2))
-    oko = set(v[v.ot_flag == "ok"].period.round(2))
+    okf = set(v[v.fund_use == 1].period.round(2))     # fund_use / ot_use (1/0) = validator's
+    oko = set(v[v.ot_use == 1].period.round(2))       # "use for tomography" flags
     s = d[(d.lag == "sym") & (d.pick_method == "argmax")]
     for comp, confset, branch in (("G_LR0", okf, "fundamental"), ("G_LR1", oko, "overtone")):
         q = s[s.component == comp]

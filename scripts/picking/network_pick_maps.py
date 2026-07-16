@@ -41,9 +41,9 @@ for vf in vfiles:
         v = pd.read_csv(vf)
     except Exception:
         continue
-    a = v[v.fund_flag == "ok"]
+    a = v[v.fund_use == 1]                     # validator's "use for tomography" flags (1/0)
     gf.append(np.column_stack([a.period, a.U_fund]))
-    b = v[v.ot_flag == "ok"]
+    b = v[v.ot_use == 1]
     go.append(np.column_stack([b.period, b.U_overtone]))
     ot_count[pr] = len(b)
 GF, GO = np.vstack(gf), np.vstack(go)
@@ -64,8 +64,8 @@ for f in sorted(glob.glob(os.path.join(V6, "*", "*_dispersion_all.csv"))):
         continue
     d["phase_velocity"] = pd.to_numeric(d["phase_velocity"], errors="coerce")
     s = d[(d.lag == "sym") & (d.pick_method == "argmax") & np.isfinite(d.phase_velocity)]
-    okf = set(v[v.fund_flag == "ok"].period.round(2))
-    oko = set(v[v.ot_flag == "ok"].period.round(2))
+    okf = set(v[v.fund_use == 1].period.round(2))
+    oko = set(v[v.ot_use == 1].period.round(2))
     q = s[(s.component == "G_LR0") & s.nominal_period.round(2).isin(okf)]
     pf.append(np.column_stack([q.nominal_period, q.phase_velocity]))
     q = s[(s.component == "G_LR1") & s.nominal_period.round(2).isin(oko)]
