@@ -77,6 +77,15 @@ def main():
     ap.add_argument("--maxmodels", type=int, default=20000)
     ap.add_argument("--pred-nsub", type=int, default=200)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--noise-regime", choices=["free", "bounded"], default="free",
+                    help="hierarchical sigma prior regime (see run_bayhunter_cell). In the "
+                         "synthetic the stated sigmas are TRUE by construction, so 'bounded' is "
+                         "exactly correct here -- but run BOTH: under 'free' the sampler has two "
+                         "escape routes from contaminated Love data (inflate sigma_love OR "
+                         "manufacture gamma), and the leak gate needs to show what it does on "
+                         "each. 'free' = what production would do; 'bounded' = the worst case.")
+    ap.add_argument("--use-mp", action="store_true",
+                    help="fork-based chain multiprocessing in the runner (3.5x on 8 chains)")
     ap.add_argument("--bayhunter-python", required=True)
     ap.add_argument("--bayhunter-runner", required=True)
     args = ap.parse_args()
@@ -140,9 +149,11 @@ def main():
     if not curves:
         raise SystemExit("no synthetic curves built")
 
+    regime_tag = f"_{args.noise_regime}" if args.noise_regime != "free" else ""
     cfg = dict(measure=("phase" if args.measure == "phase" else "group"),
-               curves=curves, out_npz=os.path.join(args.outdir, f"synth_{args.case}.npz"),
-               savepath=os.path.join(args.outdir, "bh_results"),
+               curves=curves,
+               out_npz=os.path.join(args.outdir, f"synth_{args.case}{regime_tag}.npz"),
+               savepath=os.path.join(args.outdir, f"bh_results{regime_tag}"),
                cell=[0, 0, float("nan"), float("nan")], depth_max=args.depth_max,
                vs_bounds=[args.vs_min, args.vs_max], n_layers=[1, 20], maxfrac=0.5,
                nchains=args.n_chains, iter_burnin=args.iter_burnin, iter_main=args.iter_main,
@@ -152,7 +163,11 @@ def main():
                vpvs=[float(x) for x in args.vpvs_range.split(",")])
     if args.measure == "both" and curves_phase:
         cfg["curves_phase"] = curves_phase
-    cfgp = os.path.join(args.outdir, "config.json")
+    if args.noise_regime != "free":
+        cfg["noise_regime"] = args.noise_regime
+    if args.use_mp:
+        cfg["use_mp"] = True
+    cfgp = os.path.join(args.outdir, f"config{regime_tag}.json")
     json.dump(cfg, open(cfgp, "w"))
     env = dict(os.environ, OBJC_DISABLE_INITIALIZE_FORK_SAFETY="YES",
                VECLIB_MAXIMUM_THREADS="1", OMP_NUM_THREADS="1",
