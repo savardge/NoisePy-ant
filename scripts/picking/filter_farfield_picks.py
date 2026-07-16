@@ -68,7 +68,7 @@ def write_yaml(net, outdir):
     dst = os.path.join(outdir, f"{net}_swtomotv_ff2p5.yaml")
     txt = open(src).read()
     for wave in WAVES:
-        txt = txt.replace(f"{PROJROOT}/{net}/tomo/picks_{wave}.csv",
+        txt = txt.replace(f"{PROJROOT}/{net}/tomo/1_velocity_maps/inputs/picks_{wave}.csv",
                           os.path.join(outdir, f"picks_{wave}.csv"))
     old_root = [l for l in txt.splitlines() if l.startswith("output_root:")][0]
     txt = txt.replace(old_root, "output_root: " + os.path.join(outdir, "swtomotv-output"))
