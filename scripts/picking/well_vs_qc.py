@@ -43,10 +43,12 @@ WAVESETS = {"fund": ("fund",), "fundot": ("fund", "overtone"), "love": ("love",)
             "fundlove": ("fund", "love"), "fundotlove": ("fund", "overtone", "love")}
 WS_LABEL = {"fund": "R fund", "fundot": "R fund+ot", "love": "Love",
             "fundlove": "R fund + Love", "fundotlove": "R fund+ot + Love"}
-# Love production root per net (dx matches the Rayleigh grid: Riehen 500 m, Aargau 1 km).
+# Love production root per net -- LEGACY split-root fallback (V6 era, now archived). Production
+# uses the unified single root via --production-root; these only fire when it's omitted.
 _EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
-LOVE_PROD = {"riehen": f"{_EHM}/riehen/tomo/swtomotv-output-love-500m/production",
-             "aargau": f"{_EHM}/aargau/tomo/swtomotv-output-love-1km/production"}
+_ARC = "tomo/1_velocity_maps/_archive"
+LOVE_PROD = {"riehen": f"{_EHM}/riehen/{_ARC}/swtomotv-output-love-500m/production",
+             "aargau": f"{_EHM}/aargau/{_ARC}/swtomotv-output-love-1km/production"}
 
 # name, lat, lon, depth_m  (WGS84; from swisstopo deep_wells.csv)
 WELLS = {
@@ -63,7 +65,7 @@ VPVS_RATIOS = [(1.73, "tab:orange", "--"), (1.90, "tab:purple", ":"), (2.50, "ta
 
 
 def stations_hull(net):
-    st = np.genfromtxt(f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/stations.csv",
+    st = np.genfromtxt(f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/1_velocity_maps/inputs/stations.csv",
                        delimiter=",", names=True)
     pts = np.column_stack([st["longitude"], st["latitude"]])
     return MplPath(pts[ConvexHull(pts).vertices])
@@ -119,7 +121,7 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
     criterion trims each curve to its reliable periods (period_resolution.trim_reliable)."""
     if os.path.exists(out_npz):
         return out_npz
-    cfgp = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/{net}_swtomotv.yaml"
+    cfgp = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/1_velocity_maps/inputs/{net}_swtomotv.yaml"
     if getattr(args, "production_root", None):
         # single production root carrying ALL wave subdirs (the unified rebuild:
         # swtomotv-output-uni/production/{fund,overtone,love}) -- no wave_roots juggling
@@ -128,7 +130,7 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
         pr.PROD_ROOT[(net, "love")] = prod
         cell = vi.load_cell_curves(prod, ix, iy, waves=("fund", "overtone", "love"))
     else:
-        prod = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/swtomotv-output/production"
+        prod = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/1_velocity_maps/_archive/swtomotv-output/production"
         love_root = LOVE_PROD[net]
         pr.PROD_ROOT[(net, "love")] = love_root            # Love res_diag for the trimming criteria
         cell = vi.load_cell_curves(prod, ix, iy, waves=("fund", "overtone", "love"),
@@ -886,7 +888,9 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     hull = stations_hull(net)
-    vol = np.load(f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/vs_inversion/grid/volume_fundot.npz")
+    # cell mesh (ix,iy -> lon,lat) only; the grid volume was archived in the reorg but its mesh is
+    # still the reference cell layout. It is set by the swtomotv bounds+dx, not the Vs result.
+    vol = np.load(f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/2_vs_depth_inversion/_archive/grid/volume_fundot.npz")
     cells, ll = vol["cells"], vol["lonlat"]
 
     crits = (CRIT_ORDER if args.criterion == "all"

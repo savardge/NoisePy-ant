@@ -66,7 +66,7 @@ CRIT = "physical"
 # ----------------------------------------------------------------------------- cell selection
 def find_cell(net, lon, lat):
     """Nearest inverted tomography cell (ix,iy) + distance km to (lon,lat)."""
-    vol = np.load(f"{PROJ}/{net}/tomo/vs_inversion/grid/volume_fundot.npz")
+    vol = np.load(f"{PROJ}/{net}/tomo/2_vs_depth_inversion/_archive/grid/volume_fundot.npz")
     cells, ll = vol["cells"], vol["lonlat"]
     d = np.hypot((ll[:, 0] - lon) * np.cos(np.deg2rad(lat)), ll[:, 1] - lat) * 111.0
     j = int(np.argmin(d))
@@ -81,7 +81,7 @@ def run_one(net, well, ix, iy, nc, outdir, args, waves=WAVES):
     if os.path.exists(out_npz) and "chain_loglike_med" in np.load(out_npz).files:
         print(f"  [cache] {os.path.basename(out_npz)}", flush=True)
         return out_npz, savepath
-    prod = f"{PROJ}/{net}/tomo/swtomotv-output/production"
+    prod = f"{PROJ}/{net}/tomo/1_velocity_maps/_archive/swtomotv-output/production"
     cfgp = f"{PROJ}/{net}/tomo/{net}_swtomotv.yaml"
     cell = vi.load_cell_curves(prod, ix, iy)
     if "overtone" in waves:

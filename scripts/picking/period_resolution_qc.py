@@ -34,7 +34,7 @@ WELL_CELL = {"aargau": {"Boettstein": (13, 20), "Riniken": (10, 14)},
 
 
 def reliability_panels(net, wells, wave="fund", params=None, out=None):
-    prod = f"{PROJ}/{net}/tomo/swtomotv-output/production"
+    prod = f"{PROJ}/{net}/tomo/1_velocity_maps/_archive/swtomotv-output/production"
     yaml = f"{PROJ}/{net}/tomo/{net}_swtomotv.yaml"
     p = {**pr.DEFAULTS, **(params or {})}
     fig, axs = plt.subplots(5, len(wells), figsize=(6.2 * len(wells), 12), squeeze=False,
@@ -87,7 +87,7 @@ def reliability_panels(net, wells, wave="fund", params=None, out=None):
 
 
 def _load_maps(net, wave):
-    prod = f"{PROJ}/{net}/tomo/swtomotv-output/production"
+    prod = f"{PROJ}/{net}/tomo/1_velocity_maps/_archive/swtomotv-output/production"
     files = sorted(glob.glob(os.path.join(prod, wave, "map_T*.npz")),
                    key=lambda f: float(np.load(f)["period"]))
     T = np.array([float(np.load(f)["period"]) for f in files])

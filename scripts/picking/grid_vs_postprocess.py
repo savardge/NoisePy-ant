@@ -327,7 +327,7 @@ def main():
                          "e.g. fundlove,fundotlove = overtone value WITH Love; "
                          "fund,fundlove = Love value")
     args = ap.parse_args()
-    griddir = args.griddir or f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{args.net}/tomo/vs_inversion/grid"
+    griddir = args.griddir or f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{args.net}/tomo/2_vs_depth_inversion/_archive/grid"
     depths = [float(x) for x in args.depths.split(",")] if args.depths else DEPTHS
     wa, wb = [w.strip() for w in args.compare.split(",")][:2]
     LBL = {"fund": "fund", "fundot": "fund+ot", "love": "Love", "fundlove": "fund+Love",
