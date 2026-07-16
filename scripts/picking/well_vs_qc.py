@@ -869,7 +869,20 @@ def main():
         args.radial_prior = [float(x) for x in args.radial_prior.split(",")]
     TAG = f"_{args.tag}" if args.tag else ""
     well_filter = set(w.strip() for w in args.wells.split(",")) if args.wells else None
-    outdir = args.outdir or f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/vs_inversion/wells"
+    # The hardcoded default only exists if nothing has moved. After the tomo reorg the old path is
+    # gone, and `makedirs(exist_ok=True)` would silently RECREATE it and write a fresh, empty,
+    # authoritative-looking wells tree there -- forking the results. Require an explicit --outdir
+    # once the default no longer exists, instead of resurrecting it.
+    default_outdir = f"/Users/genevievesavard/Codes/extract_higher_modes/Projects/{net}/tomo/vs_inversion/wells"
+    if args.outdir:
+        outdir = args.outdir
+    elif os.path.isdir(default_outdir):
+        outdir = default_outdir
+    else:
+        raise SystemExit(
+            f"--outdir is required: the legacy default '{default_outdir}' does not exist "
+            f"(the tomo/ tree was reorganized). Pass --outdir explicitly so results are not "
+            f"written to a resurrected legacy path.")
     os.makedirs(outdir, exist_ok=True)
 
     hull = stations_hull(net)

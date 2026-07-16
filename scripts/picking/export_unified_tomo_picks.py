@@ -77,6 +77,10 @@ ap.add_argument("--out-suffix", default=None,
                      "(defaults: '' for group, '_phase' for phase = the production filenames). "
                      "Use it for control/experiment runs (e.g. --keep-flagged --out-suffix "
                      "_keepflag) so production picks are not overwritten.")
+ap.add_argument("--outdir", default=None,
+                help="where to write the pick CSVs. Default {project}/tomo -- but pass the new "
+                     "inputs dir explicitly after the tomo/ reorg, or the picks land in the old "
+                     "tomo/ root (which still exists) while the YAMLs read the new location.")
 args = ap.parse_args()
 if args.out_suffix is None:
     args.out_suffix = "_phase" if args.measure == "phase" else ""
@@ -84,7 +88,8 @@ VCOL, OKCOL, TCOL = MEASURE[args.measure]
 
 proj = os.path.join(EHM, args.net)
 src = os.path.join(proj, "dispersion_unified", "picks_unified_QCd.csv")
-outdir = os.path.join(proj, "tomo")
+outdir = args.outdir or os.path.join(proj, "tomo")
+os.makedirs(outdir, exist_ok=True)
 print(f"reading {src} (measure={args.measure}, velocity={VCOL}, period={TCOL}) ...")
 df = pd.read_csv(src, usecols=["pair", TCOL, VCOL, "wave_type", "mode", OKCOL,
                                "distance", "azimuth"])

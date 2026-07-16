@@ -32,14 +32,35 @@ PROD_ROOT = {}   # net or (net, wave) -> production root (holds {wave}/map_T*.np
 CACHE_CSV = {}   # net -> stations_in_grid.csv
 
 
+# The hardcoded fallbacks point at swtomotv-output/, which is NOT production (production is
+# swtomotv-output-uni) and vanishes after the tomo/ reorg. Silently returning a stale/wrong root
+# would trim periods against the wrong maps, so a fallback that doesn't exist raises instead of
+# being used. Callers that set PROD_ROOT[net] / CACHE_CSV[net] explicitly (e.g. well_vs_qc.py's
+# --production-root) bypass this entirely.
 def _prod_root(net, wave="fund"):
     if (net, wave) in PROD_ROOT:
         return PROD_ROOT[(net, wave)]
-    return PROD_ROOT.get(net, f"{PROJ}/{net}/tomo/swtomotv-output/production")
+    if net in PROD_ROOT:
+        return PROD_ROOT[net]
+    fallback = f"{PROJ}/{net}/tomo/swtomotv-output/production"
+    if not os.path.isdir(fallback):
+        raise FileNotFoundError(
+            f"period_resolution: no production root registered for net '{net}' and the legacy "
+            f"fallback '{fallback}' does not exist. Set PROD_ROOT['{net}'] (or pass "
+            f"--production-root upstream) to the current production maps.")
+    return fallback
 
 
 def _cache_csv(net):
-    return CACHE_CSV.get(net, f"{PROJ}/{net}/tomo/swtomotv-output/cache/stations_in_grid.csv")
+    if net in CACHE_CSV:
+        return CACHE_CSV[net]
+    fallback = f"{PROJ}/{net}/tomo/swtomotv-output/cache/stations_in_grid.csv"
+    if not os.path.exists(fallback):
+        raise FileNotFoundError(
+            f"period_resolution: no station cache registered for net '{net}' and the legacy "
+            f"fallback '{fallback}' does not exist. Set CACHE_CSV['{net}'] to the current "
+            f"production cache's stations_in_grid.csv.")
+    return fallback
 # R_frac: keep periods whose res_diag >= R_frac * (this cell's peak res_diag) -- relative, because
 # the Tarantola-Valette res_diag is low in absolute terms everywhere (heavy regularization). R_min:
 # optional absolute floor (0 = off). alpha: wavelengths of clearance from the array edge. beta:

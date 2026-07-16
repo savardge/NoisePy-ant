@@ -71,7 +71,18 @@ def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
     cell = CellData(ix=int(ix), iy=int(iy))
     for w in waves:
         root = (wave_roots or {}).get(w, production_root)
-        files = sorted(glob.glob(os.path.join(root, w, "map_T*.npz")),
+        # Fail LOUD on a stale/wrong root. Without this a bad path globs to [] and the wave is
+        # silently dropped from the inversion (empty CellData returns cleanly, .has(w) skips it) --
+        # a wave vanishing unnoticed, the classic failure after a directory move. A root that
+        # EXISTS but has no maps for wave w is legitimate (a tree may simply lack that wave), so
+        # only the missing-directory case raises; the empty-cell/empty-wave cases stay silent.
+        wdir = os.path.join(root, w)
+        if not os.path.isdir(wdir):
+            raise FileNotFoundError(
+                f"load_cell_curves: no '{w}' map directory under production root '{root}' "
+                f"({wdir} does not exist). Check the production_root/wave_roots path -- a stale "
+                f"path here silently drops the wave instead of erroring.")
+        files = sorted(glob.glob(os.path.join(wdir, "map_T*.npz")),
                        key=lambda f: float(np.load(f)["period"]))
         T, U, S = [], [], []
         for f in files:
