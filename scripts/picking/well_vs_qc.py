@@ -396,7 +396,7 @@ def _noise_panel(ax, r):
         infl = (np.median(s) / smin[i]) if (i < len(smin) and np.isfinite(smin[i]) and smin[i] > 0) else np.nan
         ax.hist(s, bins=50, histtype="step", lw=1.3, color=c, ls=ls, density=True,
                 label=f"{w} ({np.median(s):.3f}, {infl:.1f}x)")
-    if prior is not None and prior.size == 2:
+    if prior is not None and prior.ndim == 1 and prior.size == 2:
         for b in prior:
             ax.axvline(b, color="k", lw=0.8, ls=":")
         ax.set_xlim(0, prior[1] * 1.05)
