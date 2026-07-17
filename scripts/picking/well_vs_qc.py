@@ -544,10 +544,34 @@ def _convergence_text(r, dev=0.05):
     return "\n".join(lines)
 
 
+def plot_cell_posterior(npz_path, out_png, net="", crit_label=""):
+    """Posterior figure for an arbitrary GRID cell npz (no well needed).
+
+    Everything comes from the npz itself: coords, depth_max, vs bounds, wave set. This is the
+    per-cell analogue of the well figure (Vs density, gamma strip + P(gamma>0), dispersion fits
+    group+phase, noise-sigma posterior vs bounds, misfit + convergence panels), and it is called
+    by run_bayhunter_cell at the END OF EVERY CELL RUN so posterior figures appear alongside the
+    convergence diagnostics as the grid progresses -- not in a post-hoc batch (user decision
+    2026-07-17). Failures must never kill a cell run: callers wrap in try/except.
+    """
+    r = np.load(npz_path, allow_pickle=True)
+    ix, iy = (int(v) for v in r["cell_ixiy"])
+    lon, lat = (float(v) for v in r["cell_lonlat"])
+    z = np.asarray(r["depth"], float)
+    vs_bounds = (float(np.nanmin(r["vs_p025"])), float(np.nanmax(r["vs_p975"])))
+    waveset = "_".join(str(w) for w in r["waves"] if not str(w).endswith("_phase"))
+    well = (f"cell {ix}_{iy}", lat, lon, float("nan"))
+    plot_well(net, well, ix, iy, 0.0, npz_path, [], out_png,
+              vs_bounds, float(np.nanmax(z)), waveset, crit_label)
+
+
 def plot_well(net, well, ix, iy, dist_km, npz, overlay, out_png, vs_bounds, depth_max, waveset,
               crit_label=""):
     r = np.load(npz, allow_pickle=True)
-    z = r["depth"]; ens = r["ens_vs"]                       # (nmodel, ndepth)
+    z = r["depth"]
+    # grid cells do not carry the model ensemble (save_ensemble off: ~10 MB/cell x 864 cells);
+    # fall back to the saved posterior percentiles for the density panel in that case.
+    ens = r["ens_vs"] if "ens_vs" in r.files else None      # (nmodel, ndepth) or None
     name, lat, lon, welldep = well
     vmin, vmax = vs_bounds
 
@@ -574,20 +598,28 @@ def plot_well(net, well, ix, iy, dist_km, npz, overlay, out_png, vs_bounds, dept
         ax_cv = fig.add_subplot(gs[3, 0]); ax_ns = fig.add_subplot(gs[3, 1:])
     ax_vs = fig.add_subplot(gs[:3, 0]); ax_if = fig.add_subplot(gs[:3, 1], sharey=ax_vs)
 
-    # --- Vs posterior density (per-depth histogram) ---
+    # --- Vs posterior density (per-depth histogram; percentile-band fallback without ens) ---
     vsb = np.linspace(vmin, vmax, 121)
-    dens = np.zeros((len(vsb) - 1, len(z)))
-    for k in range(len(z)):
-        col = ens[:, k]; col = col[np.isfinite(col)]
-        if col.size:
-            dens[:, k] = np.histogram(col, bins=vsb, density=True)[0]
-    cmax = dens.max(axis=0, keepdims=True)                    # per-depth marginal posterior
-    dens = dens / np.where(cmax > 0, cmax, 1.0)
-    ax_vs.pcolormesh(0.5 * (vsb[1:] + vsb[:-1]), z, dens.T, cmap="hot_r", vmin=0, vmax=1,
-                     shading="auto")
-    ax_vs.plot(r["vs_median"], z, "c-", lw=1.6, label="posterior median")
-    ax_vs.plot(r["vs_p16"], z, "c--", lw=0.8); ax_vs.plot(r["vs_p84"], z, "c--", lw=0.8)
-    ax_vs.plot(r["vs_p025"], z, "c:", lw=0.6); ax_vs.plot(r["vs_p975"], z, "c:", lw=0.6)
+    if ens is not None:
+        dens = np.zeros((len(vsb) - 1, len(z)))
+        for k in range(len(z)):
+            col = ens[:, k]; col = col[np.isfinite(col)]
+            if col.size:
+                dens[:, k] = np.histogram(col, bins=vsb, density=True)[0]
+        cmax = dens.max(axis=0, keepdims=True)                # per-depth marginal posterior
+        dens = dens / np.where(cmax > 0, cmax, 1.0)
+        ax_vs.pcolormesh(0.5 * (vsb[1:] + vsb[:-1]), z, dens.T, cmap="hot_r", vmin=0, vmax=1,
+                         shading="auto")
+        med_style = ("c-", "c--", "c:")
+    else:
+        ax_vs.fill_betweenx(z, r["vs_p025"], r["vs_p975"], color="orange", alpha=0.20,
+                            lw=0, label="95%")
+        ax_vs.fill_betweenx(z, r["vs_p16"], r["vs_p84"], color="orange", alpha=0.45,
+                            lw=0, label="68%")
+        med_style = ("r-", "r--", "r:")
+    ax_vs.plot(r["vs_median"], z, med_style[0], lw=1.6, label="posterior median")
+    ax_vs.plot(r["vs_p16"], z, med_style[1], lw=0.8); ax_vs.plot(r["vs_p84"], z, med_style[1], lw=0.8)
+    ax_vs.plot(r["vs_p025"], z, med_style[2], lw=0.6); ax_vs.plot(r["vs_p975"], z, med_style[2], lw=0.6)
     for v, zc, lab, col, ls in overlay:
         m = zc <= depth_max
         ax_vs.plot(v[m], zc[m], color=col, ls=ls, lw=1.9, label=lab)
@@ -596,7 +628,8 @@ def plot_well(net, well, ix, iy, dist_km, npz, overlay, out_png, vs_bounds, dept
     ax_vs.set_title("Vs posterior distribution", fontsize=10)
 
     # --- interface probability as a horizontal histogram (count on x-axis) ---
-    ifd = r["iface_depths"]; nmod = int(r["n_models"])
+    ifd = r["iface_depths"] if "iface_depths" in r.files else np.array([])
+    nmod = int(r["n_models"])
     bin_dz = 0.1                                              # 100 m depth bins
     edges = np.arange(0, depth_max + bin_dz, bin_dz)
     cnt, _ = np.histogram(ifd, bins=edges)

@@ -669,6 +669,24 @@ def main(cfgpath):
     np.savez_compressed(cfg["out_npz"], **d)
     print(f"BayHunter cell done: {len(prof)} posterior models, {runtime:.0f}s -> {cfg['out_npz']}")
 
+    # Posterior figure ALONGSIDE the diagnostics, per cell as the run progresses (user decision
+    # 2026-07-17) -- not a post-hoc batch. Default ON (cfg cell_fig=false to disable). Every cell
+    # is a fresh subprocess, so a running grid picks this up for all not-yet-started cells.
+    # A figure failure must NEVER kill a finished cell run: the npz is already saved above.
+    if cfg.get("cell_fig", True):
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from well_vs_qc import plot_cell_posterior
+            fig_png = cfg.get("cell_fig_png") or os.path.splitext(cfg["out_npz"])[0] + "_posterior.png"
+            plot_cell_posterior(cfg["out_npz"], fig_png, net=str(cfg.get("net", "")),
+                                crit_label=str(cfg.get("tag", "")))
+            print(f"  posterior figure -> {fig_png}", flush=True)
+        except Exception as e:                                     # noqa: BLE001
+            print(f"  (posterior figure failed, npz unaffected: {type(e).__name__}: {e})",
+                  flush=True)
+
     # storage: the raw per-chain trace dir is the big cost (~10-40 MB/cell); the compact
     # per-chain summary + reliability are now in the npz, so drop it unless kept for debugging.
     if not cfg.get("keep_chain_files", False):
