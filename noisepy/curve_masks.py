@@ -264,6 +264,138 @@ def group_nearfield_mask(picks_csv, stations_csv, cell_lon, cell_lat, periods,
     return out
 
 
+# --------------------------------------------------------------------------- batch criterion 2
+def build_c2_table(picks_csv, stations_csv, cells_lonlat, periods=None,
+                   r_km=R_KM, farfield_factor=FARFIELD_FACTOR, frac_near_max=FRAC_NEAR_MAX,
+                   nbins=NBINS, min_azi_bins=MIN_AZI_BINS, max_gap_deg=MAX_GAP_DEG,
+                   min_crossing=MIN_CROSSING, cache=None, verbose=True):
+    """Vectorized criterion 2 for MANY cells at once: keep[ncells, nperiods] + diagnostics.
+
+    Same rules as group_nearfield_mask (single-cell reference implementation), restructured for
+    grid rollout: one geometry pass over unique pairs x all cells, then per-(cell, period)
+    aggregation. `cells_lonlat` is (ncells, 2) [lon, lat]; `periods` defaults to the pick table's
+    own grid. Pass `cache` (an .npz path) to persist/reuse -- the table depends only on the pick
+    table + station coords + cell list + parameters, all of which are hashed into the cache key.
+    """
+    cells_lonlat = np.asarray(cells_lonlat, float)
+    key = None
+    if cache is not None:
+        import hashlib
+        h = hashlib.sha256()
+        for fp in (picks_csv, stations_csv):
+            h.update(fp.encode())
+            h.update(str(os.path.getmtime(fp)).encode())
+        h.update(cells_lonlat.tobytes())
+        h.update(np.asarray([r_km, farfield_factor, frac_near_max, nbins, min_azi_bins,
+                             max_gap_deg, min_crossing], float).tobytes())
+        key = h.hexdigest()[:16]
+        if os.path.exists(cache):
+            z = np.load(cache, allow_pickle=True)
+            if str(z.get("key")) == key:
+                if verbose:
+                    print(f"    c2 table cache hit: {os.path.basename(cache)}")
+                return {k: z[k] for k in z.files}
+
+    st = _load_stations(stations_csv)
+    # one pass over the table: per-row arrays + unique-pair endpoint geometry
+    pair_id, pair_xy = {}, []
+    rT, rU, rr, raz, rp = [], [], [], [], []
+    lat0 = float(np.mean(cells_lonlat[:, 1]))
+    kx = 111.0 * np.cos(np.deg2rad(lat0))
+    with open(picks_csv) as fh:
+        for row in csv.DictReader(fh):
+            pair = row["station_pair"]
+            pid = pair_id.get(pair)
+            if pid is None:
+                s1, s2 = st.get(row["stasrc"]), st.get(row["starcv"])
+                if s1 is None or s2 is None:
+                    pair_id[pair] = -1
+                    continue
+                pid = len(pair_xy)
+                pair_id[pair] = pid
+                pair_xy.append([s1[0] * kx, s1[1] * 111.0, s2[0] * kx, s2[1] * 111.0])
+            elif pid == -1:
+                continue
+            rT.append(float(row["inst_period"])); rU.append(float(row["group_velocity"]))
+            rr.append(float(row["distance"])); raz.append(float(row["azimuth"]) % 180.0)
+            rp.append(pid)
+    P = np.array(pair_xy)                                 # (npairs, 4) km
+    rT, rU, rr, raz = (np.array(x) for x in (rT, rU, rr, raz))
+    rp = np.array(rp, int)
+    if periods is None:
+        periods = np.unique(np.round(rT, 3))
+    periods = np.asarray(periods, float)
+    peridx = np.full(rT.size, -1, int)                    # row -> period bin
+    for k, T in enumerate(periods):
+        peridx[np.abs(rT - T) < PERIOD_TOL] = k
+
+    M, K = cells_lonlat.shape[0], periods.size
+    out = dict(keep=np.zeros((M, K), bool), frac_near=np.full((M, K), np.nan),
+               n_cross=np.zeros((M, K), int), azi_bins=np.zeros((M, K), int),
+               max_gap=np.full((M, K), np.nan), periods=periods, cells_lonlat=cells_lonlat)
+    binw = 180.0 / nbins
+    a1 = P[:, :2]; a2 = P[:, 2:]; seg = a2 - a1
+    L2 = np.maximum(np.einsum("ij,ij->i", seg, seg), 1e-12)
+    lam_rows = rU * rT
+    near_rows = rr < farfield_factor * lam_rows
+    azbin_rows = np.floor(raz / binw).astype(int) % nbins
+    for m in range(M):
+        q = np.array([cells_lonlat[m, 0] * kx, cells_lonlat[m, 1] * 111.0])
+        t = np.clip(np.einsum("ij,ij->i", q - a1, seg) / L2, 0.0, 1.0)
+        d = np.hypot(*(a1 + t[:, None] * seg - q).T)
+        crossing = d <= r_km                              # per pair
+        rowm = crossing[rp]
+        for k in range(K):
+            sel = rowm & (peridx == k)
+            nc = int(sel.sum())
+            out["n_cross"][m, k] = nc
+            if nc == 0:
+                continue
+            near = near_rows[sel]
+            fn = float(near.mean())
+            out["frac_near"][m, k] = fn
+            occ = np.zeros(nbins, bool)
+            occ[azbin_rows[sel][~near]] = True
+            nb = int(occ.sum())
+            out["azi_bins"][m, k] = nb
+            if occ.all():
+                gap = 0.0
+            elif not occ.any():
+                gap = 180.0
+            else:
+                ring = np.concatenate([occ, occ])
+                best = run = 0
+                for v in ring:
+                    run = run + 1 if not v else 0
+                    best = max(best, run)
+                gap = min(best, nbins) * binw
+            out["max_gap"][m, k] = gap
+            out["keep"][m, k] = (fn <= frac_near_max and nb >= min_azi_bins
+                                 and gap <= max_gap_deg and nc >= min_crossing)
+        if verbose and (m + 1) % 100 == 0:
+            print(f"    c2 table: {m + 1}/{M} cells", flush=True)
+    if cache is not None:
+        out["key"] = key
+        np.savez_compressed(cache, **out)
+        if verbose:
+            print(f"    c2 table cached -> {cache}")
+    return out
+
+
+def c2_keep_for_periods(table, cell_index, T):
+    """Boolean keep-mask for curve periods T (nearest table period within PERIOD_TOL;
+    periods with no table entry are DROPPED -- no crossing picks means no measurement)."""
+    tp = np.asarray(table["periods"], float)
+    keep_row = np.asarray(table["keep"][cell_index], bool)
+    T = np.asarray(T, float)
+    out = np.zeros(T.size, bool)
+    for i, t in enumerate(T):
+        j = int(np.argmin(np.abs(tp - t)))
+        if abs(tp[j] - t) < PERIOD_TOL:
+            out[i] = keep_row[j]
+    return out
+
+
 # --------------------------------------------------------------------------- application
 def apply_masks_to_workdir(src_work, dst_work, net_inputs, cell_lon, cell_lat,
                            waves=("fund", "overtone", "love"), verbose=True):

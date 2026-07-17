@@ -34,23 +34,29 @@ from profile_vs_inversion import coverage_grid
 
 def invert_one(task):
     """Write curves+config for one (cell, waveset) and run the BayHunter subprocess."""
-    cell, waves, out_npz, workdir, bh_py, runner, cfg_common = task
+    cell, cell_ph, waves, out_npz, workdir, bh_py, runner, cfg_common = task
     if os.path.exists(out_npz):
         return (cell.ix, cell.iy, waves, "skip", 0.0)
     os.makedirs(workdir, exist_ok=True)
-    curvefiles = {}
+    curvefiles, phasefiles = {}, {}
     for w in waves:
-        if not cell.has(w):
-            continue
-        T, U, S = cell.curves[w]
-        fp = os.path.join(workdir, f"disp_{w}.txt")
-        np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
-        curvefiles[w] = fp
+        if cell.has(w) and len(cell.curves[w][0]) >= 4:
+            T, U, S = cell.curves[w]
+            fp = os.path.join(workdir, f"disp_{w}.txt")
+            np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
+            curvefiles[w] = fp
+        if cell_ph is not None and cell_ph.has(w) and len(cell_ph.curves[w][0]) >= 4:
+            T, U, S = cell_ph.curves[w]
+            fp = os.path.join(workdir, f"disp_{w}_phase.txt")
+            np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
+            phasefiles[w] = fp
     if not curvefiles:                       # love-only cells have no "fund"; only skip if NOTHING
         return (cell.ix, cell.iy, waves, "no-data", 0.0)
     cfg = dict(curves=curvefiles, out_npz=out_npz,
                savepath=os.path.join(workdir, "bh_results"),
                cell=[cell.ix, cell.iy, cell.lon, cell.lat], **cfg_common)
+    if phasefiles:
+        cfg["curves_phase"] = phasefiles     # joint group+phase (runner: keys become *_phase)
     cfgpath = os.path.join(workdir, "config.json")
     with open(cfgpath, "w") as f:
         json.dump(cfg, f)
@@ -105,6 +111,32 @@ def main():
     ap.add_argument("--alpha", type=float, default=0.5)
     ap.add_argument("--rfrac", type=float, default=0.5)
     ap.add_argument("--limit", type=int, default=0, help="only first N cells (debug)")
+    ap.add_argument("--cells", default=None,
+                    help="explicit cell list 'ix_iy,ix_iy,...' (pilot stripes; overrides "
+                         "coverage selection order, still intersected with coverage)")
+    # ---- 2026-07-17 hybrid-recipe knobs (validated at 6 wells / 2 networks; see the two
+    # test_2026-07-16_noise_regime_pair READMEs) ----------------------------------------------
+    ap.add_argument("--phase-root", default=None,
+                    help="phase tomography production root -> joint group+phase inversion")
+    ap.add_argument("--love-phase-root", default=None,
+                    help="Love phase production root (with --phase-root)")
+    ap.add_argument("--phase-tmin", type=float, default=2.5,
+                    help="fund/Love PHASE envelope cut [s]: the measured cross-well upper "
+                         "envelope of the kinematically inconsistent (2piN mis-branch) band; "
+                         "overtone phase is never cut")
+    ap.add_argument("--noise-regime", choices=["free", "bounded"], default="free",
+                    help="bounded = sigma ~ U(0.5*S_min, 3*S_min) per target (recipe)")
+    ap.add_argument("--c2-mask", action="store_true",
+                    help="apply the per-cell near-field+azimuth GROUP mask "
+                         "(noisepy.curve_masks criterion 2) from the pick tables")
+    ap.add_argument("--picks-inputs", default=None,
+                    help="dir holding picks_{wave}_uni.csv + stations.csv for --c2-mask "
+                         "(default: Projects/<net>/tomo/1_velocity_maps/inputs)")
+    ap.add_argument("--radial", action="store_true",
+                    help="continuous per-layer radial gamma (BayHunter_Aniso fork)")
+    ap.add_argument("--radial-prior", default="-0.35,0.35")
+    ap.add_argument("--vpvs-range", default=None,
+                    help="'lo,hi' -> free Vp/Vs (recipe: 1.5,3.5); default fixed 1.73")
     ap.add_argument("--bayhunter-python", required=True)
     ap.add_argument("--bayhunter-runner", required=True)
     ap.add_argument("--shard", default=None,
@@ -142,6 +174,13 @@ def main():
         good = good | (covl >= args.min_love)
     ixs, iys = np.where(good)
     cells_ij = list(zip(ixs.tolist(), iys.tolist()))
+    if args.cells:
+        wanted = [tuple(int(v) for v in c.split("_")) for c in args.cells.split(",")]
+        have = set(cells_ij)
+        missing = [c for c in wanted if c not in have]
+        if missing:
+            print(f"--cells: {len(missing)} not in coverage, dropped: {missing}", flush=True)
+        cells_ij = [c for c in wanted if c in have]
     if args.limit:
         cells_ij = cells_ij[: args.limit]
     print(f"{os.path.basename(args.config)}: {len(cells_ij)} cells x {len(want)} wavesets "
@@ -152,6 +191,13 @@ def main():
                       iter_burnin=args.iter_burnin, iter_main=args.iter_main,
                       maxmodels=args.maxmodels, pred_nsub=args.pred_nsub, skip_pred=False,
                       _timeout=args.cell_timeout)
+    if args.noise_regime != "free":
+        cfg_common["noise_regime"] = args.noise_regime
+    if args.vpvs_range:
+        cfg_common["vpvs"] = [float(x) for x in args.vpvs_range.split(",")]
+    if args.radial:
+        cfg_common["radial_anisotropy"] = True
+        cfg_common["radial_prior"] = [float(x) for x in args.radial_prior.split(",")]
 
     # build tasks; overtone restricted to T>=overtone-min-t for the fundot waveset, then the
     # per-cell reliability criterion trims each curve to its well-resolved periods.
@@ -161,24 +207,107 @@ def main():
     # point the reliability metrics at THIS run's production maps (may be a finer-dx grid);
     # station xstat/ystat are dx-independent so the default cache is reused.
     pr.PROD_ROOT[args.net] = args.production
+    # station cache lives beside the production root (<...>/cache/stations_in_grid.csv);
+    # period_resolution's legacy fallback was removed in the reorg and RAISES without this.
+    _cache = os.path.join(os.path.dirname(args.production.rstrip("/")),
+                          "cache", "stations_in_grid.csv")
+    if os.path.exists(_cache):
+        pr.CACHE_CSV[args.net] = _cache
     load_waves = ("fund", "overtone", "love") if need_love else ("fund", "overtone")
     wave_roots = {"love": args.love_production} if need_love else None
     if need_love:
         pr.PROD_ROOT[(args.net, "love")] = args.love_production
-    tasks = []
+    # ---- pass 1: load all base cells (group and, if requested, phase) with coords -----------
+    bases, bases_ph = {}, {}
     for (ix, iy) in cells_ij:
         base = vi.load_cell_curves(args.production, ix, iy, waves=load_waves,
                                    wave_roots=wave_roots)
         vi.attach_cell_coords(base, args.config)
+        bases[(ix, iy)] = base
+        if args.phase_root:
+            ph_roots = {"love": args.love_phase_root} if (need_love and args.love_phase_root) \
+                else None
+            ph = vi.load_cell_curves(args.phase_root, ix, iy, waves=load_waves,
+                                     wave_roots=ph_roots)
+            vi.attach_cell_coords(ph, args.config)
+            bases_ph[(ix, iy)] = ph
+
+    # ---- criterion 2: per-(cell, period) group mask from the pick tables, built ONCE --------
+    c2_tables = {}
+    if args.c2_mask:
+        from noisepy import curve_masks as cm
+        pin = args.picks_inputs or (f"/Users/genevievesavard/Codes/extract_higher_modes/"
+                                    f"Projects/{args.net}/tomo/1_velocity_maps/inputs")
+        cells_lonlat = np.array([[bases[ij].lon, bases[ij].lat] for ij in cells_ij])
+        if not np.isfinite(cells_lonlat).all():
+            # attach_cell_coords leaves NaN when swtomotv cannot be imported (it lives in the
+            # bayesbay env, not bayhunter -- run THIS driver with the bayesbay python, the
+            # subprocess runner stays bayhunter). NaN coords would make the C2 geometry pass
+            # silently find zero crossing pairs and mask EVERY curve to nothing.
+            raise SystemExit("--c2-mask: cell coords are NaN (swtomotv not importable in this "
+                             "env, or wrong --config yaml). Run grid_vs_inversion with the "
+                             "bayesbay env's python; see the module docstring example.")
+        for w in load_waves:
+            pcsv = os.path.join(pin, f"picks_{w}_uni.csv")
+            if not os.path.exists(pcsv):
+                print(f"  c2: no pick table for {w} ({pcsv}); wave left unmasked", flush=True)
+                continue
+            print(f"  c2 table: {w} ({len(cells_ij)} cells)", flush=True)
+            c2_tables[w] = cm.build_c2_table(
+                pcsv, os.path.join(pin, "stations.csv"), cells_lonlat,
+                cache=os.path.join(args.outdir, f"c2_table_{w}.npz"))
+
+    def _apply_c2(cell, cellidx):
+        import copy
+        c = copy.deepcopy(cell)
+        for w, tab in c2_tables.items():
+            if not c.has(w):
+                continue
+            T, U, S = c.curves[w]
+            k = cm.c2_keep_for_periods(tab, cellidx, T)
+            c.curves[w] = (T[k], U[k], S[k])
+        return c
+
+    tasks = []
+    for ci, (ix, iy) in enumerate(cells_ij):
+        base = bases[(ix, iy)]
+        if c2_tables:
+            base = _apply_c2(base, ci)                    # group mask, waveset-independent
+        base_ph = bases_ph.get((ix, iy))
+        if base_ph is not None:
+            # ORDER MATTERS: reliability criterion FIRST (as in well_vs_qc / the validated well
+            # arms), THEN the envelope cut. trim_reliable is curve-dependent (its metrics see
+            # the whole curve), so envelope-first shreds the long-T phase it should keep --
+            # measured at cell 9_18: 32 raw -> 3 pts envelope-first vs 25 -> ~7 trim-first.
+            if args.criterion != "none":
+                _saved = pr.PROD_ROOT.get(args.net)
+                pr.PROD_ROOT[args.net] = args.phase_root
+                base_ph = pr.trim_reliable(base_ph, args.net, args.criterion, trim_params)
+                pr.PROD_ROOT[args.net] = _saved
+            # phase ENVELOPE cut (fund/love; overtone phase untouched)
+            base_ph = vi.restrict_periods(base_ph, {"fund": (args.phase_tmin, None),
+                                                    "love": (args.phase_tmin, None)})
         for wskey in want:
             cell = base
+            cell_ph = base_ph
             if "overtone" in wavesets[wskey] and args.overtone_min_t:
                 cell = vi.restrict_periods(base, {"overtone": (args.overtone_min_t, None)})
+                if cell_ph is not None:
+                    cell_ph = vi.restrict_periods(cell_ph,
+                                                  {"overtone": (args.overtone_min_t, None)})
             if args.criterion != "none":
                 cell = pr.trim_reliable(cell, args.net, args.criterion, trim_params)
+            if cell_ph is not None:
+                # only the waveset's waves go into curves_phase
+                import copy
+                cp = copy.deepcopy(cell_ph)
+                cp.curves = {w: cp.curves[w] for w in wavesets[wskey] if cp.has(w)}
+                cell_ph_ws = cp
+            else:
+                cell_ph_ws = None
             out_npz = os.path.join(celldir, f"cell_{ix}_{iy}_{wskey}.npz")
             wd = os.path.join(workroot, f"{ix}_{iy}_{wskey}")
-            tasks.append((cell, wavesets[wskey], out_npz, wd,
+            tasks.append((cell, cell_ph_ws, wavesets[wskey], out_npz, wd,
                           args.bayhunter_python, args.bayhunter_runner, cfg_common))
 
     # SLURM-array fan-out: this task processes a deterministic disjoint slice. The full task
