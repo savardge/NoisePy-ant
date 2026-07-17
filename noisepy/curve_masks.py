@@ -10,9 +10,15 @@ CRITERION 1 -- kinematic consistency (phase), per cell and wave type
     inconsistent:
       core     : U/c >= 1 while the (heavily smoothed) c(T) slope is >= 0 -- impossible in any
                  layered medium (the slope guard closes the anomalous-dispersion loophole).
-      extension: |U - U_implied(c)| > 3 sqrt(S_U^2 + S_c^2), U_implied from an error-weighted,
-                 deliberately over-smoothed spline of c (an under-smoothed derivative is noise --
-                 the historical failure of naive U-c checks).
+      extension (v2, integral-domain): |c - c_pred| > 3 sqrt(S_c^2 + S_pred^2), with c_pred from
+                 integrating the measured group slowness (k(w) = k_a + int 1/U dw; Bensen) anchored
+                 on the longest-period overlap points. Integration smooths group noise instead of
+                 amplifying it; a wrong 2piN phase sheet displaces measured k by a near-constant
+                 the anchored prediction does not follow, so the 1-2 s fast band is flagged by
+                 construction. (v1 used the derivative form U_implied = c/(1+(T/c)dc/dT) on a
+                 heavily smoothed spline and UNDER-TRIMMED: the smoothing flattened the dispersion
+                 step, the 1-2 s band went unflagged, and the adaptive-v1 arm railed fund_phase
+                 0.98 at Basel-1 where the blanket cut gave 0.07.)
       trigger  : contiguous runs of (core | extension) flags EXCLUDE only if they contain >= 1
                  core violation. A 3-sigma-only run never cuts (spline-wiggle guard).
       cut      : for a triggering run touching the short-period end of the overlap, exclude all
@@ -90,18 +96,50 @@ def phase_consistency_mask(Tu, U, Su, Tc, c, Sc,
         return out
 
     o = np.argsort(Tc)
-    # heavy, error-weighted smoothing of c(T); derivative of an under-smoothed spline is noise
+    # spline used ONLY for the core test's slope guard (anomalous-dispersion loophole); the
+    # extension test is integral-domain (below), NOT derivative-based. v1 used
+    # |U - c/(1+(T/c)dc/dT)| here and UNDER-TRIMMED: the heavy smoothing that makes dc/dT usable
+    # also flattens the basin dispersion step, so the mis-branch band (phase too FAST at 1-2 s,
+    # which does NOT violate U/c>=1) went unflagged -- measured empirically 2026-07-16, adaptive
+    # v1 arm, Basel-1 fund_phase rail 0.98 vs 0.07 under the blanket 2.5 s cut.
     sp = UnivariateSpline(Tc[o], c[o], w=1.0 / np.maximum(Sc[o], 1e-4), k=3,
                           s=Tc.size * s_factor)
     idx = np.where(ov)[0]
     T = Tc[idx]
     Ui = np.interp(T, Tu, U)
     Si = np.interp(T, Tu, Su)
-    cs, dcdT = sp(T), sp.derivative()(T)
-    Uimp = cs / (1.0 + (T / cs) * dcdT)
+    dcdT = sp.derivative()(T)
 
     core = (Ui / c[idx] >= 1.0) & (dcdT >= 0.0)
-    ext = np.abs(Ui - Uimp) > sigma_level * np.sqrt(Si ** 2 + Sc[idx] ** 2)
+
+    # EXTENSION v2 -- integral-domain consistency (Bensen: k(w) = k(w_a) + int s_U dw, s_U = 1/U;
+    # c_pred = w/k). Integration SMOOTHS group noise instead of amplifying it, and the 1-2 s
+    # fast band stands out by construction: a wrong 2piN sheet displaces k by a near-constant,
+    # while the U-integral prediction stays on the true sheet anchored at long T.
+    # Anchor: the N_ANCHOR longest-period overlap points (where phase is consistent -- they are
+    # the far side of any short-T artifact), constant fitted as the median of
+    # k_meas - int(s_U) there, so anchor noise enters as a robust average, not one point.
+    w = 2.0 * np.pi / T                                  # ascending T = descending w
+    ow = np.argsort(w)                                   # integrate in ascending w
+    ws, Ts = w[ow], T[ow]
+    sU = 1.0 / np.interp(Ts, Tu, U)
+    dw = np.diff(ws)
+    dk = 0.5 * (sU[1:] + sU[:-1]) * dw                  # trapezoid increments
+    kint = np.concatenate([[0.0], np.cumsum(dk)])        # int_{w0}^{w} s_U dw'
+    kmeas = ws / c[idx][ow]
+    n_anchor = max(3, min(5, ws.size // 4))
+    k0 = np.median((kmeas - kint)[:n_anchor])            # smallest w = longest T = anchor side
+    cpred = ws / (k0 + kint)
+    # sigma of the prediction: independent-noise propagation of the group term through the
+    # integral + anchor scatter (conservative, stated in the paper as such)
+    varints = np.concatenate([[0.0], np.cumsum((0.5 * dw) ** 2 * (
+        (np.interp(Ts, Tu, Su)[1:] / np.interp(Ts, Tu, U)[1:] ** 2) ** 2 +
+        (np.interp(Ts, Tu, Su)[:-1] / np.interp(Ts, Tu, U)[:-1] ** 2) ** 2))])
+    var_anchor = np.var((kmeas - kint)[:n_anchor]) / n_anchor
+    scpred = (cpred ** 2 / ws) * np.sqrt(varints + var_anchor)
+    ext_w = np.abs(c[idx][ow] - cpred) > sigma_level * np.sqrt(Sc[idx][ow] ** 2 + scpred ** 2)
+    ext = np.empty_like(ext_w)
+    ext[ow] = ext_w                                      # back to ascending-T order
     flag = core | ext
     out["n_core"] = int(core.sum())
     if not core.any():
