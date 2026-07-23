@@ -98,6 +98,27 @@ def _tecto(ax, gk, lw=1.0, zorder=3):
             ax.plot(xy[:, 0], xy[:, 1], color="darkred", lw=lw, zorder=zorder)
 
 
+def load_zrel(griddir, cells):
+    """Per-cell z_reliable_max [km] from cells/*.npz, aligned to `cells` order (nan if absent).
+
+    THE RING FIX (user report 2026-07-23): below a cell's data reach the trans-D posterior
+    parsimoniously EXTENDS the last constrained velocity downward, so short-reach (rim) cells
+    paint an unphysical slow ring at depth. Measured on the riehen reference: cells beyond
+    their z_reliable_max are 0.3-0.8 km/s slower than reached cells at the same depth, deficit
+    growing downward; at 2 km 56% of cells are beyond reach. Everything below z_reliable_max
+    (chain-agreement AND wavelength floor, the wells-validated product of vs_reliability) is
+    therefore MASKED in maps and sections -- prior fill is not a measurement.
+    """
+    out = np.full(len(cells), np.nan)
+    for i, (cix, ciy) in enumerate(cells):
+        fp = os.path.join(griddir, "cells", f"cell_{int(cix)}_{int(ciy)}_fundotlove.npz")
+        if os.path.exists(fp):
+            r = np.load(fp, allow_pickle=True)
+            if "z_reliable_max" in r.files:
+                out[i] = float(r["z_reliable_max"])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--griddir", required=True)
@@ -105,11 +126,23 @@ def main():
     ap.add_argument("--vlims-from", default=None,
                     help="reference griddir whose figures/vlims.json fixes the color scale "
                          "(default: use/create this griddir's own)")
+    ap.add_argument("--unmasked", action="store_true",
+                    help="disable the below-reach reliability mask (artifact demo only)")
     a = ap.parse_args()
     net = a.net
     v = np.load(os.path.join(a.griddir, "volume_fundotlove.npz"), allow_pickle=True)
     cells, lonlat, z = v["cells"], v["lonlat"], np.asarray(v["depth"], float)
     vs = np.asarray(v["vs_median"], float)                       # (ncell, ndepth)
+    if not a.unmasked:
+        zrel = load_zrel(a.griddir, cells)
+        n_masked = 0
+        for i in range(len(cells)):
+            if np.isfinite(zrel[i]):
+                m = z > zrel[i] + 1e-9
+                n_masked += int(np.isfinite(vs[i, m]).sum())
+                vs[i, m] = np.nan
+        print(f"reliability mask: NaN below per-cell z_reliable_max "
+              f"({n_masked} samples masked across {len(cells)} cells)")
     dem = np.load(f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_dem.npz")
     elev, extent = dem["elev"].astype(float), dem["extent"]
     gk = np.load(f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_gk500.npz",
