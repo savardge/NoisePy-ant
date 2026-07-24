@@ -120,6 +120,13 @@ def main():
                     help="phase tomography production root -> joint group+phase inversion")
     ap.add_argument("--love-phase-root", default=None,
                     help="Love phase production root (with --phase-root)")
+    ap.add_argument("--phase-alpha", type=float, default=0.2,
+                    help="edge-distance factor (d_edge >= alpha*lambda) for the PHASE curves' "
+                         "physical trim. Group keeps --alpha (0.5, ~2.5-lambda far-field "
+                         "validity); phase is valid to ~1 lambda (phase_pilot, validated), so "
+                         "its factor scales by 1/2.5 -> 0.2. With the group alpha applied to "
+                         "phase, hull-edge cells lost ALL long-T phase and their depth reach "
+                         "collapsed (Basel-1: floor 1.8 km vs 5.6 km with correct alpha).")
     ap.add_argument("--phase-tmin", type=float, default=2.5,
                     help="fund/Love PHASE envelope cut [s]: the measured cross-well upper "
                          "envelope of the kinematically inconsistent (2piN mis-branch) band; "
@@ -132,6 +139,12 @@ def main():
     ap.add_argument("--picks-inputs", default=None,
                     help="dir holding picks_{wave}_uni.csv + stations.csv for --c2-mask "
                          "(default: Projects/<net>/tomo/1_velocity_maps/inputs)")
+    ap.add_argument("--c2-exempt", default="",
+                    help="comma list of waves NOT masked by --c2-mask. Rationale for "
+                         "'overtone': its faster U means larger lambda so C2 flags it hardest, "
+                         "yet it never exhibited the near-field group misfit empirically "
+                         "(clean at 5/6 wells; the 2026-07-17 uniform application deleted it "
+                         "at 34%/26% of Riehen/Aargau cells -- grid_pilot DECISIONS.md D9).")
     ap.add_argument("--radial", action="store_true",
                     help="continuous per-layer radial gamma (BayHunter_Aniso fork)")
     ap.add_argument("--radial-prior", default="-0.35,0.35")
@@ -247,7 +260,11 @@ def main():
             raise SystemExit("--c2-mask: cell coords are NaN (swtomotv not importable in this "
                              "env, or wrong --config yaml). Run grid_vs_inversion with the "
                              "bayesbay env's python; see the module docstring example.")
+        exempt = {w.strip() for w in args.c2_exempt.split(",") if w.strip()}
         for w in load_waves:
+            if w in exempt:
+                print(f"  c2: {w} EXEMPT from the mask (--c2-exempt)", flush=True)
+                continue
             pcsv = os.path.join(pin, f"picks_{w}_uni.csv")
             if not os.path.exists(pcsv):
                 print(f"  c2: no pick table for {w} ({pcsv}); wave left unmasked", flush=True)
@@ -282,7 +299,8 @@ def main():
             if args.criterion != "none":
                 _saved = pr.PROD_ROOT.get(args.net)
                 pr.PROD_ROOT[args.net] = args.phase_root
-                base_ph = pr.trim_reliable(base_ph, args.net, args.criterion, trim_params)
+                ph_params = dict(trim_params, alpha=args.phase_alpha)   # phase-validity alpha
+                base_ph = pr.trim_reliable(base_ph, args.net, args.criterion, ph_params)
                 pr.PROD_ROOT[args.net] = _saved
             # phase ENVELOPE cut (fund/love; overtone phase untouched)
             base_ph = vi.restrict_periods(base_ph, {"fund": (args.phase_tmin, None),

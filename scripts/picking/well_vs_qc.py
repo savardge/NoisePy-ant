@@ -161,8 +161,12 @@ def run_cell_ensemble(net, ix, iy, out_npz, args, waves=("fund", "overtone"), cr
         # trim against the same net's group references (phase refs share the vsg_modesep dir);
         # PROD_ROOT[(net,'phase')] points res_diag at the phase maps.
         pr.PROD_ROOT[net] = args.phase_root.format(net=net)
+        # phase-validity alpha (0.2 = group 0.5 x 1lambda/2.5lambda): the group edge-distance
+        # factor applied to phase killed all long-T phase at hull-edge cells and collapsed
+        # their depth reach (Basel-1 floor 1.8 vs 5.6 km) -- see grid_vs_inversion --phase-alpha
         cell_ph = pr.trim_reliable(cell_ph, net, criterion,
-                                   {"alpha": args.alpha, "R_frac": args.rfrac,
+                                   {"alpha": getattr(args, "phase_alpha", 0.2),
+                                    "R_frac": args.rfrac,
                                     "depth_max": args.depth_max})
         pr.PROD_ROOT[net] = (args.production_root.format(net=net)
                              if getattr(args, "production_root", None) else prod)
