@@ -150,6 +150,9 @@ def main():
     st = np.genfromtxt(f"{E}/{net}/tomo/1_velocity_maps/inputs/stations.csv",
                        delimiter=",", names=True)
     hs = _hillshade(elev, extent)
+    # optional Geo2Riehen seismic horizons (riehen; prep_fig_assets --stage geo2riehen)
+    hz_path = f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_horizons.npz"
+    horizons = np.load(hz_path) if os.path.exists(hz_path) else None
     figdir = os.path.join(a.griddir, "figures")
     os.makedirs(os.path.join(figdir, "maps"), exist_ok=True)
     os.makedirs(os.path.join(figdir, "sections"), exist_ok=True)
@@ -289,11 +292,46 @@ def main():
             ax.annotate(nm, (wa, wel), xytext=(0, 8), textcoords="offset points",
                         ha="center", fontsize=8.5, fontweight="bold", zorder=8,
                         bbox=dict(fc="w", alpha=0.75, ec="k", lw=0.4, pad=1.5))
+        # Geo2Riehen seismic horizons: points within 200 m of the profile, projected to the
+        # along-coordinate and linearly interpolated (drawn only across the span where points
+        # exist -- no extrapolation beyond the constrained reach of the 3D survey).
+        if horizons is not None:
+            hv, ho = horizons["verts"], horizons["offsets"]
+            hstyle = {"TKris": ("m", "-"), "TMusch": ("darkgreen", "--"),
+                      "Base Mesozoic": ("saddlebrown", ":")}
+            for hi, hname in enumerate(horizons["names"]):
+                pts3 = hv[ho[hi]:ho[hi + 1]]
+                hx, hy = km_xy(pts3[:, 0], pts3[:, 1], lat0)
+                dh = dist_to_polyline_km(hx, hy, px, py)
+                m = dh <= NEAR_KM
+                if m.sum() < 2:
+                    continue
+                # project: along-coordinate of the nearest profile vertex per point, then bin
+                # to a fine along-grid and take the median z per bin (robust to the swath of
+                # 3D-survey points collapsing onto one profile coordinate)
+                ai = np.array([along[int(np.argmin(np.hypot(px - hx[j], py - hy[j])))]
+                               for j in np.where(m)[0]])
+                zi = pts3[m, 2].astype(float)
+                order = np.argsort(ai)
+                ai, zi = ai[order], zi[order]
+                bins = np.arange(ai.min(), ai.max() + 0.26, 0.25)
+                bc, bz = [], []
+                for b0, b1 in zip(bins[:-1], bins[1:]):
+                    sel_b = (ai >= b0) & (ai < b1)
+                    if sel_b.any():
+                        bc.append(0.5 * (b0 + b1)); bz.append(np.median(zi[sel_b]))
+                if len(bc) < 2:
+                    continue
+                key = next((k for k in hstyle if str(hname).startswith(k)), "TKris")
+                col, ls = hstyle[key]
+                ax.plot(bc, bz, color=col, ls=ls, lw=2.0, zorder=6,
+                        label=str(hname).split(" (")[0] + " (Geo2Riehen)")
         ax.set_xlabel("distance along profile [km]")
         ax.set_ylabel("elevation [m a.s.l.]")
         ax.set_xlim(0, along[-1])
         ax.set_ylim(np.nanmin(Y) - 100, np.nanmax(surf) + 150)
-        if near.any():
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
             ax.legend(fontsize=7, loc="lower left")
         plt.colorbar(pc, ax=ax, pad=0.01, fraction=0.035).set_label("Vs median [km/s]")
 

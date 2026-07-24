@@ -80,9 +80,81 @@ def stage_gk500(net):
           f"{sum(k=='axis' for k in out_type)} axes)")
 
 
+GEO2RIEHEN = "/Volumes/T7Shield/riehen/geo2riehen_data"
+HORIZON_PATTERNS = {          # filename substring (case-insensitive) -> canonical horizon name
+    "tkris": "TKris (top crystalline basement)",
+    "tmusch": "TMusch (top Muschelkalk)",
+    "meso": "Base Mesozoic",
+}
+
+
+def _ch_to_wgs84(e, n):
+    """Swisstopo approximate formulas (accurate ~1 m). Accepts LV95 (2.6e6/1.2e6) or LV03."""
+    e = np.asarray(e, float); n = np.asarray(n, float)
+    if np.nanmedian(e) > 2e6:                                  # LV95 -> LV03
+        e = e - 2_000_000.0; n = n - 1_000_000.0
+    y = (e - 600_000.0) / 1e6; x = (n - 200_000.0) / 1e6
+    lon = (2.6779094 + 4.728982 * y + 0.791484 * y * x + 0.1306 * y * x**2
+           - 0.0436 * y**3) * 100.0 / 36.0
+    lat = (16.9023892 + 3.238272 * x - 0.270978 * y**2 - 0.002528 * x**2
+           - 0.0447 * y**2 * x - 0.0140 * x**3) * 100.0 / 36.0
+    return lon, lat
+
+
+def stage_geo2riehen(net):
+    """Geo2Riehen 3D-seismic horizon points (x, y, z) -> flat npz for the section overlays.
+
+    Format is sniffed per file: delimiter (comma/semicolon/whitespace), header lines skipped,
+    coordinates auto-detected (LV95 / LV03 / lon-lat by magnitude), z reported as-read with
+    diagnostics printed so the m a.s.l. vs depth convention can be VERIFIED on first run
+    (vertical sign errors are silent killers on section overlays).
+    """
+    assert net == "riehen", "Geo2Riehen horizons are a riehen-only product"
+    import glob as _g
+    pts, names = [], []
+    files = sorted(_g.glob(os.path.join(GEO2RIEHEN, "*")))
+    if not files:
+        raise SystemExit(f"no files under {GEO2RIEHEN} (volume unreadable or empty?)")
+    for fp in files:
+        base = os.path.basename(fp).lower()
+        name = next((v for k, v in HORIZON_PATTERNS.items() if k in base), None)
+        if name is None or not os.path.isfile(fp):
+            print(f"  skip (no horizon pattern): {os.path.basename(fp)}")
+            continue
+        raw = open(fp, errors="ignore").read()
+        delim = ";" if ";" in raw.splitlines()[max(0, min(5, len(raw.splitlines()) - 1))] \
+            else ("," if "," in raw.splitlines()[0] else None)
+        arr = np.genfromtxt(fp, delimiter=delim, comments="#", invalid_raise=False)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        arr = arr[np.isfinite(arr).all(axis=1)]
+        if arr.shape[1] < 3:
+            print(f"  skip ({arr.shape[1]} cols): {os.path.basename(fp)}")
+            continue
+        x, y, zv = arr[:, 0], arr[:, 1], arr[:, 2]
+        if np.nanmedian(np.abs(x)) < 90:                       # already lon/lat
+            lon, lat = x, y
+        else:
+            lon, lat = _ch_to_wgs84(x, y)
+        print(f"  {os.path.basename(fp)} -> {name}: {len(lon)} pts | lon {np.nanmin(lon):.4f}"
+              f"..{np.nanmax(lon):.4f} lat {np.nanmin(lat):.4f}..{np.nanmax(lat):.4f} | "
+              f"z {np.nanmin(zv):.0f}..{np.nanmax(zv):.0f} (VERIFY: m a.s.l. expected, "
+              f"negative below sea level)")
+        pts.append(np.column_stack([lon, lat, zv]).astype(np.float32))
+        names.append(name)
+    if not pts:
+        raise SystemExit("no horizon files matched TKris/TMusch/Meso patterns")
+    verts = np.concatenate(pts, axis=0)
+    offs = np.concatenate([[0], np.cumsum([len(p) for p in pts])]).astype(np.int64)
+    out = f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_horizons.npz"
+    np.savez_compressed(out, verts=verts, offsets=offs,
+                        names=np.array(names, dtype="U64"))
+    print(f"wrote {out}: {len(names)} horizons, {len(verts)} points")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--net", required=True, choices=("riehen", "aargau"))
-    ap.add_argument("--stage", required=True, choices=("dem", "gk500"))
+    ap.add_argument("--stage", required=True, choices=("dem", "gk500", "geo2riehen"))
     a = ap.parse_args()
-    (stage_dem if a.stage == "dem" else stage_gk500)(a.net)
+    {"dem": stage_dem, "gk500": stage_gk500, "geo2riehen": stage_geo2riehen}[a.stage](a.net)
