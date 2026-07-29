@@ -30,9 +30,10 @@ from BayHunter import Targets, MCMC_Optimizer, PlotFromStorage, ModelMatrix, Mod
 from noisepy.vs_reliability import DELTA_LOGL as vr_DELTA_LOGL
 from noisepy import pt_defaults
 
-BH_MODE = {"fund": 1, "overtone": 2, "love": 1}     # surf96 mode: 1=fundamental, 2=first higher
+BH_MODE = {"fund": 1, "overtone": 2, "love": 1, "love_ot": 2}   # surf96 mode: 1=fund, 2=1st higher
 # wave key -> (disba/surf96 wave type, disba mode index); mirrors vs_inversion.WAVEDEF.
-WAVE_DISBA = {"fund": ("rayleigh", 0), "overtone": ("rayleigh", 1), "love": ("love", 0)}
+WAVE_DISBA = {"fund": ("rayleigh", 0), "overtone": ("rayleigh", 1), "love": ("love", 0),
+              "love_ot": ("love", 1)}
 # (wave type, measure) -> BayHunter surf96 target class. LoveDispersionGroup exists in the
 # BayHunter_Aniso fork (surf96 'ldispgr'); no fork change needed.
 BH_TARGET = {("rayleigh", "group"): Targets.RayleighDispersionGroup,
@@ -216,7 +217,7 @@ def main(cfgpath):
         sources.append((cfg["curves_phase"], "phase"))
     tlist, waves, obs, wmeta = [], [], {}, {}
     for curves, meas in sources:
-        for w in ("fund", "overtone", "love"):
+        for w in ("fund", "overtone", "love", "love_ot"):
             if w not in curves:
                 continue
             d = np.loadtxt(curves[w]); d = d[d[:, 0].argsort()]

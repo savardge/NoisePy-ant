@@ -52,9 +52,17 @@ Gates (defaults; disable any with --disable g1,g2,... / tune via CLI):
                            log-spaced CWT scales onto the 0.1 s nominal grid, so above ~2 s adjacent
                            nominal-period picks are the same measurement (Aargau: x1.35 duplication
                            at 2-3 s, x1.85 at 3-4 s, x2.28 at 4-6 s; within-scale U spread 0.02 km/s).
-                           Key includes pick_method (both streams preserved) and a 0.2 km/s velocity
-                           bin so distinct topology branches at one scale (different wave packets)
-                           are never collapsed. The retained pick is the one nearest T_scale.
+                           Key is (pair, component, lag, mode, pick_method, scale_j) -- pick_method
+                           keeps both streams. The retained pick is the one nearest T_scale.
+                           CHANGED 2026-07-28: the 0.2 km/s velocity bin that used to be part of the
+                           key is OFF by default (--u-bin 0.2 restores it). Both pickers emit exactly
+                           one pick per (pair, component, lag, mode, nominal_period) -- measured on
+                           Haute-Sorne, mean 1.000 / max 1 for argmax AND topology -- so several
+                           picks at one scale_j are always duplicate nominal periods, not distinct
+                           wave packets (99.6%% of argmax same-scale groups span < 0.2 km/s, median
+                           0.030). The bin split those duplicates whenever they straddled an EDGE,
+                           keeping two picks and piling a 1.3-1.5x count excess on 1.9/2.1/2.3/2.5
+                           km/s. Removing it drops 4.0%% of picks and moves no median.
     station       all    : optional --station-qc csv -> flagged_sta column; --drop-flagged to kill
 
 Usage:
@@ -72,7 +80,6 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
 
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--dir", required=True)
@@ -91,8 +98,36 @@ ap.add_argument("--leak-sep-factor", type=float, default=2.0,
                      "separated by > factor*leak_tol (censoring-bias fix)")
 ap.add_argument("--leak-tmax", type=float, default=2.0,
                 help="fallback where refs are unavailable/converged-indeterminate: veto only T <= this")
+ap.add_argument("--band-edge-rungs", type=int, default=1,
+                help="drop picks sitting on the last N CWT rungs below the pair's band edge "
+                     "Tmax = distance/vave. The ladder is clipped there, so the final rung is "
+                     "an accident of path length and the pick sits on the limit. 0 = off. "
+                     "Riehen cost at N=1: 2.28%% of group picks, reach 1.92 -> 1.81 s.")
+ap.add_argument("--vave", type=float, default=3.0,
+                help="must match the picker's Config.vave (3.0); sets Tmax = distance/vave.")
+ap.add_argument("--u-bin", type=float, default=0.0,
+                help="velocity-bin width [km/s] in the group_scale_dedupe key. 0 (default) "
+                     "= no velocity term, one group pick per (pair, component, lag, mode, "
+                     "method, scale_j). 0.2 restores the pre-2026-07-28 behaviour, which "
+                     "imprinted a 1.3-1.5x count excess at 1.9/2.1/2.3/2.5 km/s.")
+ap.add_argument("--fold-love-overtone", action="store_true",
+                help="relabel love/overtone rows as love/fundamental before any gate runs, "
+                     "reproducing the picker's PICK_LOVE_OVERTONE=False default (all TT "
+                     "ridges stay fundamental, nothing dropped). Exact for group picks; "
+                     "phase needs a re-pick because c_ref is chosen by mode.")
 ap.add_argument("--station-qc", default=None)
 ap.add_argument("--drop-flagged", action="store_true")
+ap.add_argument("--sigma-trim", type=float, default=0.0,
+                help="also write qc_before_after_<K>sigma.png: raw vs QC gates vs a recursive "
+                     "K-sigma velocity trim of the RAW picks per period bin (an ALTERNATIVE to "
+                     "the gates, for comparison). 0 = off")
+ap.add_argument("--core-audit", type=float, default=0.0,
+                help="write qc_core_audit.txt: per-stream kill rate for CORE picks (within "
+                     "this many km/s of the per-period median) vs tail picks, attributed to "
+                     "the gate responsible. 0 = off")
+ap.add_argument("--figs-only", action="store_true",
+                help="skip writing picks_unified_QCd.csv and the budget (figure regeneration "
+                     "only -- the CSV is deterministic, so rewriting multi-GB output is waste)")
 args = ap.parse_args()
 OUT = args.out_dir or args.dir
 DISABLED = set(x.strip() for x in args.disable.split(",") if x.strip())
@@ -120,6 +155,23 @@ if "xmode_amp" not in df.columns:
     raise SystemExit("old-schema CSVs (no xmode_amp column) -- rerun dispersion_unified.py first")
 print(f"{len(df):,} rows, {df['pair'].nunique()} pairs")
 
+# Fold the Love overtone stream back into the fundamental, reproducing what the picker does
+# with Config.PICK_LOVE_OVERTONE = False (its default): every TT ridge stays fundamental,
+# nothing is dropped. Use where the overtone label is not credible -- on Haute-Sorne the
+# whole stream sits in T = 1.1-1.4 s at U >= 2.08 km/s, the only band where the overtone
+# REFERENCE curve is defined, and it carves a matching hole out of the Love fundamental
+# distribution (exactly the failure the picker's own comment warns about).
+# Folding here rather than post-merge means the fundamental gates apply to these rows.
+# NOTE: group picks come out identical to a re-pick with the flag off (label affects neither
+# T nor U); PHASE picks do not, because the picker chooses c_ref by mode -- for exact phase,
+# re-run dispersion_unified.py instead.
+if args.fold_love_overtone:
+    m = (df["wave_type"] == "love") & (df["mode"] == "overtone")
+    if m.any():
+        df.loc[m, "mode"] = "fundamental"
+        df.loc[m, "mode_overlap"] = 0        # flag-off path emits overlap=0 for every ridge
+    print(f"[fold_love_overtone] {int(m.sum()):,} love-overtone rows relabeled fundamental")
+
 # optional station flags
 df["flagged_sta"] = 0
 if args.station_qc:
@@ -141,11 +193,16 @@ if args.station_qc:
 df["group_ok"] = np.isfinite(df["group_velocity"]) & (df["group_velocity"] > 0)
 df["phase_ok"] = np.isfinite(df["phase_velocity"]) & (df["phase_velocity"] > 0)
 
+df["group_killer"] = ""
+df["phase_killer"] = ""
 budget = []          # (gate, wave, mode, measure, killed)
 
 
 def apply_gate(name, fail_mask, measures=("group", "phase")):
-    """Kill picks failing `fail_mask` on the given measures; record per-(wave,mode) kills."""
+    """Kill picks failing `fail_mask` on the given measures; record per-(wave,mode) kills.
+    Also stamps the FIRST gate that killed each pick (`{meas}_killer`) so the rejections
+    can be audited against the mode of the velocity distribution -- a gate that removes
+    core (near-median) picks is doing something different from one that removes tails."""
     if name in DISABLED:
         return
     for meas in measures:
@@ -155,6 +212,7 @@ def apply_gate(name, fail_mask, measures=("group", "phase")):
             for (w, m), n in kill.groupby([df["wave_type"], df["mode"]]).sum().items():
                 if n:
                     budget.append((name, w, m, meas, int(n)))
+        df.loc[kill, f"{meas}_killer"] = name
         df.loc[kill, col] = False
 
 
@@ -171,6 +229,20 @@ for mode, (lo, hi) in VB.items():
     apply_gate("vbounds", sel & ~df["phase_velocity"].between(lo, hi), measures=("phase",))
 # 3 far-field (group only; picker already gates phase at 1 lambda)
 apply_gate("farfield", ~(df["ratio_d_lambda"] >= args.farfield), measures=("group",))
+# 3b band edge. compute_cwt clips each pair's scale ladder at Tmax = dist/vave, so the LAST
+#    surviving rung is set by the exact path length and the pick on it sits right on the limit
+#    (Riehen: median nominal_period 0.90 s against median Tmax 0.90 s). Those picks are marginal
+#    by construction and are what populate the freak rungs used by 2-41 pairs of 19,017. They
+#    pass farfield (T = d/vave with U ~ 1 gives d/lambda ~ 3), so nothing else removes them.
+#    Cost of dropping one rung on Riehen: 2.28% of surviving group picks, 19 of 19,017 pairs
+#    emptied, median picks per pair 33 -> 32, median period reach 1.92 -> 1.81 s.
+if args.band_edge_rungs > 0 and "band_edge" not in DISABLED:
+    RUNG = 2.0 ** (1.0 / 12.0)                      # dj = 1/12 -> one rung of the ladder
+    Tmax_pair = df["distance"] / args.vave
+    apply_gate("band_edge",
+               df["T_scale"].notna()
+               & (df["T_scale"] * RUNG ** args.band_edge_rungs > Tmax_pair),
+               measures=("group", "phase"))
 # 4 mutual suppression (Rayleigh OVERTONE only -- see docstring; fundamental fails it spuriously
 #   wherever the path is too short to separate the modes)
 apply_gate("suppression",
@@ -237,6 +309,7 @@ if "scale_dedupe" not in DISABLED:
             [df["wave_type"], df["mode"]]).sum().items():
         if n:
             budget.append(("scale_dedupe", w, m, "phase", int(n)))
+    df.loc[kill, "phase_killer"] = "scale_dedupe"
     df.loc[kill, "phase_ok"] = False
 
 # 13 group scale dedupe: same single-scale logic for group picks (see docstring). The velocity bin
@@ -244,15 +317,30 @@ if "scale_dedupe" not in DISABLED:
 if "group_scale_dedupe" not in DISABLED:
     gp = df[df["group_ok"] & (df["scale_j"] >= 0)].copy()
     gp["dT_scale"] = (gp["nominal_period"] - gp["T_scale"]).abs()
-    gp["u_bin"] = (gp["group_velocity"] / 0.2).round().astype(int)
+    # Velocity term in the key: DISABLED by default since 2026-07-28 (--u-bin 0.2 restores it).
+    # It was meant to stop distinct wave packets at one scale being collapsed, but BOTH pickers
+    # already emit exactly one pick per (pair, component, lag, mode, nominal_period) -- measured
+    # on Haute-Sorne: mean 1.000, max 1 for argmax AND topology. So several picks sharing a
+    # scale_j are always several nominal periods landing on the same CWT scale, i.e. duplicates:
+    # 99.6% of argmax same-scale groups span < 0.2 km/s (median 0.030). The absolute bin therefore
+    # almost never separated real packets; what it did do was split duplicates that straddled a
+    # bin EDGE, so those groups kept two picks instead of one and piled a 1.3-1.5x excess onto
+    # 1.9 / 2.1 / 2.3 / 2.5 km/s. Dropping it removes 4.0% of picks and leaves the median group
+    # velocity unchanged to 4 decimals at every well-sampled period.
+    key = ["pair", "component", "lag", "mode", "pick_method", "scale_j"]
+    if args.u_bin > 0:
+        gp["u_bin"] = (gp["group_velocity"] / args.u_bin).round().astype(int)
+        key = key + ["u_bin"]
+    # NOTE: `score` is constant 1.0 for every topology pick (57% of Haute-Sorne picks), so for
+    # that stream this sort degenerates to dT_scale and the survivor is decided by row order.
     keep_idx = (gp.sort_values(["dT_scale", "score"], ascending=[True, False])
-                  .drop_duplicates(subset=["pair", "component", "lag", "mode", "pick_method",
-                                           "scale_j", "u_bin"]).index)
+                  .drop_duplicates(subset=key).index)
     kill = df.index.isin(gp.index.difference(keep_idx))
     for (w, m), n in pd.Series(kill, index=df.index).groupby(
             [df["wave_type"], df["mode"]]).sum().items():
         if n:
             budget.append(("group_scale_dedupe", w, m, "group", int(n)))
+    df.loc[kill, "group_killer"] = "group_scale_dedupe"
     df.loc[kill, "group_ok"] = False
 
 # ----------------------------------------------------------------------------- outputs
@@ -260,13 +348,16 @@ survivors = df[df["group_ok"] | df["phase_ok"]].copy()
 survivors["group_ok"] = survivors["group_ok"].astype(int)
 survivors["phase_ok"] = survivors["phase_ok"].astype(int)
 out_csv = os.path.join(OUT, "picks_unified_QCd.csv")
-survivors.to_csv(out_csv, index=False)
+if args.figs_only:
+    print(f"--figs-only: NOT rewriting {out_csv}")
+else:
+    survivors.to_csv(out_csv, index=False)
 
 # rejection budget
 bud = pd.DataFrame(budget, columns=["gate", "wave", "mode", "measure", "killed"])
 lines = [f"QC rejection budget -- {len(files)} pairs, {len(df):,} input rows",
          f"gates disabled: {sorted(DISABLED) if DISABLED else 'none'}", ""]
-order = [g for g in ["snr", "vbounds", "farfield", "suppression", "ot_res", "love_env",
+order = [g for g in ["snr", "vbounds", "farfield", "band_edge", "suppression", "ot_res", "love_env",
                      "love_overlap", "rf_leak", "ot_leak", "phase_phys", "station",
                      "scale_dedupe", "group_scale_dedupe"] if g not in DISABLED]
 for g in order:
@@ -281,8 +372,9 @@ for (w, m), sub in survivors.groupby(["wave_type", "mode"]):
     lines.append(f"    {w:8s} {m:11s}: group {int(sub['group_ok'].sum()):,} | "
                  f"phase {int(sub['phase_ok'].sum()):,}")
 report = "\n".join(lines)
-with open(os.path.join(OUT, "qc_rejection_budget.txt"), "w") as f:
-    f.write(report + "\n")
+if not args.figs_only:
+    with open(os.path.join(OUT, "qc_rejection_budget.txt"), "w") as f:
+        f.write(report + "\n")
 print("\n" + report)
 
 # ----------------------------------------------------------------------------- before/after figure
@@ -297,36 +389,193 @@ if args.ref_dir:
         except Exception:
             refs[key] = None
 
-Tb = np.arange(0.2, 6.05, 0.1)
+def _scale_bins(scales, tmin, tmax, min_width=0.1):
+    """Period-bin edges matched to the picker's CWT scale grid: geometric midpoints
+    between the scales actually present, thinned to >= min_width (the linear FTAN
+    step) so every bin holds at least one nominal period. Uniform 0.1 s bins sawtooth
+    above ~2 s, where the log-spaced scales are sparser than the linear grid and
+    scale-less bins collect only FTAN-stream picks. (ffscan_common has a net-keyed
+    twin of this for the ffscan diagnostics.)"""
+    s = np.unique(scales[np.isfinite(scales) & (scales > 0)])
+    s = s[(s >= tmin / 1.2) & (s <= tmax * 1.2)]
+    if len(s) < 3:
+        return np.arange(tmin, tmax + 0.05, 0.1)
+    e = np.concatenate([[s[0] * np.sqrt(s[0] / s[1])], np.sqrt(s[:-1] * s[1:]),
+                        [s[-1] * np.sqrt(s[-1] / s[-2])]])
+    while e[0] > tmin:
+        e = np.concatenate([[e[0] * s[0] / s[1]], e])
+    while e[-1] < tmax:
+        e = np.concatenate([e, [e[-1] * s[-1] / s[-2]]])
+    keep = [0]
+    for i in range(1, len(e)):
+        if e[i] - e[keep[-1]] >= min_width:
+            keep.append(i)
+    return e[keep]
+
+
+Tb = _scale_bins(df["T_scale"].to_numpy(), 0.2, 6.0)
 Vb = np.arange(0.5, 5.05, 0.05)
-ROWS = [(w, m) for w in ("rayleigh", "love") for m in ("fundamental", "overtone")]
+# Love overtone is NOT picked on these networks (unified_picking.PICK_LOVE_OVERTONE is
+# False; the TT overtone label is not credible where the two Love modes overlap), so it
+# gets no row -- an all-empty row only invites the reader to look for data that the
+# workflow deliberately does not produce.
+ROWS = [("rayleigh", "fundamental"), ("rayleigh", "overtone"), ("love", "fundamental")]
 COLS = [("group", "before"), ("group", "after"), ("phase", "before"), ("phase", "after")]
-fig, axs = plt.subplots(4, 4, figsize=(22, 17))
+fig, axs = plt.subplots(len(ROWS), 4, figsize=(22, 4.3 * len(ROWS)))
 for ir, (w, m) in enumerate(ROWS):
     base = df[(df["wave_type"] == w) & (df["mode"] == m)]
+    # histogram first, then draw: before/after of one measure share a LINEAR color
+    # scale (saturated at the 99th percentile of occupied cells) so the panels are
+    # directly comparable and dense short-period cells do not flatten the rest
+    Hs = {}
+    for meas, stage in COLS:
+        vcol = "group_velocity" if meas == "group" else "phase_velocity"
+        # phase is measured on the discrete CWT scales -- T_scale is its real period
+        # axis; nominal_period is only a label (see export_unified_tomo_picks.py)
+        tcol = "nominal_period" if meas == "group" else "T_scale"
+        sub = base if stage == "before" else base[base[f"{meas}_ok"]]
+        T, V = sub[tcol].to_numpy(), sub[vcol].to_numpy()
+        good = np.isfinite(T) & np.isfinite(V) & (V > 0)
+        Hs[(meas, stage)] = np.histogram2d(T[good], V[good], bins=[Tb, Vb])[0]
+    vmax = {meas: max(float(np.percentile(H[H > 0], 99)) if (H > 0).any() else 1.0
+                      for st in ("before", "after") for H in [Hs[(meas, st)]])
+            for meas in ("group", "phase")}
     for ic, (meas, stage) in enumerate(COLS):
         ax = axs[ir, ic]
         vcol = "group_velocity" if meas == "group" else "phase_velocity"
+        tcol = "nominal_period" if meas == "group" else "T_scale"
         sub = base if stage == "before" else base[base[f"{meas}_ok"]]
-        T, V = sub["nominal_period"].to_numpy(), sub[vcol].to_numpy()
+        T, V = sub[tcol].to_numpy(), sub[vcol].to_numpy()
         good = np.isfinite(T) & np.isfinite(V) & (V > 0)
         T, V = T[good], V[good]
         if len(T):
-            H, xe, ye = np.histogram2d(T, V, bins=[Tb, Vb])
-            pm = ax.pcolormesh(xe, ye, np.where(H.T > 0, H.T, np.nan), cmap="viridis",
-                               norm=LogNorm())
-            plt.colorbar(pm, ax=ax, label="picks / cell")
+            H = Hs[(meas, stage)]
+            pm = ax.pcolormesh(Tb, Vb, np.where(H.T > 0, H.T, np.nan), cmap="viridis",
+                               vmin=0, vmax=vmax[meas])
+            plt.colorbar(pm, ax=ax, extend="max", label="picks / cell")
         r = refs.get((w, m))
         if meas == "phase" and r is not None and np.ndim(r) == 2 and len(r):
             ax.plot(r[:, 0], r[:, 1], "r--", lw=1.5)
         ax.set(title=f"{w} {m} -- {meas} {stage} (n={len(T):,})", xlim=(0.2, 6), ylim=(0.5, 5.0))
         if ic == 0:
             ax.set_ylabel("velocity [km/s]")
-        if ir == 3:
-            ax.set_xlabel("Period [s]")
+        if ir == len(ROWS) - 1:
+            ax.set_xlabel("Period [s]  (group: nominal; phase: T_scale)")
 fig.suptitle(f"Unified picks QC: before vs after ({len(files)} pairs)", y=0.995, fontsize=15)
 fig.tight_layout(rect=(0, 0, 1, 0.99))
 figpath = os.path.join(OUT, "qc_before_after.png")
 fig.savefig(figpath, dpi=110)
 plt.close(fig)
-print(f"\nwrote {out_csv}\n      {os.path.join(OUT, 'qc_rejection_budget.txt')}\n      {figpath}")
+print(f"\nwrote {figpath}" if args.figs_only else
+      f"\nwrote {out_csv}\n      {os.path.join(OUT, 'qc_rejection_budget.txt')}\n      {figpath}")
+
+
+# ------------------------------------------------- optional: gates vs k-sigma trim figure
+def _recursive_trim(v, k, max_iter=100):
+    """Recursive mean/std k-sigma rejection until stable; returns the keep mask."""
+    keep = np.ones(v.size, bool)
+    for _ in range(max_iter):
+        m, s = v[keep].mean(), v[keep].std()
+        if s == 0:
+            break
+        new = keep & (np.abs(v - m) <= k * s)
+        if new.sum() == keep.sum():
+            break
+        keep = new
+    return keep
+
+
+if args.core_audit:
+    # Does the gate battery remove CORE picks (near the per-period mode) or only tails?
+    # Core = within +/- args.core_audit km/s of the per-period MEDIAN of the raw picks
+    # (median, not mean: robust to the very tails under test). Reported per stream as
+    # the core kill rate, then attributed to the gate that killed each core pick.
+    lines = [f"core-vs-tail rejection audit (core = |v - median(v|T)| <= "
+             f"{args.core_audit:g} km/s, raw per-period median)", ""]
+    for w, m in ROWS:
+        for meas in ("group", "phase"):
+            vcol = "group_velocity" if meas == "group" else "phase_velocity"
+            tcol = "nominal_period" if meas == "group" else "T_scale"
+            sub = df[(df["wave_type"] == w) & (df["mode"] == m)
+                     & np.isfinite(df[tcol]) & np.isfinite(df[vcol]) & (df[vcol] > 0)]
+            if not len(sub):
+                continue
+            bi = np.clip(np.digitize(sub[tcol].to_numpy(), Tb) - 1, 0, len(Tb) - 2)
+            med = pd.Series(sub[vcol].to_numpy()).groupby(bi).transform("median").to_numpy()
+            core = np.abs(sub[vcol].to_numpy() - med) <= args.core_audit
+            killed = ~sub[f"{meas}_ok"].to_numpy()
+            nc, nt = int(core.sum()), int((~core).sum())
+            if not nc:
+                continue
+            # what the tomography actually consumes is (pair, T) CELLS -- the export takes
+            # one median per cell, so duplicate picks at the mode add no information
+            cell_raw = sub.groupby(["pair", sub[tcol].round(1)]).ngroups
+            surv = sub[sub[f"{meas}_ok"]]
+            cell_qc = surv.groupby(["pair", surv[tcol].round(1)]).ngroups if len(surv) else 0
+            lines.append(f"{w} {m} -- {meas}: core {nc:,} ({100 * killed[core].mean():.1f}% "
+                         f"killed) | tail {nt:,} ({100 * killed[~core].mean():.1f}% killed)"
+                         f"  ||  (pair,T) cells {cell_raw:,} -> {cell_qc:,} "
+                         f"({100 * cell_qc / max(cell_raw, 1):.1f}% kept)")
+            kil = sub[f"{meas}_killer"].to_numpy()[core & killed]
+            for gate, n in pd.Series(kil).value_counts().items():
+                lines.append(f"      {gate:20s} {n:>9,}  ({100 * n / nc:5.1f}% of core)")
+    rep = "\n".join(lines)
+    with open(os.path.join(OUT, "qc_core_audit.txt"), "w") as f:
+        f.write(rep + "\n")
+    print("\n" + rep)
+
+if args.sigma_trim:
+    K = args.sigma_trim
+    SCOLS = [(meas, stage) for meas in ("group", "phase")
+             for stage in ("before", "QC gates", f"{K:g}sigma")]
+    fig, axs = plt.subplots(len(ROWS), 6, figsize=(31, 4.3 * len(ROWS)))
+    for ir, (w, m) in enumerate(ROWS):
+        base = df[(df["wave_type"] == w) & (df["mode"] == m)]
+        Hs = {}
+        for meas, stage in SCOLS:
+            vcol = "group_velocity" if meas == "group" else "phase_velocity"
+            tcol = "nominal_period" if meas == "group" else "T_scale"
+            raw = base[np.isfinite(base[tcol]) & np.isfinite(base[vcol]) & (base[vcol] > 0)]
+            if stage == "before":
+                sub = raw
+            elif stage == "QC gates":
+                sub = raw[raw[f"{meas}_ok"]]
+            else:                       # k-sigma trim of the RAW set, per period bin
+                T, V = raw[tcol].to_numpy(), raw[vcol].to_numpy()
+                keep = np.zeros(V.size, bool)
+                bi = np.clip(np.digitize(T, Tb) - 1, 0, len(Tb) - 2)
+                for ib in np.unique(bi):
+                    sel = np.where(bi == ib)[0]
+                    keep[sel] = (_recursive_trim(V[sel], K) if sel.size >= 5
+                                 else np.ones(sel.size, bool))
+                sub = raw[keep]
+            Hs[(meas, stage)] = (np.histogram2d(sub[tcol].to_numpy(), sub[vcol].to_numpy(),
+                                                bins=[Tb, Vb])[0], len(sub))
+        vmax = {meas: max(float(np.percentile(H[H > 0], 99)) if (H > 0).any() else 1.0
+                          for st in ("before", "QC gates", f"{K:g}sigma")
+                          for H in [Hs[(meas, st)][0]])
+                for meas in ("group", "phase")}
+        for ic, (meas, stage) in enumerate(SCOLS):
+            ax = axs[ir, ic]
+            H, n = Hs[(meas, stage)]
+            pm = ax.pcolormesh(Tb, Vb, np.where(H.T > 0, H.T, np.nan), cmap="viridis",
+                               vmin=0, vmax=vmax[meas])
+            plt.colorbar(pm, ax=ax, extend="max", label="picks / cell")
+            r = refs.get((w, m))
+            if meas == "phase" and r is not None and np.ndim(r) == 2 and len(r):
+                ax.plot(r[:, 0], r[:, 1], "r--", lw=1.5)
+            ax.set(title=f"{w} {m} -- {meas} {stage} (n={n:,})",
+                   xlim=(0.2, 6), ylim=(0.5, 5.0))
+            if ic == 0:
+                ax.set_ylabel("velocity [km/s]")
+            if ir == len(ROWS) - 1:
+                ax.set_xlabel("Period [s]  (group: nominal; phase: T_scale)")
+    fig.suptitle(f"Unified picks: raw vs QC gates vs recursive {K:g}-sigma trim "
+                 f"({len(files)} pairs). The sigma trim is an ALTERNATIVE to the gates "
+                 f"(applied to the raw picks per period bin), not applied on top of them.",
+                 y=0.995, fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.99))
+    sigpath = os.path.join(OUT, f"qc_before_after_{K:g}sigma.png")
+    fig.savefig(sigpath, dpi=110)
+    plt.close(fig)
+    print(f"      {sigpath}")

@@ -29,7 +29,7 @@ paths:
   model_reference_csv: null # aargau: {vsg_dir}/analysis/reference_curves.csv
   # Optional faults shapefile (WGS84) for lateral_structure_map.py; needs geopandas
   # (base anaconda env only). null = skip the fault-crossing analysis.
-  faults_shapefile: "/Volumes/T7Shield/riehen/Faults_serianex_trimmed/Faults.shp"
+  faults_shapefile: "/Users/genevievesavard/Data/riehen/Faults_serianex_trimmed/Faults.shp"
                             # aargau: null
 
 vsg_modesep:                # network mode-separated stack (vsg_modesep.py)

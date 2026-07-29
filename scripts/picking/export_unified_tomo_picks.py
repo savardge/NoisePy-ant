@@ -23,13 +23,18 @@ std > --max-std are DROPPED as branch-ambiguous (median of two distinct ridges i
 singles pass with std=0. Production policy: pairs touching a station flagged in
 {project}/station_qc.csv are excluded (--keep-flagged to override).
 
-THE PERIOD AXIS DIFFERS BY MEASURE, and this is not cosmetic:
-  group -> `nominal_period`.
-  phase -> `round(T_scale, 1)`, the discrete CWT scale the phase was actually measured on.
-Phase is read off discrete wavelet scales, so T_scale is its true period axis; nominal_period is
-a label. Grouping phase by nominal_period silently merges picks from different scales and moves
-~0.5% of rows to the wrong period. (Recovered 2026-07-16 by reproducing the lost Jul-14 export;
-see VELOCITY bounds note below.)
+THE PERIOD AXIS IS THE PICKER'S CWT SCALE LADDER (`T_scale`) for BOTH measures -- uneven,
+log-spaced at ~5.95%, e.g. ... 2.031, 2.153, 2.281, 2.416, 2.560 ... s. Rationale (2026-07-27):
+the picks are measured ON those scales; the 0.1 s `nominal_period` grid is only a label the
+FTAN image is interpolated onto. Forcing that uniform grid corrupts BOTH ends of the band:
+  * T > ~1.7 s (scales coarser than 0.1 s): one scale is split across two nominal periods, so
+    the tomography builds two STARVED maps from one measurement -- 43 of 89 Haute-Sorne group
+    maps, with ray counts split e.g. 69/385/391/2381.
+  * T < ~1.7 s (scales finer than 0.1 s): 10-11 scales per network collapse onto a shared
+    nominal period and never get their own map.
+Downstream, swtomotv must render periods with enough decimals to keep the rungs distinct
+(`period_decimals: 3` in the dataset YAML); at 1 decimal two scales silently share a cache
+file. `--period-axis nominal` restores the legacy behaviour.
 
 VELOCITY bounds are applied HERE and differ by measure — the QC script's vbounds were relaxed to
 5.0 so valid long-period phase picks are not clipped:
@@ -54,17 +59,21 @@ import pandas as pd
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 WAVES = {"fund": ("rayleigh", "fundamental"),
          "overtone": ("rayleigh", "overtone"),
-         "love": ("love", "fundamental")}
+         "love": ("love", "fundamental"),
+         "love_ot": ("love", "overtone")}
 # velocity bounds per (measure, wave) -- see the module docstring for why they differ
-VBOUNDS = {"group": {"fund": (0.5, 3.6), "overtone": (1.5, 4.5), "love": (0.5, 3.6)},
-           "phase": {"fund": (0.6, 4.5), "overtone": (1.6, 5.0), "love": (0.6, 4.5)}}
-# (velocity column, ok flag, period column) per measure. The period axis is NOT shared: phase is
-# measured on discrete CWT scales, so T_scale (rounded to the 0.1 s map grid) is its real period.
-MEASURE = {"group": ("group_velocity", "group_ok", "nominal_period"),
+VBOUNDS = {"group": {"fund": (0.5, 3.6), "overtone": (1.5, 4.5), "love": (0.5, 3.6),
+                     "love_ot": (1.5, 4.5)},
+           "phase": {"fund": (0.6, 4.5), "overtone": (1.6, 5.0), "love": (0.6, 4.5),
+                     "love_ot": (1.6, 5.0)}}
+# (velocity column, ok flag, period column) per measure. BOTH measures are exported on the
+# picker's native CWT scale ladder (`T_scale`), not on the 0.1 s nominal grid -- see the
+# --period-axis note in the docstring.
+MEASURE = {"group": ("group_velocity", "group_ok", "T_scale"),
            "phase": ("phase_velocity", "phase_ok", "T_scale")}
 
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-ap.add_argument("--net", required=True, choices=("riehen", "aargau"))
+ap.add_argument("--net", required=True, choices=("riehen", "aargau", "hautesorne"))
 ap.add_argument("--measure", default="group", choices=("group", "phase"),
                 help="which velocity to export (default group). phase reads phase_velocity/"
                      "phase_ok on the T_scale period axis and defaults --out-suffix to '_phase'.")
@@ -81,20 +90,32 @@ ap.add_argument("--outdir", default=None,
                 help="where to write the pick CSVs. Default {project}/tomo -- but pass the new "
                      "inputs dir explicitly after the tomo/ reorg, or the picks land in the old "
                      "tomo/ root (which still exists) while the YAMLs read the new location.")
+ap.add_argument("--period-axis", default="scale", choices=("scale", "nominal"),
+                help="scale (default) = the picker's native CWT scale ladder (uneven, "
+                     "log-spaced ~5.95%%); nominal = the legacy uniform 0.1 s FTAN grid "
+                     "for group. See the docstring for why scale is correct.")
+ap.add_argument("--src", default=None,
+                help="alternate picks_unified_QCd.csv to read (default "
+                     "{project}/dispersion_unified/picks_unified_QCd.csv). Use for control QC "
+                     "runs, e.g. the ffscan --farfield 1.0 re-run; pair it with --out-suffix.")
 args = ap.parse_args()
 if args.out_suffix is None:
     args.out_suffix = "_phase" if args.measure == "phase" else ""
 VCOL, OKCOL, TCOL = MEASURE[args.measure]
+if args.period_axis == "nominal":            # legacy behaviour, group only
+    TCOL = "nominal_period" if args.measure == "group" else "T_scale"
 
 proj = os.path.join(EHM, args.net)
-src = os.path.join(proj, "dispersion_unified", "picks_unified_QCd.csv")
+src = args.src or os.path.join(proj, "dispersion_unified", "picks_unified_QCd.csv")
 outdir = args.outdir or os.path.join(proj, "tomo")
 os.makedirs(outdir, exist_ok=True)
 print(f"reading {src} (measure={args.measure}, velocity={VCOL}, period={TCOL}) ...")
 df = pd.read_csv(src, usecols=["pair", TCOL, VCOL, "wave_type", "mode", OKCOL,
                                "distance", "azimuth"])
-# map grid is 0.1 s; T_scale is continuous, nominal_period already discrete (round is a no-op)
-df["_T"] = df[TCOL].round(1)
+# On the scale axis the period IS the CWT scale: keep its value, rounding only to strip
+# float noise so the ladder collapses to its ~47 discrete rungs. On the legacy nominal axis
+# the 0.1 s grid is the label.
+df["_T"] = df[TCOL].round(4 if args.period_axis == "scale" else 1)
 
 flagged = set()
 if not args.keep_flagged:

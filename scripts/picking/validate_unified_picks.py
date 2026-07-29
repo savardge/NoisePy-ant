@@ -103,7 +103,7 @@ for ir, key in enumerate(ROWS):
                 ax.legend(fontsize=9, loc="upper left")
         ax.set(title=f"{wave} {mode} -- {meas}  (n={n:,})", xlabel="Period [s]",
                ylabel=f"{meas.capitalize()} velocity [km/s]", xlim=(0.2, 6), ylim=(0.5, 5.0))
-fig.suptitle(f"Aargau unified picker: 2D pick distributions ({len(files)} pairs, "
+fig.suptitle(f"{os.path.basename(os.path.dirname(args.dir.rstrip('/')))} unified picker: 2D pick distributions ({len(files)} pairs, "
              f"pick_method={args.pick_method})", y=0.997, fontsize=14)
 fig.tight_layout(rect=(0, 0, 1, 0.99))
 p1 = os.path.join(OUT, "unified_pick_distributions.png")

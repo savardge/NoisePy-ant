@@ -34,6 +34,7 @@ from matplotlib.colors import LightSource
 E = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from well_vs_qc import WELLS                                     # noqa: E402
+from noisepy.lv95 import wgs84_to_lv95, extent_lv95_km          # noqa: E402
 
 MAP_DEPTHS = np.arange(0.5, 6.01, 0.5)
 NEAR_KM = 0.2                                                    # stations/wells within 200 m
@@ -61,9 +62,11 @@ def bilinear(elev, extent, lon, lat):
     return z
 
 
-def km_xy(lon, lat, lat0):
-    kx = 111.0 * np.cos(np.deg2rad(lat0))
-    return np.asarray(lon) * kx, np.asarray(lat) * 111.0
+def km_xy(lon, lat, lat0=None):
+    """LV95 (EPSG:2056) E/N en km — regla fija 2026-07-25: todos los mapas en LV95,
+    aspecto igual. lat0 se conserva por compatibilidad de firma (sin uso)."""
+    E_, N_ = wgs84_to_lv95(lon, lat)
+    return E_ / 1e3, N_ / 1e3
 
 
 def dist_to_polyline_km(px, py, qx, qy):
@@ -92,10 +95,11 @@ def _tecto(ax, gk, lw=1.0, zorder=3):
     verts, offs, kc = gk["verts"], gk["offsets"], gk["kindcode"]
     for i in range(len(kc)):
         xy = verts[offs[i]:offs[i + 1]]
+        gx_, gy_ = km_xy(xy[:, 0], xy[:, 1])
         if kc[i] == 2:
-            ax.plot(xy[:, 0], xy[:, 1], color="royalblue", lw=lw, ls="-.", zorder=zorder)
+            ax.plot(gx_, gy_, color="royalblue", lw=lw, ls="-.", zorder=zorder)
         else:
-            ax.plot(xy[:, 0], xy[:, 1], color="darkred", lw=lw, zorder=zorder)
+            ax.plot(gx_, gy_, color="darkred", lw=lw, zorder=zorder)
 
 
 def load_zrel(griddir, cells):
@@ -183,6 +187,9 @@ def main():
     gx, gy = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
     B = np.column_stack([np.ones(gx.size), gx.ravel(), gy.ravel()])
     lon2d, lat2d = (B @ clon).reshape(nx, ny), (B @ clat).reshape(nx, ny)
+    e2d, n2d = km_xy(lon2d, lat2d)                               # LV95 km (regla de mapas)
+    extent_km = extent_lv95_km(extent)
+    stx, sty = km_xy(st["longitude"], st["latitude"])
     dx_km = abs(clon[1]) * 111.0 * np.cos(np.deg2rad(lat0))      # grid step along ix [km]
     dy_km = abs(clat[2]) * 111.0                                 # grid step along iy [km]
 
@@ -196,29 +203,31 @@ def main():
             g[int(cix), int(ciy)] = val
         vmin, vmax = vlims[float(d)]
         fig, ax = plt.subplots(figsize=(7.6, 7.2))
-        ax.imshow(hs, extent=extent, cmap="gray", origin="upper", aspect="auto", zorder=0)
-        pc = ax.pcolormesh(lon2d, lat2d, g, cmap="RdYlBu", vmin=vmin, vmax=vmax,
+        ax.imshow(hs, extent=extent_km, cmap="gray", origin="upper", zorder=0)
+        pc = ax.pcolormesh(e2d, n2d, g, cmap="RdYlBu", vmin=vmin, vmax=vmax,
                            alpha=0.68, shading="nearest", zorder=1)
         _tecto(ax, gk)
-        ax.plot(st["longitude"], st["latitude"], ".", color="k", ms=1.6, alpha=0.55, zorder=4)
+        ax.plot(stx, sty, ".", color="k", ms=1.6, alpha=0.55, zorder=4)
         for nm, la, lo, dep in wells:
-            ax.plot(lo, la, "s", mfc="k", mec="w", ms=7, zorder=5)
-            ax.annotate(nm, (lo, la), xytext=(4, 4), textcoords="offset points",
+            wx, wy = km_xy(lo, la)
+            ax.plot(wx, wy, "s", mfc="k", mec="w", ms=7, zorder=5)
+            ax.annotate(nm, (wx, wy), xytext=(4, 4), textcoords="offset points",
                         fontsize=7.5, fontweight="bold", zorder=6,
                         bbox=dict(fc="w", alpha=0.65, ec="none", pad=1))
         for nm, lo, la in CITIES[net]:
-            ax.plot(lo, la, "o", mfc="w", mec="k", ms=4, zorder=5)
-            ax.annotate(nm, (lo, la), xytext=(4, -8), textcoords="offset points",
+            cx, cy = km_xy(lo, la)
+            ax.plot(cx, cy, "o", mfc="w", mec="k", ms=4, zorder=5)
+            ax.annotate(nm, (cx, cy), xytext=(4, -8), textcoords="offset points",
                         fontsize=7, style="italic", zorder=6)
-        # 2 km scalebar, bottom left
-        sb_lon = extent[0] + 0.08 * (extent[1] - extent[0])
-        sb_lat = extent[2] + 0.05 * (extent[3] - extent[2])
-        sb_dlon = 2.0 / (111.0 * np.cos(np.deg2rad(lat0)))
-        ax.plot([sb_lon, sb_lon + sb_dlon], [sb_lat, sb_lat], "k-", lw=3, zorder=6)
-        ax.annotate("2 km", (sb_lon + sb_dlon / 2, sb_lat), xytext=(0, 4),
+        # 2 km scalebar, bottom left (ejes ya en km, largo literal)
+        sb_x = extent_km[0] + 0.08 * (extent_km[1] - extent_km[0])
+        sb_y = extent_km[2] + 0.05 * (extent_km[3] - extent_km[2])
+        ax.plot([sb_x, sb_x + 2.0], [sb_y, sb_y], "k-", lw=3, zorder=6)
+        ax.annotate("2 km", (sb_x + 1.0, sb_y), xytext=(0, 4),
                     textcoords="offset points", ha="center", fontsize=8, zorder=6)
-        ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3])
-        ax.set_xlabel("longitude"); ax.set_ylabel("latitude")
+        ax.set_xlim(extent_km[0], extent_km[1]); ax.set_ylim(extent_km[2], extent_km[3])
+        ax.set_aspect("equal")
+        ax.set_xlabel("E [km LV95]"); ax.set_ylabel("N [km LV95]")
         ax.set_title(f"{net} Vs median at {d:g} km depth — {arm}", fontsize=11)
         plt.colorbar(pc, ax=ax, fraction=0.04, pad=0.02).set_label("Vs [km/s]")
         out = os.path.join(figdir, "maps", f"vs_map_z{d:03.1f}km.png")
@@ -226,7 +235,6 @@ def main():
     print(f"maps: {len(MAP_DEPTHS)} -> {figdir}/maps/")
 
     # ------------------------------------------------------------------ B. sections
-    stx, sty = km_xy(st["longitude"], st["latitude"], lat0)
     st_elev = bilinear(elev, extent, st["longitude"], st["latitude"])
     global_vmin = min(vv[0] for vv in vlims.values())
     global_vmax = max(vv[1] for vv in vlims.values())
@@ -335,11 +343,13 @@ def main():
             ax.legend(fontsize=7, loc="lower left")
         plt.colorbar(pc, ax=ax, pad=0.01, fraction=0.035).set_label("Vs median [km/s]")
 
-        # inset map with the section line
+        # inset map with the section line (LV95 km, aspecto igual)
         axi = fig.add_axes([0.795, 0.70, 0.185, 0.24])
-        axi.imshow(hs, extent=extent, cmap="gray", origin="upper", aspect="auto")
-        axi.plot(lonlat[:, 0], lonlat[:, 1], ".", color="0.55", ms=0.8)
-        axi.plot(plon, plat, "r-", lw=2)
+        axi.imshow(hs, extent=extent_km, cmap="gray", origin="upper")
+        nkx, nky = km_xy(lonlat[:, 0], lonlat[:, 1])
+        axi.plot(nkx, nky, ".", color="0.55", ms=0.8)
+        axi.plot(px, py, "r-", lw=2)
+        axi.set_aspect("equal")
         axi.set_xticks([]); axi.set_yticks([])
         for sp in axi.spines.values():
             sp.set_linewidth(1.4)

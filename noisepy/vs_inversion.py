@@ -35,7 +35,8 @@ VPVS = 1.73                 # fixed Vp/Vs (both engines) for a clean comparison
 # pipeline wave key -> (disba/surf96 wave type, mode index, 0-based). "fund"/"overtone" are the
 # Rayleigh fundamental/1st-higher branches; "love" is the Love fundamental. The wave key stays the
 # dict key everywhere; this map is the single place the wave TYPE and mode are resolved.
-WAVEDEF = {"fund": ("rayleigh", 0), "overtone": ("rayleigh", 1), "love": ("love", 0)}
+WAVEDEF = {"fund": ("rayleigh", 0), "overtone": ("rayleigh", 1), "love": ("love", 0),
+           "love_ot": ("love", 1)}
 DISBA_MODE = {w: m for w, (_, m) in WAVEDEF.items()}    # back-compat: wave key -> mode index
 
 

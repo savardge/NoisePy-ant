@@ -130,8 +130,7 @@ def cross_section(net, axis, line, cells, lonlat, z, vf, uf, vd, out, title):
     print("wrote", out)
 
 
-GK500 = ("/Users/genevievesavard/Library/CloudStorage/OneDrive-LumidasInc/Switzerland/swisstopo/"
-         "GK500_V1_1/GK500_V1_1_FR/Shapes_WGS84")
+GK500 = "/Users/genevievesavard/Data/swisstopo/GK500_V1_1/GK500_V1_1_FR/Shapes_WGS84"
 SLICE_DEPTHS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
 
 
@@ -200,8 +199,7 @@ def depth_slice_maps(net, griddir, vs_med, cells, lonlat, z, hs, extent, depths)
         print("wrote", out)
 
 
-BORDERS_SHP = ("/Users/genevievesavard/Library/CloudStorage/OneDrive-LumidasInc/Switzerland/"
-               "swisstopo/borders/Shapes_WGS84/swissBOUNDARIES3D_1_4_TLM_LANDESGEBIET_wgs84.shp")
+BORDERS_SHP = "/Users/genevievesavard/Data/swisstopo/borders/Shapes_WGS84/swissBOUNDARIES3D_1_4_TLM_LANDESGEBIET_wgs84.shp"
 # deep boreholes (>1 km) near each array: name, lat, lon, depth_m (swisstopo deep_wells.csv)
 WELLS_GT1KM = {
     "riehen": [("Basel-1", 47.585413, 7.595614, 5009), ("Otterbach-2", 47.577748, 7.603832, 2745),
@@ -222,8 +220,7 @@ def _load_borders():
         print(f"  (no borders: {e})"); return None
 
 
-_HYDRO = ("/Users/genevievesavard/Library/CloudStorage/OneDrive-LumidasInc/Switzerland/swisstopo/"
-          "swisstlmregio_2022_2056.shp/swissTLMRegio_Product_LV95/Hydrography/WGS84")
+_HYDRO = "/Users/genevievesavard/Data/swisstopo/swisstlmregio_2022_2056.shp/swissTLMRegio_Product_LV95/Hydrography/WGS84"
 _WATER_CACHE = {}
 
 

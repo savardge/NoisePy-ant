@@ -98,8 +98,11 @@ def main():
     sta = pd.read_csv(ds.cache_dir / "stations_in_grid.csv")
     sx, sy = ll2xy(sta.latitude.values, sta.longitude.values, *grid.origin)
     xc, yc = grid.x + grid.dx / 2, grid.y + grid.dx / 2      # cell centers (legacy plotting)
-    figdir = outdir / "figures"                              # one PNG per period
-    figdir.mkdir(exist_ok=True)
+    # all figures go under the dataset-level figures/ root (ds.fig_dir, created by
+    # ensure_dirs) in a per-wave subdir -- NOT under production/{wave}/ (which
+    # previously left output_root/figures/ permanently empty).
+    figdir = ds.fig_dir / args.wave
+    figdir.mkdir(parents=True, exist_ok=True)
     DIST = cell_distance_matrix(grid.x, grid.y)
     # inv(exp(-r/LC)) is O(ncell^3) and depends ONLY on LC (se just rescales it), so cache it per
     # distinct LC: --lc-mode fresnel needs one per period, but LC(T) is rounded to 0.25 km bins so
@@ -154,7 +157,7 @@ def main():
         Vm = np.where(show, V, np.nan)
         chi2_red = float(np.sum(stats["misfit_post"] ** 2 / (args.rel_err * tau) ** 2) / N)
         cov = int(np.sum(show))
-        np.savez_compressed(outdir / f"map_T{T:.1f}.npz",
+        np.savez_compressed(outdir / f"map_T{ds.tfmt(T)}.npz",
                             period=T, vel=Vm, vel_full=np.where(covered, V, np.nan),
                             mask=show, res_diag=R, unc_s=U, res_thresh=rthr,
                             se=se_star, LC=LC_T, chi2_red=chi2_red,
@@ -172,25 +175,40 @@ def main():
             a1.plot(sx, sy, "^", ms=3.5, mfc="k", mec="w", mew=0.3, zorder=3)
             a1.set_aspect("equal")
             a1.set(xlabel="x [km]", ylabel="y [km]")
-            a1.set_title(f"{ds.name}  {args.wave}  T={T:.1f} s\n"
+            a1.set_title(f"{ds.name}  {args.wave}  T={T:g} s\n"
                          f"N={N} rays  |  LC={LC_T:g} km  sigma_eff={se_star}\n"
                          f"var_red={stats['var_red']:.2f}  chi2={chi2_red:.1f}  "
                          f"shown {cov}/{int((mask>0).sum())}", fontsize=9)
-            f1.tight_layout(); f1.savefig(figdir / f"map_T{T:.1f}.png", dpi=130); plt.close(f1)
+            f1.tight_layout(); f1.savefig(figdir / f"map_T{ds.tfmt(T)}.png", dpi=130); plt.close(f1)
             Lax.plot(SE_GRID, chis, "-", lw=0.5, color="0.85", zorder=1)
-        print(f"{ds.name}/{args.wave} T={T:.1f} N={N:5d} se={se_star:.3f} "
+        print(f"{ds.name}/{args.wave} T={T:<6g} N={N:5d} se={se_star:.3f} "
               f"LC={LC_T:g} var_red={stats['var_red']:.2f} restit_post={stats['restit_post']:.1f}% "
               f"chi2_red={chi2_red:.1f} shown={cov}/{int((mask>0).sum())}")
 
     tab = pd.DataFrame(rows)
     tab.to_csv(outdir / f"production_{args.wave}.csv", index=False)
-    Lax.axhline(1.0, color="r", ls="--", lw=1.2, zorder=2, label="discrepancy target chi2=1")
-    Lax.axvline(args.se, color="b", lw=1.4, zorder=2, label=f"fixed sigma_eff={args.se}")
-    Lax.set(xscale="log", yscale="log", xlabel="prior slowness std sigma_eff [s/km]",
-            ylabel="reduced chi-square", title=f"{ds.name} {args.wave}: chi2(sigma_eff) per period "
-            "(grey) -- rails below 1: se is a fixed analyst choice (blue)")
-    Lax.legend(fontsize=8)
-    Lfig.tight_layout(); Lfig.savefig(outdir / f"discrepancy_{args.wave}.png", dpi=130); plt.close(Lfig)
+    if args.fast:
+        # --fast skips the sigma_eff audit scan, so the discrepancy figure would
+        # contain no data curves at all -- don't write an empty frame.
+        plt.close(Lfig)
+    else:
+        Lax.axhline(1.0, color="r", ls="--", lw=1.2, zorder=2,
+                    label="discrepancy-principle target: reduced χ² = 1")
+        Lax.axvline(args.se, color="b", lw=1.4, zorder=2,
+                    label=f"production prior slowness std σ_eff = {args.se} s/km (fixed)")
+        Lax.plot([], [], "-", lw=0.5, color="0.6",
+                 label="one grey curve per period: χ²(σ_eff) audit scan")
+        Lax.set(xscale="log", yscale="log",
+                xlabel="prior slowness std σ_eff (s/km)  —  larger = rougher maps allowed",
+                ylabel="reduced χ²  =  Σ(residual/σ_data)² / N")
+        Lax.set_title(f"{ds.name} {args.wave} — discrepancy-principle audit\n"
+                      "each grey curve: data misfit vs damping for one period; the fixed "
+                      "production σ_eff (blue)\nis an analyst choice — curves railing below "
+                      "χ²=1 would indicate over-fitting headroom", fontsize=9, loc="left")
+        Lax.legend(fontsize=8, loc="upper right")
+        Lfig.tight_layout()
+        Lfig.savefig(figdir / f"discrepancy_{args.wave}.png", dpi=130)
+        plt.close(Lfig)
 
     # multi-period map panel
     if maps:
@@ -201,14 +219,14 @@ def main():
             pc = ax.pcolormesh(xc, yc, Vm.T, cmap="RdYlBu", vmin=vlo, vmax=vhi, shading="auto")
             plt.colorbar(pc, ax=ax, shrink=0.8)
             ax.plot(sx, sy, "^", ms=1.5, mfc="k", mec="none")
-            ax.set_aspect("equal"); ax.set_title(f"T={T:.1f}s", fontsize=9)
+            ax.set_aspect("equal"); ax.set_title(f"T={T:g}s", fontsize=9)
         for ax in axs.ravel()[len(maps):]:
             ax.axis("off")
         fig.suptitle(f"{ds.name} {args.wave}: production group-velocity maps "
                      f"({args.lc_mode}-LC, se={args.se}, coverage + drop-worst-"
                      f"{int(100*args.res_drop_q)}%-resolution mask)", y=1.0)
         fig.tight_layout()
-        fig.savefig(outdir / f"maps_{args.wave}.png", dpi=120); plt.close(fig)
+        fig.savefig(figdir / f"maps_{args.wave}.png", dpi=120); plt.close(fig)
     print(f"\nwrote {len(rows)} period maps + production_{args.wave}.csv + figures under {outdir}")
 
 

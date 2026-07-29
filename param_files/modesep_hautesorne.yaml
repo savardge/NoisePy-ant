@@ -1,0 +1,63 @@
+# Mode-separation workflow parameters — Haute-Sorne (Jura) SmartSolo network.
+# Template: modesep_params.yaml (Riehen). Consumed by scripts/picking/{vsg_modesep,
+# pick_reference_ridges, dispersion_batch_modesep, dispersion_unified,
+# network_station_qc, network_consistency_analysis, network_pick_maps,
+# lateral_structure_map}.py.
+#
+# Stacks: NoisePy NormZ run, 25 Hz nodes, maxlag 180 s, 683 stations with data
+# (687 deployed), ~232.6k pairs. Picking uses Allstack_pws.
+
+network:
+  name: "Haute-Sorne"
+  code: "SS"                # stack files are SS.<sta5>/SS.<sta5>_SS.<sta5>.h5
+
+paths:
+  vsg_dir: "/Users/genevievesavard/Data/hautesorne/phasevelocity_VSG"
+  stack_root: "/Volumes/Data/unige/hautesorne/STACK_coh_all"
+  project_dir: "/Users/genevievesavard/Codes/extract_higher_modes/Projects/hautesorne"
+  dispersion_dir: null      # default: {project_dir}/dispersion_V6
+  ref_dir: null             # default: {project_dir}/vsg_modesep
+  model_reference_csv: null
+  # Schori (2021) inferred faults, WGS84; needs geopandas (base anaconda env)
+  faults_shapefile: "/Users/genevievesavard/Data/hautesorne/GIS/Schori2021_inferred_faults.shp"
+
+vsg_modesep:
+  sign: 1                   # rerun with -1 as sanity check: branches must swap
+  max_sources: null
+  nfft: null                # derive from the stored f grid: round(1/(df*dt))
+  min_common_receivers: 20
+  plot_flim: [0.15, 2.0]
+
+pick_windows:               # tuned 2026-07-17 from vsg_modesep_sign+1.png (683 sources):
+                            # fundamental ridge 2.9->1.65 km/s over 0.2-1.5 Hz (clean in G_LR0);
+                            # overtone 4.5->3.5 km/s over 0.3-1.05 Hz (clean in G_LR1);
+                            # sign -1 control swaps branches as required.
+  fundamental:
+    img: "G_LR0"
+    fmin: 0.20              # [Hz]
+    fmax: 2.00
+    vmin: 1.30              # [km/s]
+    vmax: 3.20              # ridge reaches ~3.0 at 0.2 Hz (Riehen: 3.10)
+    dom_min: 0.60
+    rough_max: 0.030        # [km/s]
+  overtone:
+    img: "G_LR1"
+    fmin: 0.25              # avoid the <0.25 Hz low-f wash
+    fmax: 1.05
+    vmin: 3.00
+    vmax: 4.80              # ridge tops ~4.5-4.6 at 0.3 Hz (Riehen: 4.70)
+    dom_min: 0.60
+    rough_max: 0.060
+  rough_win: 9
+  min_run: 10
+
+batch:
+  nproc: 8                  # user policy: <= half of the 16 cores
+  limit: 0                  # >0: evenly-spread pilot subset of this many pairs
+
+analysis:
+  group_ref_band_fundamental: [0.7, 3.6]  # [s] revisit after the VSG picking
+  group_ref_band_overtone: [1.1, 1.9]
+  min_overtone_periods: 3
+  lateral_band: [1.5, 2.5]
+  fault_main_name: null     # set to a Schori fault name to enable the W/E split panel

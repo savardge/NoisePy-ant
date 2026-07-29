@@ -31,6 +31,8 @@ NETWORKS = {
                "vsg": "/Users/genevievesavard/Data/aargau/phasevelocity_VSG"},
     "riehen": {"title": "Riehen (RI)", "project": f"{ROOT}/riehen",
                "vsg": "/Users/genevievesavard/Data/riehen/phasevelocity_VSG"},
+    "hautesorne": {"title": "Haute-Sorne (SS)", "project": f"{ROOT}/hautesorne",
+                   "vsg": "/Users/genevievesavard/Data/hautesorne/phasevelocity_VSG"},
 }
 REF_FILES = {("rayleigh", "fundamental"): "ref_fundamental_phase.txt",
              ("rayleigh", "overtone"): "ref_overtone_phase.txt",

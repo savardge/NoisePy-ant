@@ -20,11 +20,17 @@ GK500 = "/Users/genevievesavard/Data/hautesorne/GIS/GK-500-V-4/GK500_V1_4_FR/Sha
 
 
 def net_bbox(net, pad=0.03):
-    v = np.load(f"{E}/{net}/tomo/2_vs_depth_inversion/production/"
-                f"production_2026-07-17_hybrid_recipe/volume_fundotlove.npz", allow_pickle=True)
-    ll = v["lonlat"]
-    return (ll[:, 0].min() - pad, ll[:, 0].max() + pad,
-            ll[:, 1].min() - pad, ll[:, 1].max() + pad)
+    vol = (f"{E}/{net}/tomo/2_vs_depth_inversion/production/"
+           f"production_2026-07-17_hybrid_recipe/volume_fundotlove.npz")
+    if os.path.exists(vol):
+        ll = np.load(vol, allow_pickle=True)["lonlat"]
+        lo, la = ll[:, 0], ll[:, 1]
+    else:                       # nets without a Vs volume yet (e.g. hautesorne): station extent
+        st = np.genfromtxt(f"{E}/{net}/tomo/1_velocity_maps/inputs/stations.csv",
+                           delimiter=",", names=True)
+        lo, la = st["longitude"], st["latitude"]
+        pad = pad + 0.02        # stations under-span the grid slightly; widen
+    return (lo.min() - pad, lo.max() + pad, la.min() - pad, la.max() + pad)
 
 
 def stage_dem(net):
@@ -80,11 +86,11 @@ def stage_gk500(net):
           f"{sum(k=='axis' for k in out_type)} axes)")
 
 
-GEO2RIEHEN = "/Volumes/T7Shield/riehen/geo2riehen_data"
+GEO2RIEHEN = f"{E}/riehen/geo2riehen_data"    # user-copied from /Volumes/T7Shield (TCC-locked)
 HORIZON_PATTERNS = {          # filename substring (case-insensitive) -> canonical horizon name
-    "tkris": "TKris (top crystalline basement)",
-    "tmusch": "TMusch (top Muschelkalk)",
-    "meso": "Base Mesozoic",
+    "tkrist": "TKris (top crystalline basement)",
+    "tmk": "TMusch (top Muschelkalk)",
+    "bmz": "Base Mesozoic",
 }
 
 
@@ -112,34 +118,27 @@ def stage_geo2riehen(net):
     assert net == "riehen", "Geo2Riehen horizons are a riehen-only product"
     import glob as _g
     pts, names = [], []
-    files = sorted(_g.glob(os.path.join(GEO2RIEHEN, "*")))
+    # the *_llXY.dat variants carry ready-made longitude/latitude columns; Z is METERS BELOW
+    # SEA LEVEL (positive down). Convention verified 2026-07-24 by two independent anchors:
+    # TMusch's negative Z (min -468) sits exactly where the Muschelkalk OUTCROPS on the
+    # Dinkelberg at ~470 m a.s.l. (impossible if Z were depth-below-ground), and at Riehen-1
+    # (nearest point 1 m from the well) Z=1164 below MSL = ~1430 m below ground, matching the
+    # well's known top-Muschelkalk. Stored as ELEVATION m a.s.l. = -Z.
+    files = sorted(_g.glob(os.path.join(GEO2RIEHEN, "*_llXY.dat")))
     if not files:
-        raise SystemExit(f"no files under {GEO2RIEHEN} (volume unreadable or empty?)")
+        raise SystemExit(f"no *_llXY.dat under {GEO2RIEHEN}")
     for fp in files:
         base = os.path.basename(fp).lower()
         name = next((v for k, v in HORIZON_PATTERNS.items() if k in base), None)
-        if name is None or not os.path.isfile(fp):
+        if name is None:
             print(f"  skip (no horizon pattern): {os.path.basename(fp)}")
             continue
-        raw = open(fp, errors="ignore").read()
-        delim = ";" if ";" in raw.splitlines()[max(0, min(5, len(raw.splitlines()) - 1))] \
-            else ("," if "," in raw.splitlines()[0] else None)
-        arr = np.genfromtxt(fp, delimiter=delim, comments="#", invalid_raise=False)
-        if arr.ndim == 1:
-            arr = arr[None, :]
-        arr = arr[np.isfinite(arr).all(axis=1)]
-        if arr.shape[1] < 3:
-            print(f"  skip ({arr.shape[1]} cols): {os.path.basename(fp)}")
-            continue
-        x, y, zv = arr[:, 0], arr[:, 1], arr[:, 2]
-        if np.nanmedian(np.abs(x)) < 90:                       # already lon/lat
-            lon, lat = x, y
-        else:
-            lon, lat = _ch_to_wgs84(x, y)
+        a = np.genfromtxt(fp, delimiter=",", names=True)
+        lon, lat, zv = a["longitude"], a["latitude"], -np.asarray(a["Z"], float)  # -> m a.s.l.
+        ok = np.isfinite(lon) & np.isfinite(lat) & np.isfinite(zv)
+        lon, lat, zv = lon[ok], lat[ok], zv[ok]
         print(f"  {os.path.basename(fp)} -> {name}: {len(lon)} pts | lon {np.nanmin(lon):.4f}"
-              f"..{np.nanmax(lon):.4f} lat {np.nanmin(lat):.4f}..{np.nanmax(lat):.4f} | "
-              f"z {np.nanmin(zv):.0f}..{np.nanmax(zv):.0f} (VERIFY: m a.s.l. expected, "
-              f"negative below sea level)")
+              f"..{np.nanmax(lon):.4f} | elev {np.nanmin(zv):.0f}..{np.nanmax(zv):.0f} m a.s.l.")
         pts.append(np.column_stack([lon, lat, zv]).astype(np.float32))
         names.append(name)
     if not pts:
@@ -154,7 +153,7 @@ def stage_geo2riehen(net):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--net", required=True, choices=("riehen", "aargau"))
+    ap.add_argument("--net", required=True, choices=("riehen", "aargau", "hautesorne"))
     ap.add_argument("--stage", required=True, choices=("dem", "gk500", "geo2riehen"))
     a = ap.parse_args()
     {"dem": stage_dem, "gk500": stage_gk500, "geo2riehen": stage_geo2riehen}[a.stage](a.net)

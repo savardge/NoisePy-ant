@@ -19,7 +19,8 @@ import matplotlib.pyplot as plt
 
 E = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from vs_model_figures import MAP_DEPTHS, _hillshade, _tecto, load_zrel  # noqa: E402
+from vs_model_figures import MAP_DEPTHS, _hillshade, _tecto, load_zrel, km_xy  # noqa: E402
+from noisepy.lv95 import extent_lv95_km                                 # noqa: E402
 
 
 def main():
@@ -64,6 +65,9 @@ def main():
     gx, gy = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
     Bm = np.column_stack([np.ones(gx.size), gx.ravel(), gy.ravel()])
     lon2d, lat2d = (Bm @ clon).reshape(nx, ny), (Bm @ clat).reshape(nx, ny)
+    e2d, n2d = km_xy(lon2d, lat2d)                   # LV95 km (regla de mapas 2026-07-25)
+    extent_km = extent_lv95_km(extent)
+    chx, chy = km_xy(lonlat[changed, 0], lonlat[changed, 1])
 
     outdir = os.path.join(args.b, "figures", "diff_maps")
     os.makedirs(outdir, exist_ok=True)
@@ -74,14 +78,14 @@ def main():
         for (cx, cy), val in zip(cells, d3[:, k]):
             g[int(cx), int(cy)] = val
         fig, ax = plt.subplots(figsize=(7.6, 7.2))
-        ax.imshow(hs, extent=extent, cmap="gray", origin="upper", aspect="auto", zorder=0)
-        pc = ax.pcolormesh(lon2d, lat2d, g, cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+        ax.imshow(hs, extent=extent_km, cmap="gray", origin="upper", zorder=0)
+        pc = ax.pcolormesh(e2d, n2d, g, cmap="RdBu_r", vmin=-vmax, vmax=vmax,
                            alpha=0.75, shading="nearest", zorder=1)
         _tecto(ax, gk, lw=0.7)
-        ax.plot(lonlat[changed, 0], lonlat[changed, 1], "s", mfc="none", mec="k",
-                ms=3.2, mew=0.5, zorder=4)
-        ax.set_xlim(extent[0], extent[1]); ax.set_ylim(extent[2], extent[3])
-        ax.set_xlabel("longitude"); ax.set_ylabel("latitude")
+        ax.plot(chx, chy, "s", mfc="none", mec="k", ms=3.2, mew=0.5, zorder=4)
+        ax.set_xlim(extent_km[0], extent_km[1]); ax.set_ylim(extent_km[2], extent_km[3])
+        ax.set_aspect("equal")
+        ax.set_xlabel("E [km LV95]"); ax.set_ylabel("N [km LV95]")
         ax.set_title(f"{args.net} dVs ({args.label}) at {dpth:g} km depth\n"
                      f"outlined = recomputed cells; elsewhere identical by construction",
                      fontsize=10)

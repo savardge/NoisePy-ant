@@ -26,6 +26,8 @@ Theory note (why Love is not symmetric with Rayleigh):
 The unified CSV schema (see HEADER) is the V6 schema plus an explicit `mode` column and three Love QC
 columns (`env_ratio`, `ot_flag`, `mode_overlap`); Rayleigh rows leave the Love QC columns blank/NaN.
 """
+import os
+
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -80,6 +82,13 @@ class Config:
     RAYLEIGH_RES_FACTOR = 1.0                    # envelope-widths: sep_req = max(SEP_MIN, F*U0^2*T/d)
     RAYLEIGH_SLOW_TOL = 0.10                     # [km/s] U1 < U0 - tol -> ot_flag='slow' (leakage
     #   candidate; group curves CAN cross at Airy phases, so this is a flag, not a drop)
+
+
+# Env overrides for controlled re-pick experiments (inherited by spawned workers).
+# DISP_VMIN: lower velocity-grid bound (production 0.5; the grid floor CENSORS anything
+# slower -- see the 2026-07-26 ffscan vmin discussion before changing the default).
+if os.environ.get("DISP_VMIN"):
+    Config.vmin = float(os.environ["DISP_VMIN"])
 
 
 # Components that must be present to synthesize the Rayleigh modes.
