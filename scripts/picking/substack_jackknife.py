@@ -47,7 +47,17 @@ A.add_argument("--out", required=True)
 A.add_argument("--k", type=int, default=2, help="substack windows per block (2 ~ 4 h)")
 A.add_argument("--nproc", type=int, default=8)
 A.add_argument("--limit", type=int, default=0)
+A.add_argument("--shard", default=None, metavar="I/N",
+               help="process only shard I of N (0-based), for a Slurm job array. Strided "
+                    "(files[I::N]) so cost spreads evenly. Output is one CSV per pair and "
+                    "skip-if-exists, so shards never collide and a re-run resumes.")
 args = A.parse_args()
+
+SHARD_I, SHARD_N = 0, 1
+if args.shard:
+    SHARD_I, SHARD_N = (int(x) for x in args.shard.split("/"))
+    if not 0 <= SHARD_I < SHARD_N:
+        A.error("--shard I/N needs 0 <= I < N (got %s)" % args.shard)
 
 
 def argmax_curve(trace, dist, dt):
@@ -88,7 +98,16 @@ def one_pair(path):
             tg = sorted(k for k in aux if k.startswith("T"))
             if not tg:
                 return "no-substacks"
-            at = aux[tg[0]]["ZZ"].attrs
+            # attrs live on each component dataset, and the FIRST window does not always
+            # carry ZZ (RI.BAS04's early windows lack Z entirely -> 779 KeyErrors in the
+            # first campaign). Take attrs from the first window that has ZZ.
+            at = None
+            for k in tg:
+                if "ZZ" in aux[k]:
+                    at = aux[k]["ZZ"].attrs
+                    break
+            if at is None:
+                return "no-ZZ"
             params = {k: float(at[k]) for k in ("dist", "dt", "azi", "baz")}
             if params["dist"] < MIN_DIST:
                 return "short"
@@ -142,7 +161,11 @@ def main():
     files = sorted(glob.glob(os.path.join(args.stack_root, "*", "*.h5")))
     if args.limit:
         files = files[:args.limit]
-    print("[jk] %d pairs | k=%d | nproc=%d | out=%s" % (len(files), args.k, args.nproc, args.out))
+    total = len(files)
+    if SHARD_N > 1:
+        files = files[SHARD_I::SHARD_N]
+    print("[jk] %d pairs (shard %d/%d of %d) | k=%d | nproc=%d | out=%s"
+          % (len(files), SHARD_I, SHARD_N, total, args.k, args.nproc, args.out))
     os.makedirs(args.out, exist_ok=True)
     stats = {}
     with Pool(args.nproc) as pool:

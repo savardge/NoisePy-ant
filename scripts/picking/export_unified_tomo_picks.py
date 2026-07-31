@@ -94,6 +94,16 @@ ap.add_argument("--period-axis", default="scale", choices=("scale", "nominal"),
                 help="scale (default) = the picker's native CWT scale ladder (uneven, "
                      "log-spaced ~5.95%%); nominal = the legacy uniform 0.1 s FTAN grid "
                      "for group. See the docstring for why scale is correct.")
+ap.add_argument("--vbounds", default=None,
+                help="override the built-in VBOUNDS for the chosen measure, as "
+                     "'fund=0.2:3.6,overtone=1.5:4.5,love=0.2:3.6[,love_ot=1.5:4.5]'. "
+                     "Waves not listed keep the built-in bounds. The built-in group floor "
+                     "is 0.5 -- on the vmin=0.2 pick trees pass the 0.2 floor explicitly "
+                     "or slow picks are silently re-clipped here (third-floor trap).")
+ap.add_argument("--bounds-file", default=None,
+                help="period-DEPENDENT bounds JSON from pick_vbounds.py; applied to the "
+                     "chosen measure's velocity before aggregation. Complements --vbounds "
+                     "(both apply). Ignored with a warning if the file does not exist.")
 ap.add_argument("--src", default=None,
                 help="alternate picks_unified_QCd.csv to read (default "
                      "{project}/dispersion_unified/picks_unified_QCd.csv). Use for control QC "
@@ -104,6 +114,15 @@ if args.out_suffix is None:
 VCOL, OKCOL, TCOL = MEASURE[args.measure]
 if args.period_axis == "nominal":            # legacy behaviour, group only
     TCOL = "nominal_period" if args.measure == "group" else "T_scale"
+
+if args.vbounds:
+    for part in args.vbounds.split(","):
+        wkey, rng = part.split("=")
+        lo, hi = rng.split(":")
+        if wkey not in VBOUNDS[args.measure]:
+            raise SystemExit("unknown wave key %r in --vbounds" % wkey)
+        VBOUNDS[args.measure][wkey] = (float(lo), float(hi))
+    print("vbounds override:", VBOUNDS[args.measure])
 
 proj = os.path.join(EHM, args.net)
 src = args.src or os.path.join(proj, "dispersion_unified", "picks_unified_QCd.csv")
@@ -116,6 +135,17 @@ df = pd.read_csv(src, usecols=["pair", TCOL, VCOL, "wave_type", "mode", OKCOL,
 # float noise so the ladder collapses to its ~47 discrete rungs. On the legacy nominal axis
 # the 0.1 s grid is the label.
 df["_T"] = df[TCOL].round(4 if args.period_axis == "scale" else 1)
+
+if args.bounds_file:
+    if not os.path.exists(args.bounds_file):
+        print("WARNING: --bounds-file %s does not exist -- skipping" % args.bounds_file)
+    else:
+        from pick_vbounds import load_bounds, apply_bounds
+        keep = apply_bounds(load_bounds(args.bounds_file), df["wave_type"], df["mode"],
+                            df[TCOL], df[VCOL])
+        print("bounds_file: dropping %s of %s rows" % (format(int((~keep).sum()), ","),
+                                                       format(len(df), ",")))
+        df = df[keep]
 
 flagged = set()
 if not args.keep_flagged:

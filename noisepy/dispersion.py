@@ -356,17 +356,24 @@ def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
     '''
     X = np.asarray(traces, dtype=float)
     K, n = X.shape
-    Ws = None
+    # STREAMING accumulation: the estimator needs only sum(W_k) and sum(W_k/|W_k|), so the
+    # full (K, n_scales, n_time) coefficient cube never has to exist. Holding it cost ~1 GB
+    # per pair at K~110 windows, which put an 8-worker build into swap and serialised it
+    # (one worker at 98% CPU, seven blocked). Memory is now O(n_scales x n_time), ~K times
+    # smaller; the arithmetic is unchanged.
+    lin = None
+    unit_sum = None
     for k in range(K):
         W, sj, freq, coi, _, _ = pycwt.cwt(X[k], dt, dj, -1, -1, 'morlet')
-        if Ws is None:
-            Ws = np.empty((K,) + W.shape, dtype=complex)
-        Ws[k] = W
-    lin = Ws.mean(axis=0)
-    mag = np.abs(Ws)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        unit = np.where(mag > 0, Ws / mag, 0)
-    coh = np.abs(unit.mean(axis=0))                     # phase coherence in [0, 1]
+        if lin is None:
+            lin = np.zeros(W.shape, dtype=complex)
+            unit_sum = np.zeros(W.shape, dtype=complex)
+        lin += W
+        mag = np.abs(W)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            unit_sum += np.where(mag > 0, W / mag, 0)
+    lin /= K
+    coh = np.abs(unit_sum / K)                          # phase coherence in [0, 1]
     if unbiased and wu == 2:
         w = np.clip((K * coh ** 2 - 1.0) / (K - 1.0), 0.0, None)
     else:

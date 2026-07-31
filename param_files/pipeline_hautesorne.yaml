@@ -1,0 +1,43 @@
+# Riehen full-pipeline configuration: picking -> QC -> tomography export.
+# One file per network (pipeline_aargau.yaml, pipeline_hautesorne.yaml are siblings).
+# Run stages with:  python scripts/picking/run_pipeline.py --config <this file> \
+#                       --stage pick|qc|export|all [--dry-run]
+# Every value lives HERE, not in the scripts; a missing key falls back to the tool's own
+# CLI default. QC/export outputs are labeled directories + a qc_current symlink.
+
+network: hautesorne
+label: ffwin1.5-10_nodedup        # names qc_<label>/; change when settings change
+
+paths:
+  picker_config: /Users/genevievesavard/Codes/NoisePy-ant/param_files/modesep_hautesorne.yaml
+  picks_tree: /Users/genevievesavard/Codes/extract_higher_modes/Projects/hautesorne/dispersion_unified_vmin0.2
+  ref_dir: /Users/genevievesavard/Codes/extract_higher_modes/Projects/hautesorne/vsg_modesep
+  export_dir: /Users/genevievesavard/Codes/extract_higher_modes/Projects/hautesorne/tomo/1_velocity_maps/inputs
+
+picker:                            # env overrides for dispersion_unified.py
+  vmin: 0.2                        # DISP_VMIN (grid floor; NOT a quality gate)
+  stack: pws                       # DISP_STACK -- pending the ts-PWS/linear decision
+  love_overtone: false             # DISP_LOVE_OT
+  nproc: 8
+
+qc:                                # flags for qc_unified_picks.py
+  snr_min: 5.0
+  vbounds_fund: "0.2,5.0"
+  vbounds_ot: "1.5,5.0"
+  farfield: 1.5                    # d/lambda window from the substack-jackknife evidence
+  farfield_max: 10.0
+  band_edge_rungs: 1
+  vave: 3.0
+  u_bin: 0.0
+  group_scale_dedupe: false        # export's (pair, T_scale) median collapses duplicates
+  fold_love_overtone: false
+
+export:                            # flags for export_unified_tomo_picks.py
+  measure: group
+  period_axis: scale
+  max_std: 0.2
+  out_suffix: ""
+  # velocity bounds per wave, "lo:hi" [km/s] -- floors match the vmin=0.2 picking
+  vbounds: "fund=0.2:3.6,overtone=1.5:4.5,love=0.2:3.6"
+  # optional period-dependent bounds from pick_vbounds.py (applied when the file exists):
+  # bounds_file: /Users/.../vbounds_riehen.json

@@ -89,7 +89,17 @@ ap.add_argument("--disable", default="", help="comma-separated gate names to ski
 ap.add_argument("--snr-min", type=float, default=5.0)
 ap.add_argument("--vbounds-fund", default="0.5,5.0")
 ap.add_argument("--vbounds-ot", default="1.5,5.0")
-ap.add_argument("--farfield", type=float, default=2.0)
+ap.add_argument("--farfield", type=float, default=1.5,
+                help="LOWER d/lambda bound (group). CHANGED 2026-07-30: default 2.0 -> 1.5 "
+                     "on the substack-jackknife evidence (repeatability optimum d/lambda "
+                     "2-6, degrading below ~1.5). CAUTION: the 2.0 default came from the "
+                     "deep-LVZ ACCURACY finding (near-field group picks bias slow at long "
+                     "T); repeatability does not rule that bias out -- the ffscan campaign "
+                     "is the arbiter. Restore --farfield 2.0 to keep the old behaviour.")
+ap.add_argument("--farfield-max", type=float, default=10.0,
+                help="UPPER d/lambda bound (group), NEW 2026-07-30: beyond ~10 wavelengths "
+                     "pick repeatability degrades steeply (cycle skipping; jackknife sigma "
+                     "climbs to ~0.6 km/s on Aargau). 0 disables.")
 ap.add_argument("--xmode-max", type=float, default=0.6)
 ap.add_argument("--env-min", type=float, default=0.0, help="0 = env gate off (see docstring)")
 ap.add_argument("--leak-tol", type=float, default=0.15)
@@ -110,6 +120,15 @@ ap.add_argument("--u-bin", type=float, default=0.0,
                      "= no velocity term, one group pick per (pair, component, lag, mode, "
                      "method, scale_j). 0.2 restores the pre-2026-07-28 behaviour, which "
                      "imprinted a 1.3-1.5x count excess at 1.9/2.1/2.3/2.5 km/s.")
+ap.add_argument("--group-scale-dedupe", action="store_true",
+                help="re-enable the group scale dedupe (one group pick per pair per CWT "
+                     "scale). OFF BY DEFAULT since 2026-07-30: the tomography export "
+                     "aggregates by (pair, T_scale rung) with a median, which collapses "
+                     "the duplicates anyway, and per-period maps never double-count "
+                     "within a map -- so the dedupe only mattered for count statistics "
+                     "and it stripes period histograms. Enable it if exporting on the "
+                     "legacy NOMINAL axis, where duplicates would smear one measurement "
+                     "across adjacent period maps.")
 ap.add_argument("--fold-love-overtone", action="store_true",
                 help="relabel love/overtone rows as love/fundamental before any gate runs, "
                      "reproducing the picker's PICK_LOVE_OVERTONE=False default (all TT "
@@ -228,7 +247,10 @@ for mode, (lo, hi) in VB.items():
     apply_gate("vbounds", sel & ~df["group_velocity"].between(lo, hi), measures=("group",))
     apply_gate("vbounds", sel & ~df["phase_velocity"].between(lo, hi), measures=("phase",))
 # 3 far-field (group only; picker already gates phase at 1 lambda)
-apply_gate("farfield", ~(df["ratio_d_lambda"] >= args.farfield), measures=("group",))
+_ff_bad = ~(df["ratio_d_lambda"] >= args.farfield)
+if args.farfield_max > 0:
+    _ff_bad |= df["ratio_d_lambda"] > args.farfield_max
+apply_gate("farfield", _ff_bad, measures=("group",))
 # 3b band edge. compute_cwt clips each pair's scale ladder at Tmax = dist/vave, so the LAST
 #    surviving rung is set by the exact path length and the pick on it sits right on the limit
 #    (Riehen: median nominal_period 0.90 s against median Tmax 0.90 s). Those picks are marginal
@@ -314,7 +336,7 @@ if "scale_dedupe" not in DISABLED:
 
 # 13 group scale dedupe: same single-scale logic for group picks (see docstring). The velocity bin
 # keeps genuinely distinct branches at one scale (topology multi-ridge) as separate measurements.
-if "group_scale_dedupe" not in DISABLED:
+if args.group_scale_dedupe and "group_scale_dedupe" not in DISABLED:
     gp = df[df["group_ok"] & (df["scale_j"] >= 0)].copy()
     gp["dT_scale"] = (gp["nominal_period"] - gp["T_scale"]).abs()
     # Velocity term in the key: DISABLED by default since 2026-07-28 (--u-bin 0.2 restores it).
