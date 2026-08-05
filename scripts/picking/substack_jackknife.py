@@ -46,6 +46,8 @@ A.add_argument("--stack-root", required=True)
 A.add_argument("--out", required=True)
 A.add_argument("--k", type=int, default=2, help="substack windows per block (2 ~ 4 h)")
 A.add_argument("--nproc", type=int, default=8)
+A.add_argument("--code", default=None, metavar="XX",
+               help="station-code prefix (RI/AA/SS); restricts the pair glob to\n                    <code>.*/<code>.*_<code>.*.h5 so cross-network CH.* pairs are\n                    skipped, matching dispersion_unified.py.")
 A.add_argument("--limit", type=int, default=0)
 A.add_argument("--shard", default=None, metavar="I/N",
                help="process only shard I of N (0-based), for a Slurm job array. Strided "
@@ -158,7 +160,10 @@ def one_pair(path):
 
 
 def main():
-    files = sorted(glob.glob(os.path.join(args.stack_root, "*", "*.h5")))
+    pat = (os.path.join(args.stack_root, "%s.*" % args.code,
+                        "%s.*_%s.*.h5" % (args.code, args.code)) if args.code
+           else os.path.join(args.stack_root, "*", "*.h5"))
+    files = sorted(glob.glob(pat))
     if args.limit:
         files = files[:args.limit]
     total = len(files)

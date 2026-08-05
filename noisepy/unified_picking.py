@@ -106,10 +106,40 @@ _COLS = HEADER.split(",")
 def read_stack_components(sfile, dtype, comps):
     """Read params (dist, dt, azi, baz) + component waveforms for one stack type.
 
-    pyasdf if available, else plain h5py (an ASDF file is HDF5 with data under
-    /AuxiliaryData/<dtype>/<comp> and parameters as dataset attrs). Ported from V6."""
+    pyasdf for real ASDF files, else plain h5py (an ASDF file is HDF5 with data under
+    /AuxiliaryData/<dtype>/<comp> and parameters as dataset attrs). Ported from V6.
+
+    The pyasdf branch is guarded by an ASDF-header check, not just by the import. The
+    ts-PWS stacks from build_tspws_stacks.py use the same /AuxiliaryData layout but carry
+    no ASDF header, and pyasdf WRITES its format attribute even when opened mode="r" --
+    which on a read-only file raises OSError("No write intent on file"). That never
+    surfaced on a laptop without pyasdf installed; on the cluster, where it is installed,
+    it failed all 19,503 pairs. Any pyasdf failure also falls back rather than propagating.
+    """
+    import h5py
+
+    def _h5py_read():
+        with h5py.File(sfile, "r") as f:
+            g = f["AuxiliaryData"][dtype]
+            a = g["ZZ"].attrs
+            params = {k: float(a[k]) for k in ("dist", "dt", "azi", "baz")}
+            raw = {c: np.asarray(g[c][:], dtype=float) for c in comps if c in g}
+            return params, raw
+
     try:
         import pyasdf
+    except ImportError:
+        return _h5py_read()
+    try:
+        with h5py.File(sfile, "r") as f:
+            fmt = f.attrs.get("file_format", b"")
+        if isinstance(fmt, bytes):
+            fmt = fmt.decode("ascii", "ignore")
+        if str(fmt).upper() != "ASDF":
+            return _h5py_read()
+    except Exception:
+        return _h5py_read()
+    try:
         with pyasdf.ASDFDataSet(sfile, mode="r") as ds:
             p = ds.auxiliary_data[dtype]["ZZ"].parameters
             params = {k: float(p[k]) for k in ("dist", "dt", "azi", "baz")}
@@ -120,14 +150,8 @@ def read_stack_components(sfile, dtype, comps):
                 except Exception:
                     pass
             return params, raw
-    except ImportError:
-        import h5py
-        with h5py.File(sfile, "r") as f:
-            g = f["AuxiliaryData"][dtype]
-            a = g["ZZ"].attrs
-            params = {k: float(a[k]) for k in ("dist", "dt", "azi", "baz")}
-            raw = {c: np.asarray(g[c][:], dtype=float) for c in comps if c in g}
-            return params, raw
+    except Exception:
+        return _h5py_read()
 
 
 def split_lags(tdata):

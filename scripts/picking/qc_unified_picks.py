@@ -134,6 +134,18 @@ ap.add_argument("--fold-love-overtone", action="store_true",
                      "reproducing the picker's PICK_LOVE_OVERTONE=False default (all TT "
                      "ridges stay fundamental, nothing dropped). Exact for group picks; "
                      "phase needs a re-pick because c_ref is chosen by mode.")
+ap.add_argument("--short-vmax", default="",
+                help="per-wave GROUP velocity ceiling below --short-vmax-tmax, as "
+                     "'fund=2.0,love=2.0' (empty = off; omitted waves unaffected). At "
+                     "T<1 s the Rayleigh/Love FUNDAMENTAL branches sit at 1.0-1.8 km/s, so "
+                     "picks above ~2 km/s there are the fast spray that made the "
+                     "T=0.2-0.3 s maps come out at a uniform ~3 km/s. Deliberately NOT "
+                     "applied to the Rayleigh overtone, whose branch legitimately runs "
+                     "1.8-3.5 km/s at short period -- a blanket cut there removes 26-29%% "
+                     "of the overtone data, i.e. the branch itself. Group only: phase "
+                     "velocity exceeds group, so the same ceiling would over-cut it.")
+ap.add_argument("--short-vmax-tmax", type=float, default=1.0,
+                help="period below which --short-vmax applies [s]")
 ap.add_argument("--station-qc", default=None)
 ap.add_argument("--drop-flagged", action="store_true")
 ap.add_argument("--sigma-trim", type=float, default=0.0,
@@ -149,6 +161,8 @@ ap.add_argument("--figs-only", action="store_true",
                      "only -- the CSV is deterministic, so rewriting multi-GB output is waste)")
 args = ap.parse_args()
 OUT = args.out_dir or args.dir
+# Create it up front: everything below is expensive and the writes happen last.
+os.makedirs(OUT, exist_ok=True)
 DISABLED = set(x.strip() for x in args.disable.split(",") if x.strip())
 VB = {"fundamental": tuple(float(x) for x in args.vbounds_fund.split(",")),
       "overtone": tuple(float(x) for x in args.vbounds_ot.split(","))}
@@ -265,6 +279,30 @@ if args.band_edge_rungs > 0 and "band_edge" not in DISABLED:
                df["T_scale"].notna()
                & (df["T_scale"] * RUNG ** args.band_edge_rungs > Tmax_pair),
                measures=("group", "phase"))
+# 3b short-period fast spray, per wave (user-specified 2026-07-31). Slow short-period
+#    picks are NOT cut: unconsolidated sediments genuinely produce them, and their small
+#    jackknife sigma reflects a clean repeatable arrival, not an artifact -- the weighting
+#    problem those caused is handled by winsorizing sigma, not by deleting picks.
+if args.short_vmax:
+    _WKEY = {"fund": ("rayleigh", "fundamental"), "love": ("love", "fundamental"),
+             "overtone": ("rayleigh", "overtone")}
+    _Tv = df["nominal_period"].to_numpy(float)
+    for _item in args.short_vmax.split(","):
+        _item = _item.strip()
+        if not _item:
+            continue
+        _k, _, _v = _item.partition("=")
+        _k = _k.strip()
+        if _k not in _WKEY:
+            raise SystemExit("--short-vmax: unknown wave key %r (use %s)"
+                             % (_k, "/".join(_WKEY)))
+        _w, _m = _WKEY[_k]
+        apply_gate("short_vmax",
+                   (df["wave_type"] == _w) & (df["mode"] == _m)
+                   & (_Tv < args.short_vmax_tmax)
+                   & (df["group_velocity"].to_numpy(float) > float(_v)),
+                   measures=("group",))
+
 # 4 mutual suppression (Rayleigh OVERTONE only -- see docstring; fundamental fails it spuriously
 #   wherever the path is too short to separate the modes)
 apply_gate("suppression",

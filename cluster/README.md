@@ -79,12 +79,14 @@ mkdir -p logs
 B=$(sbatch --parsable --array=0-49%25 riehen.sbatch)
 J=$(sbatch --parsable --array=0-49%25 --export=ALL,STAGE=jackknife --dependency=afterok:$B riehen.sbatch)
 sbatch --dependency=afterok:$J --export=ALL,STAGE=finalize \
-       --partition=shared-cpu --time=08:00:00 --cpus-per-task=32 --mem=64G riehen.sbatch
+       --partition=shared-cpu --time=12:00:00 --cpus-per-task=32 --mem=64G riehen.sbatch
 ```
 
-Same for `aargau.sbatch`. For `hautesorne.sbatch` use `--array=0-199%50` and a bigmem
-finalize (`--partition=public-bigmem --time=1-00:00:00 --cpus-per-task=32 --mem=384G`) —
-it has ~232.6k pairs, roughly 11x the others, so the QC merge is the memory-hungry step.
+Same for `aargau.sbatch` and `hautesorne.sbatch`.
+
+**Walltimes are deliberately generous (12 h, shared-cpu's ceiling).** Over-requesting only
+costs backfill priority; under-requesting ends tasks as TIMEOUT and drops every `afterok`
+dependent, which is far more expensive to recover from.
 
 `--export=ALL,STAGE=...` matters: without `ALL` the job loses your environment.
 

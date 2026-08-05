@@ -32,6 +32,10 @@ qc:                                # flags for qc_unified_picks.py
   band_edge_rungs: 1
   vave: 3.0
   u_bin: 0.0
+  short_vmax: ''   # DISABLED (user 2026-07-31: let the inversion fit the full
+                    # distribution; assess the lowest reliable period at the Vs stage).
+                    # Re-enable with fund=2.0,love=2.0 -- GROUP only, overtone exempt.
+  short_vmax_tmax: 1.0
   group_scale_dedupe: false        # export's (pair, T_scale) median collapses duplicates
   fold_love_overtone: false
 
@@ -44,3 +48,10 @@ export:                            # flags for export_unified_tomo_picks.py
   vbounds: "fund=0.2:3.6,overtone=1.5:4.5,love=0.2:3.6"
   # optional period-dependent bounds from pick_vbounds.py (applied when the file exists):
   # bounds_file: /srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/hautesorne/vbounds_hautesorne.json
+
+export_phase:                      # second export pass -- phase picks
+  measure: phase
+  period_axis: scale
+  max_std: 0.2
+  out_suffix: "_phase"
+  vbounds: "fund=0.2:4.5,overtone=1.5:5.5,love=0.2:4.5"

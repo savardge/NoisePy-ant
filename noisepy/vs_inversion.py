@@ -39,6 +39,32 @@ WAVEDEF = {"fund": ("rayleigh", 0), "overtone": ("rayleigh", 1), "love": ("love"
            "love_ot": ("love", 1)}
 DISBA_MODE = {w: m for w, (_, m) in WAVEDEF.items()}    # back-compat: wave key -> mode index
 
+# CURVE KEYS carry the measure as a suffix: "fund" is the GROUP curve (unsuffixed = group, so
+# every pre-existing caller and result file keeps working) and "fund_phase" the PHASE one. The
+# convention is not invented here -- it is what run_bayhunter_cell.py already writes for its
+# phase targets (`key = w if meas == "group" else f"{w}_phase"`), so CellData keys, BayHunter
+# target names and the result npz all agree. Group and phase for the same wave can therefore
+# coexist in one CellData and be inverted jointly.
+
+
+def parse_curve_key(key):
+    """'fund' -> ('fund', 'group');  'fund_phase' -> ('fund', 'phase')."""
+    if key.endswith("_phase"):
+        return key[: -len("_phase")], "phase"
+    return key, "group"
+
+
+def curve_key(wave, measure="group"):
+    """Inverse of parse_curve_key."""
+    return wave if measure == "group" else f"{wave}_phase"
+
+
+def curve_def(key):
+    """(disba_wave, mode, measure) for a curve key."""
+    base, meas = parse_curve_key(key)
+    disba_wave, mode = WAVEDEF[base]
+    return disba_wave, mode, meas
+
 
 # --------------------------------------------------------------------- data
 @dataclass
@@ -57,10 +83,17 @@ class CellData:
 
 
 def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
-                     res_min=None, min_periods=5, wave_roots=None):
+                     res_min=None, min_periods=5, wave_roots=None, measure="group",
+                     into=None):
     """Assemble a cell's dispersion curves from the per-period production npz maps.
 
     production_root : .../swtomotv-output/production  (holds {wave}/map_T*.npz)
+    measure  : "group" or "phase". Curves are stored under `curve_key(wave, measure)`, i.e.
+        "fund" for group and "fund_phase" for phase, so both can coexist in one CellData.
+    into     : an existing CellData to add these curves to (returned, mutated) instead of a
+        fresh one. This is how a joint group+phase cell is built -- call twice with the two
+        measures and their two production roots. NOTE group and phase are recommended from
+        DIFFERENT Cd runs (group=scaled, phase=blanket), so the roots genuinely differ.
     wave_roots : optional {wave: root} overriding production_root per wave. Use it to merge a
         wave whose maps live under a DIFFERENT production tree (e.g. Love, in
         .../swtomotv-output-love-<dx>/production) into the same CellData as the Rayleigh waves.
@@ -69,8 +102,12 @@ def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
     tightens the per-cell resolution gate beyond the production mask.
     Returns a CellData (curves only for waves with >= min_periods valid periods).
     """
-    cell = CellData(ix=int(ix), iy=int(iy))
+    cell = into if into is not None else CellData(ix=int(ix), iy=int(iy))
+    if into is not None and (int(ix), int(iy)) != (cell.ix, cell.iy):
+        raise ValueError("load_cell_curves(into=...): cell index mismatch (%d,%d) vs (%d,%d)"
+                         % (ix, iy, cell.ix, cell.iy))
     for w in waves:
+        w = parse_curve_key(w)[0]           # accept either "fund" or "fund_phase" as input
         root = (wave_roots or {}).get(w, production_root)
         # Fail LOUD on a stale/wrong root. Without this a bad path globs to [] and the wave is
         # silently dropped from the inversion (empty CellData returns cleanly, .has(w) skips it) --
@@ -100,7 +137,8 @@ def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
             S.append(float(z["unc_s"][ix, iy]) * u ** 2)     # s/km -> km/s
         if len(T) >= min_periods:
             o = np.argsort(T)
-            cell.curves[w] = (np.array(T)[o], np.array(U)[o], np.array(S)[o])
+            cell.curves[curve_key(w, measure)] = (np.array(T)[o], np.array(U)[o],
+                                                  np.array(S)[o])
     return cell
 
 
@@ -281,13 +319,16 @@ def run_bayesbay(cell, waves=("fund", "overtone"), depth_max=6.0,
 
     def make_fwd(w):
         periods = cell.curves[w][0]
-        disba_wave, mode = WAVEDEF[w]
+        # per-CURVE measure: a joint cell holds "fund" (group) and "fund_phase" (phase), which
+        # must forward through GroupDispersion and PhaseDispersion respectively.
+        disba_wave, mode, meas = curve_def(w)
 
         def fwd(state):
             th, vs = model_from_state(state)          # already projected if constraint=="project"
             if constraint != "project" and not adjacent_contrast_ok(vs, maxfrac):
                 return REJECT[w]
-            g = group_velocity(th, vs, periods, mode, disba_wave=disba_wave)
+            g = dispersion_velocity(th, vs, periods, mode, measure=meas,
+                                    disba_wave=disba_wave)
             if not np.all(np.isfinite(g)):   # model cannot produce this branch/period -> reject
                 return REJECT[w]
             return g
@@ -579,15 +620,24 @@ def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overt
     import tempfile
     workdir = workdir or tempfile.mkdtemp(prefix="bayhunter_cell_")
     os.makedirs(workdir, exist_ok=True)
-    curvefiles = {}
+    # The runner takes TWO curve dicts, both keyed by BASE wave: `curves` (interpreted with
+    # cfg["measure"]) and an optional `curves_phase`. Split the cell's keys accordingly --
+    # writing a "fund_phase" key into `curves` would make the runner look up WAVE_DISBA
+    # ["fund_phase"] and silently skip it.
+    curvefiles, phasefiles = {}, {}
     for w in waves:
         if not cell.has(w):
             continue
+        base, meas = parse_curve_key(w)
         T, U, S = cell.curves[w]
         fp = os.path.join(workdir, f"disp_{w}.txt")
         np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
-        curvefiles[w] = fp
-    cfg = dict(curves=curvefiles, out_npz=out_npz, depth_max=depth_max,
+        (phasefiles if meas == "phase" else curvefiles)[base] = fp
+    if not curvefiles and phasefiles:
+        # phase-only run: hand it over as the primary set with measure="phase"
+        curvefiles, phasefiles, measure = phasefiles, {}, "phase"
+    cfg = dict(curves=curvefiles, curves_phase=phasefiles,
+               out_npz=out_npz, depth_max=depth_max,
                vs_bounds=list(vs_bounds), n_layers=list(n_layers), maxfrac=maxfrac,
                nchains=nchains, iter_burnin=iter_burnin, iter_main=iter_main, measure=measure,
                cell=[cell.ix, cell.iy, cell.lon, cell.lat])

@@ -2,7 +2,7 @@
 # Source template: param_files/modesep_hautesorne.yaml
 # Cluster: yggdrasil. stack_root is the ts-PWS OUTPUT tree built by
 # 01_build_tspws.sbatch from the substacks at
-#   /srv/beegfs/scratch/shares/cdff/hautesorne/STACK_coh_60s_substacks
+#   /srv/beegfs/scratch/shares/cdff/hautesorne/STACK_coh
 
 # Mode-separation workflow parameters — Haute-Sorne (Jura) SmartSolo network.
 # Template: modesep_params.yaml (Riehen). Consumed by scripts/picking/{vsg_modesep,

@@ -48,6 +48,13 @@ A.add_argument("--pre-block", type=int, default=2, help="windows averaged per PW
 A.add_argument("--vmin-trim", type=float, default=0.2, help="lag trim uses dist/this")
 A.add_argument("--pad", type=int, default=64, help="extra samples kept beyond the trim")
 A.add_argument("--limit", type=int, default=0)
+A.add_argument("--code", default=None, metavar="XX",
+               help="station-code prefix (RI/AA/SS). Restricts the pair glob to "
+                    "<code>.*/<code>.*_<code>.*.h5, matching what dispersion_unified.py "
+                    "picks. Without it the glob takes every *.h5, which on the Riehen and "
+                    "Aargau trees includes CH.* broadband cross-correlations the picker "
+                    "then ignores -- 24%% and 18%% of the files respectively, built for "
+                    "nothing.")
 A.add_argument("--shard", default=None, metavar="I/N",
                help="process only shard I of N (0-based), for a Slurm job array. Strided "
                     "(files[I::N]), not contiguous, so long-substack pairs spread evenly "
@@ -127,7 +134,10 @@ def one_pair(path):
 
 
 def main():
-    files = sorted(glob.glob(os.path.join(args.stack_root, "*", "*.h5")))
+    pat = (os.path.join(args.stack_root, "%s.*" % args.code,
+                        "%s.*_%s.*.h5" % (args.code, args.code)) if args.code
+           else os.path.join(args.stack_root, "*", "*.h5"))
+    files = sorted(glob.glob(pat))
     if args.limit:
         files = files[:args.limit]
     total = len(files)

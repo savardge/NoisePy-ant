@@ -33,7 +33,8 @@ QC_FLAGS = {"snr_min": "--snr-min", "vbounds_fund": "--vbounds-fund",
             "farfield_max": "--farfield-max", "band_edge_rungs": "--band-edge-rungs",
             "vave": "--vave", "u_bin": "--u-bin", "leak_tol": "--leak-tol",
             "leak_sep_factor": "--leak-sep-factor", "leak_tmax": "--leak-tmax",
-            "env_min": "--env-min", "xmode_max": "--xmode-max", "disable": "--disable"}
+            "env_min": "--env-min", "xmode_max": "--xmode-max", "disable": "--disable",
+            "short_vmax": "--short-vmax", "short_vmax_tmax": "--short-vmax-tmax"}
 QC_BOOLS = {"group_scale_dedupe": "--group-scale-dedupe",
             "fold_love_overtone": "--fold-love-overtone"}
 EXPORT_FLAGS = {"measure": "--measure", "period_axis": "--period-axis",
@@ -80,6 +81,11 @@ def stage_qc(cfg, dry):
         if q.get(k):
             cmd += [f]
     print("[qc] -> %s" % out)
+    # qc_unified_picks.py does not create --out-dir; it only fails at the very END, after
+    # every gate has run, when to_csv hits a missing directory. That cost a full 19,501-pair
+    # QC pass on the cluster. Labels are new directories by design, so create it here.
+    if not dry:
+        os.makedirs(out, exist_ok=True)
     sh(cmd, dry=dry)
     if dry:
         return
@@ -94,16 +100,29 @@ def stage_qc(cfg, dry):
 
 
 def stage_export(cfg, dry):
-    e = cfg.get("export", {})
+    """Export the QC'd picks once per configured measure.
+
+    The picker measures BOTH group and phase for every wave/mode, and QC gates both, but
+    one export run writes one measure -- so a config with only an `export:` block silently
+    ships group-only tables and the phase picks stay stranded in the pick tree. An optional
+    `export_phase:` block (same keys, `measure: phase`, its own `out_suffix`) is exported
+    as a second pass into the same directory.
+    """
     src = os.path.join(cfg["paths"]["picks_tree"], "qc_current", "picks_unified_QCd.csv")
     outdir = cfg["paths"]["export_dir"]
-    cmd = [sys.executable, TOOLS["export"], "--net", cfg["network"], "--src", src,
-           "--outdir", outdir]
-    for k, f in EXPORT_FLAGS.items():
-        if k in e and str(e[k]) != "":
-            cmd += [f, str(e[k])]
-    print("[export] %s -> %s" % (src, outdir))
-    sh(cmd, dry=dry)
+    blocks = [("export", cfg.get("export", {}))]
+    if cfg.get("export_phase"):
+        blocks.append(("export_phase", cfg["export_phase"]))
+    for name, e in blocks:
+        if not e:
+            continue
+        cmd = [sys.executable, TOOLS["export"], "--net", cfg["network"], "--src", src,
+               "--outdir", outdir]
+        for k, f in EXPORT_FLAGS.items():
+            if k in e and str(e[k]) != "":
+                cmd += [f, str(e[k])]
+        print("[%s] measure=%s -> %s" % (name, e.get("measure", "group"), outdir))
+        sh(cmd, dry=dry)
 
 
 def main():
@@ -111,9 +130,15 @@ def main():
     ap.add_argument("--config", required=True, help="param_files/pipeline_<network>.yaml")
     ap.add_argument("--stage", required=True, choices=("pick", "qc", "export", "all"))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--nproc", type=int, default=None,
+                    help="override picker.nproc for this run only (the config is not "
+                         "modified). Use when the machine is shared -- or on Slurm, to "
+                         "match --cpus-per-task without editing the YAML.")
     a = ap.parse_args()
     with open(a.config) as fh:
         cfg = yaml.safe_load(fh)
+    if a.nproc is not None:
+        cfg.setdefault("picker", {})["nproc"] = a.nproc
     stages = ("pick", "qc", "export") if a.stage == "all" else (a.stage,)
     for s in stages:
         {"pick": stage_pick, "qc": stage_qc, "export": stage_export}[s](cfg, a.dry_run)

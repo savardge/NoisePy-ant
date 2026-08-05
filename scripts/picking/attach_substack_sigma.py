@@ -70,6 +70,34 @@ def main():
     ap.add_argument("--jackknife", required=True)
     ap.add_argument("--suffix", default="")
     ap.add_argument("--min-blocks", type=int, default=6)
+    ap.add_argument("--winsor-pct", type=float, default=25.0,
+                    help="winsorize sigma from below at this PER-PERIOD percentile "
+                         "(0 disables). The jackknife measures repeatability, not "
+                         "accuracy: a pick locked onto the same wrong arrival in every "
+                         "substack has MAD -> 0, pins at the floor, and a measured-Cd "
+                         "inversion then hands it ~500x the weight of an honest pick. On "
+                         "Riehen fund that population is 9-15%% of short-period picks and "
+                         "14-24%% slower than the rest; it drove map structure to 26 km/s "
+                         "and a NEGATIVE mean velocity at T=0.51 s. Winsorizing at p25 "
+                         "(not p10 -- at the bad periods p10 IS the floor) removed every "
+                         "negative-var_red period and beat deleting the picks outright. "
+                         "The raw value is preserved in std_jk.")
+    ap.add_argument("--sigma-floor", type=float, default=0.0297,
+                    help="clamp sigma from below [km/s]. Default 1.4826*0.02 = the "
+                         "jackknife's OWN resolution: its picks live on a 0.02 km/s "
+                         "velocity grid, so a MAD finer than one quantum is not a "
+                         "measurement. Without it 0.02-0.3%% of rows carry std=0 exactly "
+                         "and others go to 5e-4, which a Tarantola-Valette inversion "
+                         "reads as (near-)zero data variance = near-infinite weight.")
+    ap.add_argument("--proxy", action="store_true",
+                    help="the sigma being attached does not measure this table's own "
+                         "quantity. Use for PHASE tables: the jackknife re-picks GROUP "
+                         "velocity per substack block, so there is no phase sigma "
+                         "anywhere. Group sigma is a defensible RELATIVE weight (same "
+                         "waveform quality drives both) but its absolute scale is wrong "
+                         "for phase, which is generally better determined. Every "
+                         "sigma_src value gets a _group_proxy suffix so no downstream "
+                         "step can mistake it for a measured phase uncertainty.")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -97,7 +125,11 @@ def main():
                 ii = np.asarray(idx)[ok]
                 sig[d.index.get_indexer(ii)] = v
                 nbl[d.index.get_indexer(ii)] = np.round(nb).astype(int)
-        src = np.where(np.isfinite(sig), "jackknife", "")
+        tag = "_group_proxy" if a.proxy else ""
+        # dtype=object, NOT the default: np.where(..., "jackknife", "") yields dtype "<U9"
+        # and every longer label assigned later is silently clipped to 9 chars, which made
+        # "fallback_stream_median" and "fallback_global" both read as "fallback_".
+        src = np.where(np.isfinite(sig), "jackknife" + tag, "").astype(object)
         # fallback 1: stream median sigma at that period; fallback 2: global median
         if (~np.isfinite(sig)).any():
             have = np.isfinite(sig)
@@ -106,28 +138,51 @@ def main():
                     d.loc[have, "inst_period"].round(4).values).median()
                 fill = d.loc[~have, "inst_period"].round(4).map(med_by_T).values
                 gmed = float(np.nanmedian(sig[have]))
-                src[~have] = np.where(np.isfinite(fill), "fallback_stream_median",
-                                      "fallback_global")
+                src[~have] = np.where(np.isfinite(fill),
+                                      "fallback_stream_median" + tag,
+                                      "fallback_global" + tag)
                 sig[~have] = np.where(np.isfinite(fill), fill, gmed)
             else:
-                src[:] = "fallback_global"
+                src[:] = "fallback_global" + tag
                 sig[:] = np.nan
         d["std_cross"] = d["std"]
+        n_floored = int(np.sum(np.isfinite(sig) & (sig < a.sigma_floor)))
+        sig = np.where(np.isfinite(sig), np.maximum(sig, a.sigma_floor), sig)
+        d["std_jk"] = np.round(sig, 4)          # pre-winsorizing jackknife value
+        n_wins = 0
+        if a.winsor_pct and a.winsor_pct > 0:
+            ser = pd.Series(sig, index=d.index)
+            cut = ser.groupby(d["inst_period"]).transform(
+                lambda x: np.nanpercentile(x, a.winsor_pct) if np.isfinite(x).any() else np.nan)
+            lift = np.isfinite(sig) & np.isfinite(cut.values) & (sig < cut.values)
+            n_wins = int(lift.sum())
+            sig = np.where(lift, cut.values, sig)
         d["std"] = np.round(sig, 4)
         d["std_percent"] = np.round(100 * d["std"] / d["group_velocity"], 2)
         d["n_blocks"] = nbl
         d["sigma_src"] = src
-        cov = 100 * (src == "jackknife").mean()
+        cov = 100 * (src == "jackknife" + tag).mean()
         print("%-9s %s rows | jackknife sigma on %.1f%% | median sigma %.3f km/s "
-              "(was cross-method %.3f)"
+              "(was cross-method %.3f) | floored %s at %.4f | winsorized %s at p%g"
               % (wkey, format(len(d), ","), cov, np.nanmedian(sig),
-                 float(d["std_cross"].median())))
+                 float(d["std_cross"].median()), format(n_floored, ","), a.sigma_floor,
+                 format(n_wins, ","), a.winsor_pct))
         if a.dry_run:
             continue
         d.to_csv(fn, index=False, float_format="%.4f")
         mf = fn + ".meta.json"
         meta = json.load(open(mf)) if os.path.exists(mf) else {}
-        meta.update({"std_column": "substack jackknife sigma_mad (km/s)",
+        meta.update({"std_column": (
+                         "substack jackknife sigma_mad (km/s) -- GROUP-velocity "
+                         "repeatability applied as a PROXY on this phase table; "
+                         "relative weight only, absolute scale NOT calibrated for phase"
+                         if a.proxy else "substack jackknife sigma_mad (km/s)"),
+                     "std_is_proxy": bool(a.proxy),
+                     "std_floor_km_s": a.sigma_floor,
+                     "std_winsor_pct": a.winsor_pct,
+                     "std_n_winsorized": n_wins,
+                     "std_jk_column": "jackknife sigma BEFORE winsorizing",
+                     "std_n_floored": n_floored,
                      "std_source_dir": os.path.abspath(a.jackknife),
                      "std_min_blocks": a.min_blocks,
                      "std_jackknife_coverage_pct": round(cov, 2),

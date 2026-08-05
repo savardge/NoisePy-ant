@@ -9,11 +9,36 @@ projection coordinates and WGS84" (2016).
 """
 import numpy as np
 
+# Switzerland + a generous margin. Latitudes (45.8-47.9) and longitudes (5.9-10.5) do not
+# overlap, so swapped arguments are always detectable.
+_LON_RANGE = (5.0, 11.5)
+_LAT_RANGE = (45.5, 48.5)
+
+
+def _check_order(lon, lat):
+    lo_ok = np.all((lon >= _LON_RANGE[0]) & (lon <= _LON_RANGE[1]))
+    la_ok = np.all((lat >= _LAT_RANGE[0]) & (lat <= _LAT_RANGE[1]))
+    if lo_ok and la_ok:
+        return
+    swapped = (np.all((lat >= _LON_RANGE[0]) & (lat <= _LON_RANGE[1]))
+               and np.all((lon >= _LAT_RANGE[0]) & (lon <= _LAT_RANGE[1])))
+    raise ValueError(
+        "wgs84_to_lv95 takes (lon, lat) -- arguments look %s. Got lon in [%.4f, %.4f], "
+        "lat in [%.4f, %.4f]." % ("SWAPPED" if swapped else "out of Swiss range",
+                                  np.min(lon), np.max(lon), np.min(lat), np.max(lat)))
+
 
 def wgs84_to_lv95(lon, lat):
-    """lon/lat [deg] -> (E, N) in meters, LV95 (2.6e6 / 1.2e6 false origin)."""
+    """lon/lat [deg] -> (E, N) in meters, LV95 (2.6e6 / 1.2e6 false origin).
+
+    NOTE the argument order: LON FIRST. Calling it (lat, lon) does not fail -- the
+    polynomials happily evaluate on swapped input and return E/N that are wrong by
+    tens of km while preserving roughly the right SPAN, so a W-E profile built on
+    them looks superficially sane. Hence the range check below.
+    """
     lon = np.asarray(lon, float)
     lat = np.asarray(lat, float)
+    _check_order(lon, lat)
     lp = (lon * 3600.0 - 26782.5) / 10000.0
     pp = (lat * 3600.0 - 169028.66) / 10000.0
     E = (2600072.37 + 211455.93 * lp - 10938.51 * lp * pp

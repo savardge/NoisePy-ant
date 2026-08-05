@@ -20,6 +20,35 @@ import numpy as np
 from noisepy import vs_inversion as vi
 
 
+def read_period_ranges(path, net=None):
+    """{curve_key: (tmin, tmax)} from a period-validity decision CSV.
+
+    Expects columns net, measure, wave and T_valid_min / T_valid_max; blank bounds mean
+    "open on that side", and a row with BOTH blank imposes no restriction at all (it is
+    skipped, not read as (nan, nan) -- which would silently delete every period).
+    """
+    import csv
+    out = {}
+    rows = list(csv.DictReader(open(path)))
+    nets = {(r.get("net") or "").strip() for r in rows} - {""}
+    if net is None and len(nets) > 1:
+        # keys are (wave, measure) only, so rows from a second network would overwrite the
+        # first silently and the cell would be trimmed to ANOTHER network's ranges.
+        raise SystemExit("read_period_ranges: %s covers %d networks (%s) -- pass --net"
+                         % (path, len(nets), ", ".join(sorted(nets))))
+    for row in rows:
+            if net and (row.get("net") or "").strip() and row["net"].strip() != net:
+                continue
+            lo_s = (row.get("T_valid_min") or "").strip()
+            hi_s = (row.get("T_valid_max") or "").strip()
+            if not lo_s and not hi_s:
+                continue
+            key = vi.curve_key((row.get("wave") or "").strip(),
+                               (row.get("measure") or "group").strip())
+            out[key] = (float(lo_s) if lo_s else None, float(hi_s) if hi_s else None)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--production", required=True, help="swtomotv-output/production root")
@@ -45,15 +74,52 @@ def main():
     ap.add_argument("--bb-constraint", default="project", choices=("project", "reject"),
                     help="bayesbay constraint handling (project=native-like, reject=hard)")
     ap.add_argument("--overtone-min-t", type=float, default=None,
-                    help="drop overtone periods below this (s) as a data-quality test, e.g. 1.0")
+                    help="DEPRECATED shorthand for --period-ranges; drop overtone periods "
+                         "below this (s). Applied after --period-ranges if both are given.")
+    ap.add_argument("--production-phase", default=None,
+                    help="production root for the PHASE maps, when inverting group+phase "
+                         "jointly. Group and phase are recommended from DIFFERENT Cd runs "
+                         "(group=scaled, phase=blanket), so this is a separate path, not a "
+                         "flag on --production.")
+    ap.add_argument("--waves", default="fund,overtone",
+                    help="comma list of base waves to load: fund,overtone,love,love_ot")
+    ap.add_argument("--period-ranges", default=None,
+                    help="CSV of validated period ranges (from period_validity_table.py: "
+                         "columns net,measure,wave,T_valid_min,T_valid_max). Rows with both "
+                         "bounds blank are treated as 'no restriction'; a wave listed with a "
+                         "range is trimmed to it.")
+    ap.add_argument("--net", default=None,
+                    help="network name, used to select rows from --period-ranges")
     args = ap.parse_args()
     engines = [e.strip() for e in args.engines.split(",") if e.strip()]
     os.makedirs(args.outdir, exist_ok=True)
 
-    cell = vi.load_cell_curves(args.production, args.ix, args.iy)
+    waves = [w.strip() for w in args.waves.split(",") if w.strip()]
+    cell = vi.load_cell_curves(args.production, args.ix, args.iy, waves=waves,
+                               measure="group")
+    if args.production_phase:
+        # second pass into the SAME CellData -> keys "fund_phase" etc. alongside the group ones
+        cell = vi.load_cell_curves(args.production_phase, args.ix, args.iy, waves=waves,
+                                   measure="phase", into=cell)
+
+    if args.period_ranges:
+        ranges = read_period_ranges(args.period_ranges, args.net)
+        if ranges:
+            cell = vi.restrict_periods(cell, ranges)
+            for k, (lo, hi) in sorted(ranges.items()):
+                print("  period range %-14s %s - %s s"
+                      % (k, "open" if lo is None else lo, "open" if hi is None else hi))
+        else:
+            print("  --period-ranges matched no rows (check --net); no restriction applied")
     if args.overtone_min_t:
         cell = vi.restrict_periods(cell, {"overtone": (args.overtone_min_t, None)})
         print(f"overtone restricted to T >= {args.overtone_min_t}s")
+    dropped = [k for k, (T, _, _) in cell.curves.items() if len(T) == 0]
+    for k in dropped:
+        print("  %s: EMPTY after period restriction -- dropped" % k)
+        del cell.curves[k]
+    if not cell.curves:
+        raise SystemExit("no curves survive the period ranges for this cell")
     if args.config:
         vi.attach_cell_coords(cell, args.config)
     print(f"cell (ix,iy)=({cell.ix},{cell.iy}) lon,lat=({cell.lon:.4f},{cell.lat:.4f})")
