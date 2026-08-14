@@ -667,7 +667,14 @@ def main(cfgpath):
         d["iface_depths"] = (np.concatenate(ifaces) if ifaces else np.array([])).astype(np.float32)
         d["ens_misfit"] = misf
         d["ens_nlayers"] = np.asarray(nlay_each)
-    np.savez_compressed(cfg["out_npz"], **d)
+    # ATOMIC: write to a temp beside the target, then os.replace. A cluster task killed at
+    # walltime mid-savez would otherwise leave a TRUNCATED npz at the final path -- and both
+    # consumers treat "file exists" as done (grid_vs_inversion skips it forever,
+    # assemble_volume silently drops what it cannot load), so the cell becomes an invisible
+    # hole in the volume. os.replace is atomic within a filesystem.
+    _tmp_npz = cfg["out_npz"] + ".tmp%d.npz" % os.getpid()
+    np.savez_compressed(_tmp_npz, **d)
+    os.replace(_tmp_npz, cfg["out_npz"])
     print(f"BayHunter cell done: {len(prof)} posterior models, {runtime:.0f}s -> {cfg['out_npz']}")
 
     # Posterior figure ALONGSIDE the diagnostics, per cell as the run progresses (user decision

@@ -20,33 +20,8 @@ import numpy as np
 from noisepy import vs_inversion as vi
 
 
-def read_period_ranges(path, net=None):
-    """{curve_key: (tmin, tmax)} from a period-validity decision CSV.
-
-    Expects columns net, measure, wave and T_valid_min / T_valid_max; blank bounds mean
-    "open on that side", and a row with BOTH blank imposes no restriction at all (it is
-    skipped, not read as (nan, nan) -- which would silently delete every period).
-    """
-    import csv
-    out = {}
-    rows = list(csv.DictReader(open(path)))
-    nets = {(r.get("net") or "").strip() for r in rows} - {""}
-    if net is None and len(nets) > 1:
-        # keys are (wave, measure) only, so rows from a second network would overwrite the
-        # first silently and the cell would be trimmed to ANOTHER network's ranges.
-        raise SystemExit("read_period_ranges: %s covers %d networks (%s) -- pass --net"
-                         % (path, len(nets), ", ".join(sorted(nets))))
-    for row in rows:
-            if net and (row.get("net") or "").strip() and row["net"].strip() != net:
-                continue
-            lo_s = (row.get("T_valid_min") or "").strip()
-            hi_s = (row.get("T_valid_max") or "").strip()
-            if not lo_s and not hi_s:
-                continue
-            key = vi.curve_key((row.get("wave") or "").strip(),
-                               (row.get("measure") or "group").strip())
-            out[key] = (float(lo_s) if lo_s else None, float(hi_s) if hi_s else None)
-    return out
+# shared with grid_vs_inversion.py; the implementation lives in noisepy.vs_inversion
+read_period_ranges = vi.read_period_ranges
 
 
 def main():
@@ -82,7 +57,27 @@ def main():
                          "(group=scaled, phase=blanket), so this is a separate path, not a "
                          "flag on --production.")
     ap.add_argument("--waves", default="fund,overtone",
-                    help="comma list of base waves to load: fund,overtone,love,love_ot")
+                    help="comma list of base waves to load as GROUP curves; may be '' for a "
+                         "phase-only inversion (then --waves-phase selects the targets)")
+    ap.add_argument("--waves-phase", default=None,
+                    help="comma list of base waves to load as PHASE curves from "
+                         "--production-phase. Default (unset): mirror --waves when a phase "
+                         "root is given. '' = no phase even with a phase root. This is "
+                         "independent of --waves so e.g. group-only, phase-only and mixed "
+                         "target sets are all expressible.")
+    ap.add_argument("--bh-use-mp", action="store_true",
+                    help="run BayHunter chains via fork multiprocessing (validated: posterior "
+                         "statistically identical to serial, ~3.5x faster)")
+    ap.add_argument("--bh-mp-nthreads", type=int, default=0,
+                    help="worker processes for --bh-use-mp (0 = BayHunter default cpu_count; "
+                         "set lower when several cells run concurrently)")
+    ap.add_argument("--radial", action="store_true",
+                    help="BayHunter continuous-zeta radial anisotropy: Love targets forward "
+                         "on Vsh, Rayleigh on Vsv, gamma(z)=(Vsh-Vsv)/Vsv free per layer. "
+                         "Only meaningful when the target set mixes Love and Rayleigh. "
+                         "bayesbay has no zeta support -- rejected if it is among --engines.")
+    ap.add_argument("--radial-prior", default="-0.35,0.35",
+                    help="uniform prior bounds for zeta (default from the CZ calibration)")
     ap.add_argument("--period-ranges", default=None,
                     help="CSV of validated period ranges (from period_validity_table.py: "
                          "columns net,measure,wave,T_valid_min,T_valid_max). Rows with both "
@@ -92,14 +87,28 @@ def main():
                     help="network name, used to select rows from --period-ranges")
     args = ap.parse_args()
     engines = [e.strip() for e in args.engines.split(",") if e.strip()]
+    if args.radial and "bayesbay" in engines:
+        raise SystemExit("--radial is BayHunter-only (bayesbay has no zeta parameterization); "
+                         "use --engines bayhunter")
     os.makedirs(args.outdir, exist_ok=True)
 
     waves = [w.strip() for w in args.waves.split(",") if w.strip()]
-    cell = vi.load_cell_curves(args.production, args.ix, args.iy, waves=waves,
-                               measure="group")
-    if args.production_phase:
-        # second pass into the SAME CellData -> keys "fund_phase" etc. alongside the group ones
-        cell = vi.load_cell_curves(args.production_phase, args.ix, args.iy, waves=waves,
+    if args.waves_phase is None:
+        waves_phase = waves if args.production_phase else []
+    else:
+        waves_phase = [w.strip() for w in args.waves_phase.split(",") if w.strip()]
+    if waves_phase and not args.production_phase:
+        raise SystemExit("--waves-phase given but no --production-phase root to load from")
+    if not waves and not waves_phase:
+        raise SystemExit("empty --waves and no phase waves: nothing to invert")
+    cell = None
+    if waves:
+        cell = vi.load_cell_curves(args.production, args.ix, args.iy, waves=waves,
+                                   measure="group")
+    if waves_phase:
+        # second pass into the SAME CellData -> keys "fund_phase" etc. alongside the group
+        # ones (or a fresh phase-only cell when --waves is empty)
+        cell = vi.load_cell_curves(args.production_phase, args.ix, args.iy, waves=waves_phase,
                                    measure="phase", into=cell)
 
     if args.period_ranges:
@@ -135,7 +144,11 @@ def main():
             r = vi.load_result(npz); r["cell"] = cell
         else:
             print("\n=== bayesbay ===")
-            r = vi.run_bayesbay(cell, depth_max=args.depth_max, vs_bounds=(args.vs_min, args.vs_max),
+            # waves must be the cell's ACTUAL curve keys: the engine default is
+            # ("fund","overtone"), which would silently drop love and every phase target
+            # right after the driver loaded and printed them.
+            r = vi.run_bayesbay(cell, waves=list(cell.curves),
+                                depth_max=args.depth_max, vs_bounds=(args.vs_min, args.vs_max),
                                 maxfrac=args.maxfrac, n_chains=args.n_chains,
                                 n_iterations=args.iterations, burnin=args.burnin, seed=42,
                                 constraint=args.bb_constraint)
@@ -155,9 +168,13 @@ def main():
             if not (args.bayhunter_python and args.bayhunter_runner):
                 raise SystemExit("bayhunter engine needs --bayhunter-python and --bayhunter-runner")
             r = vi.run_bayhunter(cell, npz, args.bayhunter_runner, args.bayhunter_python,
+                                 waves=list(cell.curves),
                                  depth_max=args.depth_max, vs_bounds=(args.vs_min, args.vs_max),
                                  maxfrac=args.maxfrac, nchains=args.n_chains,
                                  iter_burnin=args.bh_iter_burnin, iter_main=args.bh_iter_main,
+                                 use_mp=args.bh_use_mp, mp_nthreads=args.bh_mp_nthreads,
+                                 radial=args.radial,
+                                 radial_prior=[float(x) for x in args.radial_prior.split(",")],
                                  workdir=os.path.join(args.outdir, "bayhunter_work"))
             r["cell"] = cell
         vi.plot_inversion(r, os.path.join(args.outdir, "bayhunter_inversion.png"),

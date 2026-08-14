@@ -208,6 +208,35 @@ def restrict_periods(cell, period_ranges):
     return c
 
 
+def read_period_ranges(path, net=None):
+    """{curve_key: (tmin, tmax)} from a period-validity decision CSV.
+
+    Expects columns net, measure, wave and T_valid_min / T_valid_max; blank bounds mean
+    "open on that side", and a row with BOTH blank imposes no restriction at all (it is
+    skipped, not read as (nan, nan) -- which would silently delete every period).
+    """
+    import csv
+    out = {}
+    rows = list(csv.DictReader(open(path)))
+    nets = {(r.get("net") or "").strip() for r in rows} - {""}
+    if net is None and len(nets) > 1:
+        # keys are (wave, measure) only, so rows from a second network would overwrite the
+        # first silently and the cell would be trimmed to ANOTHER network's ranges.
+        raise SystemExit("read_period_ranges: %s covers %d networks (%s) -- pass --net"
+                         % (path, len(nets), ", ".join(sorted(nets))))
+    for row in rows:
+        if net and (row.get("net") or "").strip() and row["net"].strip() != net:
+            continue
+        lo_s = (row.get("T_valid_min") or "").strip()
+        hi_s = (row.get("T_valid_max") or "").strip()
+        if not lo_s and not hi_s:
+            continue
+        key = curve_key((row.get("wave") or "").strip(),
+                        (row.get("measure") or "group").strip())
+        out[key] = (float(lo_s) if lo_s else None, float(hi_s) if hi_s else None)
+    return out
+
+
 def attach_cell_coords(cell, swtomotv_yaml):
     """Fill lon/lat/x_km/y_km on a CellData from the swtomotv grid (lazy import).
 
@@ -604,7 +633,8 @@ def compare_engines(results, path, cell=None):
 def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overtone"),
                   depth_max=6.0, vs_bounds=(0.3, 3.6), n_layers=(1, 20),
                   maxfrac=MAX_ADJ_FRAC, nchains=8, iter_burnin=120_000, iter_main=60_000,
-                  workdir=None, timeout=None, measure="group"):
+                  workdir=None, timeout=None, measure="group", use_mp=False, mp_nthreads=0,
+                  radial=False, radial_prior=(-0.35, 0.35)):
     """Run BayHunter in its own env via subprocess; return the loaded result dict.
 
     runner            : path to run_bayhunter_cell.py (executed with bayhunter_python)
@@ -640,6 +670,8 @@ def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overt
                out_npz=out_npz, depth_max=depth_max,
                vs_bounds=list(vs_bounds), n_layers=list(n_layers), maxfrac=maxfrac,
                nchains=nchains, iter_burnin=iter_burnin, iter_main=iter_main, measure=measure,
+               use_mp=bool(use_mp), mp_nthreads=int(mp_nthreads),
+               radial_anisotropy=bool(radial), radial_prior=list(radial_prior),
                cell=[cell.ix, cell.iy, cell.lon, cell.lat])
     cfgpath = os.path.join(workdir, "config.json")
     with open(cfgpath, "w") as f:

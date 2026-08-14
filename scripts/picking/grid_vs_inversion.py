@@ -50,7 +50,7 @@ def invert_one(task):
             fp = os.path.join(workdir, f"disp_{w}_phase.txt")
             np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
             phasefiles[w] = fp
-    if not curvefiles:                       # love-only cells have no "fund"; only skip if NOTHING
+    if not curvefiles and not phasefiles:    # love-only cells have no "fund"; only skip if NOTHING
         return (cell.ix, cell.iy, waves, "no-data", 0.0)
     cfg = dict(curves=curvefiles, out_npz=out_npz,
                savepath=os.path.join(workdir, "bh_results"),
@@ -64,15 +64,29 @@ def invert_one(task):
                VECLIB_MAXIMUM_THREADS="1", OMP_NUM_THREADS="1",
                OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     t0 = time.time()
+    # GRID_VS_DEBUG=1: stream the runner's stdout/stderr live instead of capturing -- for
+    # interactive debugging. Default: capture, and print the tail only when the run FAILS.
+    sink = None if os.environ.get("GRID_VS_DEBUG") else subprocess.PIPE
     try:
-        subprocess.run([bh_py, runner, cfgpath], check=True, env=env,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=cfg_common.get("_timeout"))
-        status = "ok" if os.path.exists(out_npz) else "no-out"
+        r = subprocess.run([bh_py, runner, cfgpath], env=env,
+                           stdout=sink, stderr=(None if sink is None else subprocess.STDOUT),
+                           timeout=cfg_common.get("_timeout"))
+        if r.returncode == 0:
+            status = "ok" if os.path.exists(out_npz) else "no-out"
+        elif os.path.exists(out_npz):
+            # Teardown-only failure: the result npz (and figures) are already on disk; the
+            # interpreter died on exit (observed intermittently with fork-mp at high iteration
+            # counts on the cluster). The RESULT is the npz -- count it ok, but say so.
+            print(f"({cell.ix},{cell.iy}) {'+'.join(waves)}: runner rc={r.returncode} AFTER "
+                  f"writing the result npz -- counted ok (teardown crash)", flush=True)
+            status = "ok"
+        else:
+            tail = (r.stdout or b"")[-3000:].decode(errors="replace") if sink else ""
+            print(f"({cell.ix},{cell.iy}) {'+'.join(waves)}: runner rc={r.returncode}, no "
+                  f"result npz. Output tail:\n{tail}", flush=True)
+            status = "err"
     except subprocess.TimeoutExpired:
         status = "timeout"
-    except subprocess.CalledProcessError:
-        status = "err"
     # the per-cell work dir holds ~90 MB of raw BayHunter chain storage; the result npz has
     # everything downstream needs, so drop the work dir to keep the grid's disk footprint flat.
     shutil.rmtree(workdir, ignore_errors=True)
@@ -104,6 +118,17 @@ def main():
     ap.add_argument("--wavesets", default="fund,fundot",
                     help="comma list of: fund (R fund), fundot (R fund+overtone), love (Love only), "
                          "fundlove (R fund+Love), fundotlove (R fund+overtone+Love)")
+    ap.add_argument("--measure", choices=("group", "phase"), default="group",
+                    help="phase = PHASE-ONLY inversion: --production must then be the PHASE "
+                         "run's production root; its curves become <wave>_phase targets and no "
+                         "group targets are built. Incompatible with --phase-root, which adds "
+                         "phase ON TOP of group targets.")
+    ap.add_argument("--period-ranges", default=None,
+                    help="CSV of validated period ranges (period_validity_table.py: columns "
+                         "net,measure,wave,T_valid_min,T_valid_max), applied uniformly to every "
+                         "cell. Group rows trim the group curves, phase rows the phase curves; "
+                         "rows with both bounds blank impose no restriction. Needs --net when "
+                         "the CSV covers several networks.")
     ap.add_argument("--net", default=None, help="riehen|aargau; required for --criterion")
     ap.add_argument("--criterion", default="none",
                     choices=("none", "tomographic", "physical", "combined"),
@@ -150,6 +175,13 @@ def main():
     ap.add_argument("--radial-prior", default="-0.35,0.35")
     ap.add_argument("--vpvs-range", default=None,
                     help="'lo,hi' -> free Vp/Vs (recipe: 1.5,3.5); default fixed 1.73")
+    ap.add_argument("--use-mp", action="store_true",
+                    help="fork-multiprocess the chains INSIDE each cell's BayHunter subprocess "
+                         "(validated: posterior statistically identical to serial). Size "
+                         "--n-workers x --mp-nthreads to the CPUs available.")
+    ap.add_argument("--mp-nthreads", type=int, default=0,
+                    help="worker processes per cell for --use-mp (0 = BayHunter default "
+                         "cpu_count; set = --n-chains so all chains run concurrently)")
     ap.add_argument("--bayhunter-python", required=True)
     ap.add_argument("--bayhunter-runner", required=True)
     ap.add_argument("--shard", default=None,
@@ -173,7 +205,21 @@ def main():
                 "fundlove": ("fund", "love"), "fundotlove": ("fund", "overtone", "love")}
     need_love = any("love" in wavesets[w] for w in want)
     if need_love and not args.love_production:
-        raise SystemExit("--love-production is required for love/fundlove/fundotlove wavesets")
+        # prod3_k3-style runs carry love/ inside the same production tree; older runs kept Love
+        # under a separate swtomotv-output-love-<dx> root and must still pass it explicitly.
+        args.love_production = args.production
+        print(f"--love-production not given; using --production ({args.production})", flush=True)
+    if args.measure == "phase" and args.phase_root:
+        raise SystemExit("--measure phase is a PHASE-ONLY run (--production IS the phase root); "
+                         "--phase-root only makes sense for joint group+phase on top of group")
+    pranges = (vi.read_period_ranges(args.period_ranges, net=args.net)
+               if args.period_ranges else {})
+    # split by measure: group-keyed entries trim the group CellData; phase entries are re-keyed
+    # to the plain wave name because the phase CellData (bases_ph / --measure phase) stores its
+    # curves under plain keys -- the "phase-ness" is carried by WHICH dict the curve files land
+    # in (curves vs curves_phase), not by the curve key (see invert_one / the runner).
+    pr_group = {k: v for k, v in pranges.items() if not k.endswith("_phase")}
+    pr_phase = {k[: -len("_phase")]: v for k, v in pranges.items() if k.endswith("_phase")}
 
     covf = coverage_grid(args.production, "fund")
     covo = coverage_grid(args.production, "overtone")
@@ -211,6 +257,9 @@ def main():
     if args.radial:
         cfg_common["radial_anisotropy"] = True
         cfg_common["radial_prior"] = [float(x) for x in args.radial_prior.split(",")]
+    if args.use_mp:
+        cfg_common["use_mp"] = True
+        cfg_common["mp_nthreads"] = args.mp_nthreads
 
     # build tasks; overtone restricted to T>=overtone-min-t for the fundot waveset, then the
     # per-cell reliability criterion trims each curve to its well-resolved periods.
@@ -231,19 +280,35 @@ def main():
     if need_love:
         pr.PROD_ROOT[(args.net, "love")] = args.love_production
     # ---- pass 1: load all base cells (group and, if requested, phase) with coords -----------
+    # --measure phase: --production IS the phase run; its curves go into the PHASE slot
+    # (bases_ph -> curves_phase -> phase targets in the runner) and the group slot stays an
+    # empty CellData that only carries the cell coords.
     bases, bases_ph = {}, {}
     for (ix, iy) in cells_ij:
-        base = vi.load_cell_curves(args.production, ix, iy, waves=load_waves,
-                                   wave_roots=wave_roots)
-        vi.attach_cell_coords(base, args.config)
-        bases[(ix, iy)] = base
-        if args.phase_root:
-            ph_roots = {"love": args.love_phase_root} if (need_love and args.love_phase_root) \
-                else None
-            ph = vi.load_cell_curves(args.phase_root, ix, iy, waves=load_waves,
-                                     wave_roots=ph_roots)
+        if args.measure == "phase":
+            base = vi.CellData(ix=int(ix), iy=int(iy))
+            ph = vi.load_cell_curves(args.production, ix, iy, waves=load_waves,
+                                     wave_roots=wave_roots)
+            if pr_phase:
+                ph = vi.restrict_periods(ph, pr_phase)
             vi.attach_cell_coords(ph, args.config)
             bases_ph[(ix, iy)] = ph
+        else:
+            base = vi.load_cell_curves(args.production, ix, iy, waves=load_waves,
+                                       wave_roots=wave_roots)
+            if pr_group:
+                base = vi.restrict_periods(base, pr_group)
+            if args.phase_root:
+                ph_roots = {"love": args.love_phase_root} if (need_love and args.love_phase_root) \
+                    else None
+                ph = vi.load_cell_curves(args.phase_root, ix, iy, waves=load_waves,
+                                         wave_roots=ph_roots)
+                if pr_phase:
+                    ph = vi.restrict_periods(ph, pr_phase)
+                vi.attach_cell_coords(ph, args.config)
+                bases_ph[(ix, iy)] = ph
+        vi.attach_cell_coords(base, args.config)
+        bases[(ix, iy)] = base
 
     # ---- criterion 2: per-(cell, period) group mask from the pick tables, built ONCE --------
     c2_tables = {}
@@ -298,13 +363,15 @@ def main():
             # measured at cell 9_18: 32 raw -> 3 pts envelope-first vs 25 -> ~7 trim-first.
             if args.criterion != "none":
                 _saved = pr.PROD_ROOT.get(args.net)
-                pr.PROD_ROOT[args.net] = args.phase_root
+                pr.PROD_ROOT[args.net] = args.phase_root or args.production
                 ph_params = dict(trim_params, alpha=args.phase_alpha)   # phase-validity alpha
                 base_ph = pr.trim_reliable(base_ph, args.net, args.criterion, ph_params)
                 pr.PROD_ROOT[args.net] = _saved
-            # phase ENVELOPE cut (fund/love; overtone phase untouched)
-            base_ph = vi.restrict_periods(base_ph, {"fund": (args.phase_tmin, None),
-                                                    "love": (args.phase_tmin, None)})
+            # phase ENVELOPE cut (fund/love; overtone phase untouched). <=0 disables it (e.g.
+            # when --period-ranges alone governs the band).
+            if args.phase_tmin > 0:
+                base_ph = vi.restrict_periods(base_ph, {"fund": (args.phase_tmin, None),
+                                                        "love": (args.phase_tmin, None)})
         for wskey in want:
             cell = base
             cell_ph = base_ph
