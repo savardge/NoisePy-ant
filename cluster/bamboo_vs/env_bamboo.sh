@@ -50,3 +50,41 @@ cfg_flags() {           # usage: cfg_flags <cfg>  -> sets PROD, WS, EXTRA
 
 ALL_CFGS="R0g R0p L0g L0p RLg_radial RLg_iso"
 ALL_NETS="riehen aargau hautesorne"
+
+# ---------------------------------------------------------------- Dinver (SWinvert) campaign
+# Sibling of vs_prod3 on scratch; inputs are the SAME blanket prod3_k3 trees (symlinked, not
+# copied). Outputs: runs/<net>/<cfg>/cells/*.npz (lean, ~50 KB each) + volume; nothing else.
+export SCRATCH_DINVER="${SCRATCH_DINVER:-/srv/beegfs/scratch/users/s/savardg/vs_dinver}"
+export DINVER_RUNS="$SCRATCH_DINVER/runs"
+
+activate_dinver() {
+    activate_env                       # bayhunter_aniso: numpy/disba/swprepost + PYTHONPATH
+    _flags=$-
+    set +eu
+    module load GCC/11.3.0 OpenMPI/4.1.4 geopsy/3.4.2
+    _rc=$?
+    case "$_flags" in *e*) set -e ;; esac
+    case "$_flags" in *u*) set -u ;; esac
+    [ "$_rc" -eq 0 ] || { echo "FATAL: cannot load geopsy/3.4.2"; exit 1; }
+    export DINVER_BIN="$EBROOTGEOPSY/bin/dinver"
+    export GPDCREPORT_BIN="$EBROOTGEOPSY/bin/gpdcreport"
+    # dinver is GUI-linked. On any fatal error -- and on the SIGTERM the driver sends at
+    # --cell-timeout -- CoreApplicationPrivate spawns a GUI copy of itself (-reportbug /
+    # -reportint) to render a bug report. Without a usable Qt platform plugin that child
+    # aborts in ~100 ms and the parent's diagnostic is lost, so a timed-out cell leaves
+    # only an opaque abort. offscreen keeps timeouts readable; verified not to affect
+    # -optimization or -plugin-list.
+    export QT_QPA_PLATFORM=offscreen
+}
+
+# Dinver configs -> waveset + measure + sizing. R0gR1g = the arm the well study validated
+# (both group curves at chi~1, basement recovered). Group runs size the SWinvert layering
+# from the fundamental PHASE wavelength (--dinver-size-phase-root), phase is not inverted.
+dinver_cfg_flags() {    # usage: dinver_cfg_flags <cfg> -> sets PROD, WS, DEXTRA
+    local cfg=$1
+    case "$cfg" in
+        R0gR1g) PROD=$GROUP_PROD; WS=fundot; DEXTRA="--measure group --dinver-size-phase-root $PHASE_PROD" ;;
+        R0g)    PROD=$GROUP_PROD; WS=fund;   DEXTRA="--measure group --dinver-size-phase-root $PHASE_PROD" ;;
+        *) echo "dinver_cfg_flags: unknown cfg '$cfg'" >&2; return 2 ;;
+    esac
+}

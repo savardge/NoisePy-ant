@@ -82,6 +82,31 @@ class CellData:
         return wave in self.curves and len(self.curves[wave][0]) > 0
 
 
+_MAP_CACHE = {}          # wave dir -> [(period, vel, mask, res_diag, unc_s), ...] sorted by T
+
+
+def _wave_maps(wdir):
+    """Every map_T*.npz in `wdir`, read ONCE and kept in memory, sorted by period.
+
+    Without this every cell re-globbed the directory and re-opened all ~40 npz -- twice, since
+    sorting by period opened each file just to read that scalar. A 4824-cell grid therefore did
+    ~650k opens per shard, and the mode gate (which needs a second reference curve per cell)
+    multiplied it again; on BeeGFS across 32 shards x 12 arms that dominated the runtime and
+    starved the rest of the cluster. The arrays are tiny -- ~10 MB for a whole network -- so
+    caching them is free.
+    """
+    hit = _MAP_CACHE.get(wdir)
+    if hit is not None:
+        return hit
+    out = []
+    for f in glob.glob(os.path.join(wdir, "map_T*.npz")):
+        z = np.load(f)
+        out.append((float(z["period"]), z["vel"], z["mask"], z["res_diag"], z["unc_s"]))
+    out.sort(key=lambda r: r[0])
+    _MAP_CACHE[wdir] = out
+    return out
+
+
 def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
                      res_min=None, min_periods=5, wave_roots=None, measure="group",
                      into=None):
@@ -120,21 +145,18 @@ def load_cell_curves(production_root, ix, iy, waves=("fund", "overtone"),
                 f"load_cell_curves: no '{w}' map directory under production root '{root}' "
                 f"({wdir} does not exist). Check the production_root/wave_roots path -- a stale "
                 f"path here silently drops the wave instead of erroring.")
-        files = sorted(glob.glob(os.path.join(wdir, "map_T*.npz")),
-                       key=lambda f: float(np.load(f)["period"]))
         T, U, S = [], [], []
-        for f in files:
-            z = np.load(f)
-            if not bool(z["mask"][ix, iy]):
+        for period, vel, mask, res, unc in _wave_maps(wdir):
+            if not bool(mask[ix, iy]):
                 continue
-            if res_min is not None and float(z["res_diag"][ix, iy]) < res_min:
+            if res_min is not None and float(res[ix, iy]) < res_min:
                 continue
-            u = float(z["vel"][ix, iy])
+            u = float(vel[ix, iy])
             if not np.isfinite(u):
                 continue
-            T.append(float(z["period"]))
+            T.append(period)
             U.append(u)
-            S.append(float(z["unc_s"][ix, iy]) * u ** 2)     # s/km -> km/s
+            S.append(float(unc[ix, iy]) * u ** 2)            # s/km -> km/s
         if len(T) >= min_periods:
             o = np.argsort(T)
             cell.curves[curve_key(w, measure)] = (np.array(T)[o], np.array(U)[o],
@@ -185,6 +207,67 @@ def decimate_periods(cell, max_periods=55):
         targets = np.geomspace(T.min(), T.max(), max_periods)
         idx = sorted(set(int(np.argmin(np.abs(T - t))) for t in targets))
         c.curves[w] = (T[idx], U[idx], S[idx])
+    return c
+
+
+def mode_id_gate(cell, ix, iy, phase_root=None, overtone_root=None, waves=("fund", "love"),
+                 wave_roots=None, margin=1.0, report=None):
+    """Drop (wave, period) samples whose GROUP pick cannot be the branch it claims to be.
+
+    Two physical tests, both parameter-free at margin=1.0:
+
+    KINEMATIC (rigorous for any wave, needs the phase map of the SAME wave)
+        Normal dispersion with dc/dT > 0 forces U < c. A pick with U >= c is impossible, and
+        measured across this campaign it flags exactly the cells whose "fundamental" sits on a
+        higher-mode branch: in riehen Love, 74% of U>=c cells also have U_fund > U_overtone,
+        against an 11% background.
+
+    BRANCH ORDER (rigorous for RAYLEIGH, empirical for Love, needs the overtone map)
+        The fundamental cannot outrun its own overtone at the same period. For Love the only
+        available reference is the RAYLEIGH overtone -- there is no Love overtone in this
+        campaign -- so no strict inequality holds between them; it separated the populations
+        127:1 in hautesorne empirically, but treat a Love branch-order cut as a heuristic and
+        prefer the kinematic test there.
+
+    margin < 1 also removes near-misses (drop if U >= margin*reference); 1.0 keeps only the
+    strictly impossible. `report` collects per-wave counts of what was dropped.
+    """
+    import copy
+    c = copy.deepcopy(cell)
+    for w in waves:
+        if not c.has(w):
+            continue
+        T, U, S = c.curves[w]
+        keep = np.ones(len(T), bool)
+        for root, meas in ((phase_root, "phase"), (overtone_root, "overtone")):
+            if root is None:
+                continue
+            # The reference curve at THIS cell: phase of the same wave, or the overtone.
+            # Do NOT pass the caller's wave_roots. It exists to redirect a wave to a different
+            # GROUP tree (grid_vs_inversion sets {"love": <group root>}), so forwarding it here
+            # made the Love reference load from the group tree and the gate compared the curve
+            # against ITSELF -- dropping 100% of Love while fund/overtone behaved correctly.
+            # A reference root is a complete production tree; take every wave from it.
+            rw = w if meas == "phase" else "overtone"
+            ref = load_cell_curves(root, ix, iy, waves=(rw,), min_periods=1,
+                                   measure=("phase" if meas == "phase" else "group"))
+            rkey = curve_key(rw, "phase" if meas == "phase" else "group")
+            if not ref.has(rkey):
+                continue
+            rT, rV, _ = ref.curves[rkey]
+            if len(rT) < 2:
+                continue
+            # only judge where the reference actually spans the period -- no extrapolating a
+            # physical bound into periods the reference never measured
+            inside = (T >= rT.min()) & (T <= rT.max())
+            rv = np.interp(T, rT, rV)
+            bad = inside & (U >= margin * rv)
+            if report is not None:
+                report.setdefault((w, meas), [0, 0])
+                report[(w, meas)][0] += int(bad.sum())
+                report[(w, meas)][1] += int(inside.sum())
+            keep &= ~bad
+        c.curves[w] = (T[keep], U[keep], S[keep])
     return c
 
 
@@ -270,21 +353,28 @@ def adjacent_contrast_ok(vs, maxfrac=MAX_ADJ_FRAC):
 
 
 def dispersion_velocity(thickness, vs, periods, mode, measure="group", vpvs=VPVS,
-                        disba_wave="rayleigh"):
+                        disba_wave="rayleigh", vp=None, rho=None):
     """disba GROUP or PHASE velocity for one mode; NaN where the mode is undefined.
 
     thickness: layer thicknesses km (last = half-space, use a large value).
     measure: "group" or "phase".  disba_wave: "rayleigh" or "love".
+    vp, rho: explicit per-layer Vp (km/s) and density (g/cm3). Default None = the engines'
+        convention vp = vpvs*vs, rho = Brocher(vp). Dinver models carry their OWN Vp (Poisson's
+        ratio is a free parameter there) and a fixed rho, so its posterior-predictive forward
+        must pass them in rather than have them silently replaced.
     Returns an array aligned to `periods` (NaN where disba does not return that period).
     """
     from disba import GroupDispersion, PhaseDispersion
     Disp = {"group": GroupDispersion, "phase": PhaseDispersion}[measure]
     vs = np.asarray(vs, float)
-    vp = vpvs * vs
-    rho = 0.32 * vp + 0.77
+    vp = vpvs * vs if vp is None else np.asarray(vp, float)
+    rho = 0.32 * vp + 0.77 if rho is None else np.broadcast_to(np.asarray(rho, float), vs.shape)
     try:
         gd = Disp(np.asarray(thickness, float), vp, vs, rho)
-        cp = gd(periods, mode=mode, wave=disba_wave)
+        # disba insists on an ascending period axis; callers hand in whatever order their
+        # curve is in (gpdcreport output is ascending FREQUENCY). Sort for the call only --
+        # the output is re-aligned to the caller's `periods` by value below, so order is free.
+        cp = gd(np.sort(np.asarray(periods, float)), mode=mode, wave=disba_wave)
     except Exception:
         return np.full(len(periods), np.nan)
     out = np.full(len(periods), np.nan)
@@ -502,7 +592,7 @@ def load_result(path):
     r = {k: (z[k].item() if z[k].shape == () else z[k]) for k in z.files
          if not k.startswith(("pred", "predT", "obs"))}
     r["engine"] = str(r.get("engine"))
-    r["waves"] = list(z["waves"]) if "waves" in z.files else []
+    r["waves"] = [str(w) for w in z["waves"]] if "waves" in z.files else []
     r["pred"] = {w: (z[f"predT_{w}"], z[f"pred_{w}"]) for w in r["waves"] if f"pred_{w}" in z.files}
     r["obs"] = {w: (z[f"obsT_{w}"], z[f"obs_{w}"], z[f"obssig_{w}"])
                 for w in r["waves"] if f"obs_{w}" in z.files}
@@ -522,6 +612,9 @@ def _pred_band(result, w):
     dp = np.asarray(dp)
     if dp.ndim == 1:
         return T, dp, None, None
+    if result.get("band_pred"):
+        # lean dinver npz: rows are the (2.5, 16, 50, 84, 97.5) percentiles, not models
+        return T, dp[2], dp[0], dp[4]
     return T, np.nanmedian(dp, 0), np.nanpercentile(dp, 2.5, 0), np.nanpercentile(dp, 97.5, 0)
 
 
@@ -580,7 +673,7 @@ def compare_engines(results, path, cell=None):
     import matplotlib.pyplot as plt
     waves = sorted({w for r in results for w in r.get("waves", [])})
     fig, axs = plt.subplots(1, 2 + len(waves), figsize=(4.6 * (2 + len(waves)), 6))
-    colors = {"bayesbay": "C0", "bayhunter": "C3"}
+    colors = {"bayesbay": "C0", "bayhunter": "C3", "dinver": "C2"}
     ax = axs[0]
     for r in results:
         c = colors.get(r["engine"], "C2")
@@ -605,14 +698,19 @@ def compare_engines(results, path, cell=None):
         ax.legend(fontsize=8)
     # metrics/QC table
     ax = axs[-1]; ax.axis("off")
+    # n_layers means different things per engine: bayesbay/BayHunter SAMPLE the layer count
+    # (posterior spread), dinver's is FIXED per parameterization and the spread is across the
+    # pooled LN/LR set. Flag the dinver row so the column is not read as one posterior.
     rows = [["engine", "runtime", "n_layers", "chain_std", "chi(fund)", "chi(ot)", "chi(love)"]]
     for r in results:
         mis = data_misfit(r)
         nl = r.get("n_layers_post", np.array([np.nan]))
         cd = r.get("chain_disagree", np.nan)
         cd = float(cd) if cd is not None else np.nan
-        rows.append([r["engine"], f"{r.get('runtime_s', np.nan):.0f}s",
-                     f"{np.mean(nl):.1f}±{np.std(nl):.1f}",
+        nl_s = f"{np.mean(nl):.1f}±{np.std(nl):.1f}"
+        if r["engine"] == "dinver":
+            nl_s += " (fixed/param)"
+        rows.append([r["engine"], f"{r.get('runtime_s', np.nan):.0f}s", nl_s,
                      ("%.2f" % cd) if np.isfinite(cd) else "-",
                      f"{mis.get('fund', np.nan):.2f}", f"{mis.get('overtone', np.nan):.2f}",
                      f"{mis.get('love', np.nan):.2f}"])
@@ -634,7 +732,7 @@ def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overt
                   depth_max=6.0, vs_bounds=(0.3, 3.6), n_layers=(1, 20),
                   maxfrac=MAX_ADJ_FRAC, nchains=8, iter_burnin=120_000, iter_main=60_000,
                   workdir=None, timeout=None, measure="group", use_mp=False, mp_nthreads=0,
-                  radial=False, radial_prior=(-0.35, 0.35)):
+                  radial=False, radial_prior=(-0.35, 0.35), save_ensemble=False):
     """Run BayHunter in its own env via subprocess; return the loaded result dict.
 
     runner            : path to run_bayhunter_cell.py (executed with bayhunter_python)
@@ -672,6 +770,7 @@ def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overt
                nchains=nchains, iter_burnin=iter_burnin, iter_main=iter_main, measure=measure,
                use_mp=bool(use_mp), mp_nthreads=int(mp_nthreads),
                radial_anisotropy=bool(radial), radial_prior=list(radial_prior),
+               save_ensemble=bool(save_ensemble),
                cell=[cell.ix, cell.iy, cell.lon, cell.lat])
     cfgpath = os.path.join(workdir, "config.json")
     with open(cfgpath, "w") as f:
@@ -682,4 +781,90 @@ def run_bayhunter(cell, out_npz, runner, bayhunter_python, waves=("fund", "overt
                VECLIB_MAXIMUM_THREADS="1", OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
                MKL_NUM_THREADS="1")
     subprocess.run([bayhunter_python, runner, cfgpath], check=True, timeout=timeout, env=env)
+    return load_result(out_npz)
+
+
+# --------------------------------------------------------------------- Dinver (subprocess)
+DINVER_BIN_DEFAULT = os.path.expanduser(
+    "~/Codes/geopsy-install/bin/dinver.app/Contents/MacOS/dinver")
+
+
+def dinver_config(cell, out_npz, dinver_bin=DINVER_BIN_DEFAULT, waves=("fund", "overtone"),
+                  lns=(3, 4, 5, 7), lrs=(3.0, 2.0, 1.5, 1.2), ntrials=3, ns=50_000, nr=100,
+                  ns0=10_000, n_pool=100, depth_factor=2.0, n_resample=30, min_cov=0.05,
+                  depth_max=6.5, vs_bounds=(0.5, 4.2), vp_bounds=(0.8, 8.0),
+                  pr_bounds=(0.2, 0.35), rho=2000.0, jobs=1, seed0=1, workdir=None,
+                  gpdcreport_bin=None, run_timeout=None, keep_reports=False, n_parallel=1,
+                  size_from=None, **extra):
+    """Write the cell's curves + the JSON config that run_dinver_cell.py consumes.
+
+    Returns (cfgpath, workdir). Split out of run_dinver so grid_vs_inversion.py can build the
+    same config for its pool without importing the subprocess plumbing.
+
+    waves : CURVE KEYS ("fund" = group, "fund_phase" = phase); the runner tags each ModalCurve
+        Group/Phase from the key, so a joint group+phase cell is just both keys in this list.
+    SWinvert defaults (Vantassel & Cox 2021): LN 3,4,5,7 + LR 3.0,2.0,1.5,1.2; Ns0 10 000,
+        Ns (=It*Ns) 50 000, Nr 100, >= 3 trials; nu free 0.2-0.5, Vp linked to the Vs
+        layering, rho fixed 2000. vs_bounds/depth_max defaults are the riehen row of the
+        prior-range table (plan); set per network.
+    n_parallel : concurrent dinver processes inside the runner (the 8x3 (param, trial) runs
+        are independent). 1 under a grid pool; ~cores for a single-cell run.
+    keep_reports : keep the ~560 MB .report per run (default: extract best-nr and delete).
+    size_from : CellData whose curves size the SWinvert layering (lambda_min/3 .. lambda_max/df),
+        default `cell`. The rule is defined on the fundamental PHASE wavelength, so when the
+        driver has the phase curve loaded but Dinver is inverting only the GROUP keys, pass the
+        FULL cell here -- otherwise the runner falls back to group U*T and dmax comes out ~30%
+        too shallow (measured: 4.7 vs 6.1 km on Basel-1).
+    """
+    import json
+    import tempfile
+    workdir = workdir or tempfile.mkdtemp(prefix="dinver_cell_")
+    os.makedirs(workdir, exist_ok=True)
+    curvefiles = {}
+    for w in waves:
+        if not cell.has(w):
+            continue
+        T, U, S = cell.curves[w]
+        fp = os.path.join(workdir, f"disp_{w}.txt")
+        np.savetxt(fp, np.column_stack([T, U, S]), fmt="%.6f")
+        curvefiles[w] = fp
+    if not curvefiles:
+        raise ValueError("dinver_config: cell has none of the requested curves %r" % (waves,))
+    from noisepy import dinver_target as dt
+    src = size_from if size_from is not None else cell
+    rayleigh = any(parse_curve_key(w)[0] in ("fund", "overtone") for w in curvefiles)
+    prefer, fallback = ("fund_phase", "fund") if rayleigh else ("love_phase", "love")
+    wmin_m, wmax_m, wsrc = dt.wavelength_range(src, prefer=prefer, fallback=fallback)
+    cfg = dict(wmin_m=wmin_m, wmax_m=wmax_m, wavelength_source=wsrc,
+               curves=curvefiles, out_npz=out_npz, workdir=workdir, dinver_bin=dinver_bin,
+               gpdcreport_bin=gpdcreport_bin, lns=list(lns), lrs=list(lrs), ntrials=int(ntrials),
+               ns=int(ns), nr=int(nr), ns0=int(ns0), n_pool=int(n_pool),
+               depth_factor=float(depth_factor), n_resample=int(n_resample),
+               min_cov=(None if min_cov is None else float(min_cov)),
+               depth_max=float(depth_max), vs_bounds=list(vs_bounds), vp_bounds=list(vp_bounds),
+               pr_bounds=list(pr_bounds), rho=float(rho), jobs=int(jobs), seed0=seed0,
+               run_timeout=run_timeout, keep_reports=bool(keep_reports),
+               n_parallel=int(n_parallel),
+               cell=[cell.ix, cell.iy, cell.lon, cell.lat], **extra)
+    cfgpath = os.path.join(workdir, "config.json")
+    with open(cfgpath, "w") as f:
+        json.dump(cfg, f, indent=1)
+    return cfgpath, workdir
+
+
+def run_dinver(cell, out_npz, runner, python=None, timeout=None, **kw):
+    """Run the SWinvert Dinver workflow on one cell via subprocess; return the result dict.
+
+    runner : path to run_dinver_cell.py. python : interpreter to run it with (default: this
+    one -- unlike BayHunter, the runner needs only swprepost + disba, which live in the
+    default env). **kw -> dinver_config (dinver_bin, waves, lns/lrs, ns/nr/ns0, bounds, ...).
+    Same contract as run_bayhunter: curves to txt + JSON config in a workdir, subprocess,
+    then load_result(out_npz).
+    """
+    import subprocess
+    import sys
+    cfgpath, workdir = dinver_config(cell, out_npz, **kw)
+    env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
+    subprocess.run([python or sys.executable, runner, cfgpath], check=True, timeout=timeout,
+                   env=env)
     return load_result(out_npz)

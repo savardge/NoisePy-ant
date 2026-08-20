@@ -41,7 +41,11 @@ if [ "$STAGE" = assemble ]; then
 fi
 
 I=$(( ${SLURM_ARRAY_TASK_ID:-0} ))
-srun "$BH_PY" grid_vs_inversion.py "${COMMON[@]}" $EXTRA \
+# EXTRA_FLAGS: extra driver flags for booster/diagnostic arms (e.g. --reverse). Unquoted on
+# purpose. @C@ decodes back to a comma: sbatch --export is itself comma-separated, so a
+# literal comma in a value (--vpvs-range 1.5,3.5) is truncated in transit.
+EXTRA_FLAGS=${EXTRA_FLAGS//@C@/,}
+srun "$BH_PY" grid_vs_inversion.py "${COMMON[@]}" $EXTRA ${EXTRA_FLAGS:-} \
     --n-chains "${NCHAINS:-24}" \
     --iter-burnin "${BURN:-500000}" --iter-main "${MAIN:-500000}" \
     --use-mp --mp-nthreads "${SLURM_CPUS_PER_TASK}" --n-workers 1 \

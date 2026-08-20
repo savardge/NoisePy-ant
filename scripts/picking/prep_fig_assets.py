@@ -25,9 +25,20 @@ def net_bbox(net, pad=0.03):
     if os.path.exists(vol):
         ll = np.load(vol, allow_pickle=True)["lonlat"]
         lo, la = ll[:, 0], ll[:, 1]
-    else:                       # nets without a Vs volume yet (e.g. hautesorne): station extent
-        st = np.genfromtxt(f"{E}/{net}/tomo/1_velocity_maps/inputs/stations.csv",
-                           delimiter=",", names=True)
+    else:                       # nets without a Vs volume yet: fall back to station extent.
+        # `1_velocity_maps/inputs/` is the PRE-2026-08-05-reorg path and no longer exists;
+        # try the current locations in order and say which one was used rather than dying on
+        # the legacy one.
+        cands = [f"{E}/{net}/tomo/1_velocity_maps/0_inputs/culled_picks_vbounds/k3/stations_all.csv",
+                 f"{E}/{net}/tomo/1_velocity_maps/0_inputs/culled_picks_vbounds/k2/stations_all.csv",
+                 f"{E}/{net}/tomo/1_velocity_maps/0_inputs/configs/stations.csv",
+                 f"{E}/{net}/tomo/1_velocity_maps/inputs/stations.csv"]
+        sf = next((c for c in cands if os.path.exists(c)), None)
+        if sf is None:
+            raise SystemExit("no station file found for %s; tried:\n  %s"
+                             % (net, "\n  ".join(cands)))
+        print(f"  bbox from {sf}")
+        st = np.genfromtxt(sf, delimiter=",", names=True)
         lo, la = st["longitude"], st["latitude"]
         pad = pad + 0.02        # stations under-span the grid slightly; widen
     return (lo.min() - pad, lo.max() + pad, la.min() - pad, la.max() + pad)
@@ -50,8 +61,12 @@ def stage_gk500(net):
     lo0, lo1, la0, la1 = net_bbox(net)
     bb = box(lo0, la0, lo1, la1)
     out_lines, out_type = [], []
-    # LI_Accident_tecto = faults/thrusts (attribute TYPE_AT distinguishes), LI_Axes = fold axes
-    for shp, kind_default, attr in (("LI_Accident_tecto_wgs84.shp", "fault", "TYPE_AT"),
+    # LI_Accident_tecto = faults/thrusts, LI_Axes = fold axes. The attribute naming the kind
+    # is 'Type' in the FR GK500 delivery (values "Faille", "Chevauchement"); the older
+    # 'TYPE_AT' guess silently matched nothing, so EVERY line fell back to "fault" and no
+    # thrust was ever drawn. Try the known names in order.
+    ATTRS = ("Type", "TYPE_AT", "TYPE", "type")
+    for shp, kind_default, attr in (("LI_Accident_tecto_wgs84.shp", "fault", ATTRS),
                                     ("LI_Axes_de_struct_wgs84.shp", "axis", None)):
         fp = os.path.join(GK500, shp)
         if not os.path.exists(fp):
@@ -60,10 +75,13 @@ def stage_gk500(net):
         g = gpd.read_file(fp)
         g = g[g.intersects(bb)]
         print(f"  {shp}: {len(g)} features in bbox; columns: {list(g.columns)[:8]}")
+        col = next((c for c in (attr or ()) if c in g.columns), None)
+        if attr and col is None:
+            print(f"    WARNING: none of {attr} present -- all lines typed '{kind_default}'")
         for _, row in g.iterrows():
             kind = kind_default
-            if attr and attr in row and isinstance(row[attr], str):
-                t = row[attr].lower()
+            if col is not None and isinstance(row[col], str):
+                t = row[col].lower()
                 kind = "thrust" if ("chevauch" in t or "thrust" in t) else "fault"
             geom = row.geometry.intersection(bb)
             geoms = getattr(geom, "geoms", [geom])

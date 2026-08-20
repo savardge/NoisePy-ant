@@ -58,9 +58,29 @@ WELLS = {
                ("Leuggern", 47.589033, 8.205224, 1689), ("Kaisten", 47.539828, 8.031539, 1306),
                ("Schafisheim", 47.369472, 8.148685, 2006), ("Weiach-1", 47.563788, 8.458407, 2482),
                ("Weiach-2", 47.565144, 8.453530, 2013), ("Benken", 47.644915, 8.649547, 1007)],
+    # GVL-1 (Geo-Energie Suisse exploration well). NOTE it has stratigraphy but NO sonic/Vp/Vs
+    # log, so a Vs comparison there is against formation tops, not a velocity curve --
+    # see gvl1_stratigraphy_compare.py.
+    # swisstopo "Deep wells" record (verified 2026-08-16). Registered name is GLOVELIER-1;
+    # searching the local ch.swisstopo.geologie-bohrungen_tiefer_500 copy for it fails because
+    # that copy PREDATES the well (spudded 22.05.2024, completed 24.08.2024).
+    #   E 2583491.08  N 1242491.79 (LV95) = 7.22020E 47.33308N  -> matches GVL-1.shp to 0.3 m
+    #   ground elevation 494.2 m a.s.l.; 4041.5 m MD / 4005.9 m TVD; TD in Kristallin
+    # Depth here is TVD, which is what the inversion depth axis means.
+    "hautesorne": [("GVL-1", 47.33308, 7.22020, 4006)],
 }
 NAGRA_VP = "/Users/genevievesavard/Data/aargau/nagra-wells-vp"   # {well}-geoIntervalVp.csv (Vp,depth)
-MICHEL_MODEL = "/Volumes/T7Shield/riehen/well-data/Michel2016_gpdc.model"
+# Riehen in-situ Vs. The T7Shield copy is the original, but that drive is usually unmounted
+# and this is the project's ONLY true Vs ground truth (the aargau overlays are interval Vp with
+# an assumed Vp/Vs, which spans 1.5-3.4 km/s and cannot discriminate a 0.2 km/s difference).
+# So fall back to the OneDrive copy rather than silently dropping the overlay.
+_MICHEL_CANDIDATES = [
+    "/Volumes/T7Shield/riehen/well-data/Michel2016_gpdc.model",
+    os.path.expanduser("~/Library/CloudStorage/OneDrive-LumidasInc/Switzerland/matlab-swant/"
+                       "scripts/vs_depth_inversion/riehen/Michel2016_gpdc.model"),
+]
+MICHEL_MODEL = next((p for p in _MICHEL_CANDIDATES if os.path.exists(p)),
+                    _MICHEL_CANDIDATES[0])
 VPVS_RATIOS = [(1.73, "tab:orange", "--"), (1.90, "tab:purple", ":"), (2.50, "tab:brown", "-.")]
 
 

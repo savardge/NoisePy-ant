@@ -16,6 +16,14 @@ Example:
     --outdir .../riehen/tomo/vs_inversion/grid --n-workers 12 \
     --bayhunter-python /opt/anaconda3/envs/bayhunter/bin/python \
     --bayhunter-runner run_bayhunter_cell.py
+
+Dinver (Geopsy NA, SWinvert workflow) is a second engine behind the same plumbing:
+  --engine dinver [--dinver-bin ... --dinver-ns 50000 --dinver-ntrials 3 ...]
+Same task list, skip-if-exists, sharding and assembly; the runner is run_dinver_cell.py in
+THIS interpreter (needs swprepost + disba, e.g. das-ambient-noise). Keep engines in separate
+--outdir trees. Note dinver's per-cell cost is orders of magnitude above BayHunter's at the
+SWinvert defaults (~1.2 M models/cell) -- measure on one cell before sizing a grid, and set
+--cell-timeout accordingly.
 """
 import argparse
 import json
@@ -33,11 +41,20 @@ from profile_vs_inversion import coverage_grid
 
 
 def invert_one(task):
-    """Write curves+config for one (cell, waveset) and run the BayHunter subprocess."""
+    """Write curves+config for one (cell, waveset) and run the engine subprocess.
+
+    Engine is cfg_common["_engine"]: "bayhunter" (default, run_bayhunter_cell.py in its own
+    conda env) or "dinver" (run_dinver_cell.py, SWinvert workflow). The two differ ONLY in how
+    the config is laid out -- BayHunter takes `curves` + `curves_phase` keyed by base wave, the
+    Dinver runner one `curves` dict keyed by CURVE KEY ("fund" / "fund_phase") -- everything
+    else here (skip-if-exists, timeout, teardown-crash classification, work-dir cleanup) is
+    shared, so the SLURM plumbing around this function is engine-agnostic.
+    """
     cell, cell_ph, waves, out_npz, workdir, bh_py, runner, cfg_common = task
     if os.path.exists(out_npz):
         return (cell.ix, cell.iy, waves, "skip", 0.0)
     os.makedirs(workdir, exist_ok=True)
+    engine = cfg_common.get("_engine", "bayhunter")
     curvefiles, phasefiles = {}, {}
     for w in waves:
         if cell.has(w) and len(cell.curves[w][0]) >= 4:
@@ -52,11 +69,36 @@ def invert_one(task):
             phasefiles[w] = fp
     if not curvefiles and not phasefiles:    # love-only cells have no "fund"; only skip if NOTHING
         return (cell.ix, cell.iy, waves, "no-data", 0.0)
-    cfg = dict(curves=curvefiles, out_npz=out_npz,
-               savepath=os.path.join(workdir, "bh_results"),
-               cell=[cell.ix, cell.iy, cell.lon, cell.lat], **cfg_common)
-    if phasefiles:
-        cfg["curves_phase"] = phasefiles     # joint group+phase (runner: keys become *_phase)
+    shared = {k: v for k, v in cfg_common.items() if not k.startswith("_")}
+    if engine == "dinver":
+        dcfg = dict(cfg_common.get("_dinver", {}))
+        size_only = bool(dcfg.pop("size_only_phase", False))
+        if size_only and not curvefiles:
+            return (cell.ix, cell.iy, waves, "no-data", 0.0)   # phase was for sizing only
+        # one dict keyed by curve key; the runner tags Group/Phase from the key itself
+        curves = dict(curvefiles)
+        if not size_only:
+            curves.update({f"{w}_phase": p for w, p in phasefiles.items()})
+        # SWinvert layering is sized on the fundamental PHASE wavelength; use the phase cell
+        # whenever the run has one (joint or --measure phase), else group U*T with a warning.
+        from noisepy import dinver_target as dt
+        src = vi.CellData(ix=cell.ix, iy=cell.iy)
+        src.curves.update(cell.curves)
+        if cell_ph is not None:
+            src.curves.update({f"{w}_phase": c for w, c in cell_ph.curves.items()})
+        rayleigh = any(vi.parse_curve_key(w)[0] in ("fund", "overtone") for w in curves)
+        prefer, fallback = ("fund_phase", "fund") if rayleigh else ("love_phase", "love")
+        wmin_m, wmax_m, wsrc = dt.wavelength_range(src, prefer=prefer, fallback=fallback)
+        cfg = dict(curves=curves, out_npz=out_npz, workdir=workdir,
+                   cell=[cell.ix, cell.iy, cell.lon, cell.lat],
+                   wmin_m=wmin_m, wmax_m=wmax_m, wavelength_source=wsrc,
+                   depth_max=shared["depth_max"], vs_bounds=shared["vs_bounds"], **dcfg)
+    else:
+        cfg = dict(curves=curvefiles, out_npz=out_npz,
+                   savepath=os.path.join(workdir, "bh_results"),
+                   cell=[cell.ix, cell.iy, cell.lon, cell.lat], **shared)
+        if phasefiles:
+            cfg["curves_phase"] = phasefiles     # joint group+phase (runner: keys become *_phase)
     cfgpath = os.path.join(workdir, "config.json")
     with open(cfgpath, "w") as f:
         json.dump(cfg, f)
@@ -89,7 +131,13 @@ def invert_one(task):
         status = "timeout"
     # the per-cell work dir holds ~90 MB of raw BayHunter chain storage; the result npz has
     # everything downstream needs, so drop the work dir to keep the grid's disk footprint flat.
-    shutil.rmtree(workdir, ignore_errors=True)
+    # EXCEPT a dinver cell that did not finish: its work dir holds the per-(param, trial)
+    # best-100 caches (~100 KB each) that make the runner resume where it stopped -- a cell is
+    # 24 runs of ~20 min on the cluster, and deleting them on a timeout threw away ~370 core-h
+    # in the first Riehen submission. Only a stale .report.part (<=560 MB) can linger, and
+    # the next attempt overwrites it (-f).
+    if status == "ok" or engine != "dinver":
+        shutil.rmtree(workdir, ignore_errors=True)
     return (cell.ix, cell.iy, waves, status, time.time() - t0)
 
 
@@ -175,6 +223,18 @@ def main():
     ap.add_argument("--radial-prior", default="-0.35,0.35")
     ap.add_argument("--vpvs-range", default=None,
                     help="'lo,hi' -> free Vp/Vs (recipe: 1.5,3.5); default fixed 1.73")
+    ap.add_argument("--mode-gate-phase", default=None, metavar="PHASE_ROOT",
+                    help="KINEMATIC mode-identification gate: drop (cell, period) samples whose "
+                         "GROUP pick has U >= c against the phase maps at PHASE_ROOT. Normal "
+                         "dispersion forbids U >= c, and those samples are where the "
+                         "'fundamental' has landed on a higher-mode branch. Parameter-free.")
+    ap.add_argument("--mode-gate-overtone", default=None, metavar="GROUP_ROOT",
+                    help="BRANCH-ORDER gate: also drop samples with U >= U_overtone from the "
+                         "overtone maps at GROUP_ROOT. Rigorous for Rayleigh; for Love the only "
+                         "reference is the RAYLEIGH overtone, so treat it as a heuristic.")
+    ap.add_argument("--mode-gate-margin", type=float, default=1.0,
+                    help="drop if U >= margin*reference; 1.0 (default) removes only the "
+                         "strictly impossible, <1 also trims near-misses")
     ap.add_argument("--use-mp", action="store_true",
                     help="fork-multiprocess the chains INSIDE each cell's BayHunter subprocess "
                          "(validated: posterior statistically identical to serial). Size "
@@ -182,8 +242,55 @@ def main():
     ap.add_argument("--mp-nthreads", type=int, default=0,
                     help="worker processes per cell for --use-mp (0 = BayHunter default "
                          "cpu_count; set = --n-chains so all chains run concurrently)")
-    ap.add_argument("--bayhunter-python", required=True)
-    ap.add_argument("--bayhunter-runner", required=True)
+    ap.add_argument("--engine", choices=("bayhunter", "dinver"), default="bayhunter",
+                    help="per-cell engine. dinver = Geopsy NA via the SWinvert workflow "
+                         "(run_dinver_cell.py); group/phase/joint follows --measure/--phase-root "
+                         "exactly as for BayHunter. Use a SEPARATE --outdir per engine.")
+    ap.add_argument("--bayhunter-python", default=None, help="required for --engine bayhunter")
+    ap.add_argument("--bayhunter-runner", default=None, help="required for --engine bayhunter")
+    # ---- Dinver (SWinvert; same knobs as run_vs_inversion.py) --------------------------------
+    ap.add_argument("--dinver-bin", default=vi.DINVER_BIN_DEFAULT,
+                    help="dinver executable (cluster: $EBROOTGEOPSY/bin/dinver)")
+    ap.add_argument("--dinver-runner", default=None,
+                    help="run_dinver_cell.py (default: next to this script)")
+    ap.add_argument("--dinver-python", default=None,
+                    help="interpreter for the runner (default: this one; needs swprepost+disba)")
+    ap.add_argument("--dinver-lns", default="3,4,5,7")
+    ap.add_argument("--dinver-lrs", default="3.0,2.0,1.5,1.2")
+    ap.add_argument("--dinver-ntrials", type=int, default=3)
+    ap.add_argument("--dinver-ns", type=int, default=50_000)
+    ap.add_argument("--dinver-nr", type=int, default=100)
+    ap.add_argument("--dinver-ns0", type=int, default=10_000)
+    ap.add_argument("--dinver-n-pool", type=int, default=100)
+    ap.add_argument("--dinver-depth-factor", type=float, default=2.0)
+    ap.add_argument("--dinver-rho", type=float, default=2000.0)
+    ap.add_argument("--dinver-pr", default="0.2,0.35", help="Poisson range; crustal default, see run_vs_inversion.py")
+    ap.add_argument("--dinver-vp", default="0.8,8.0")
+    ap.add_argument("--dinver-jobs", type=int, default=1)
+    ap.add_argument("--dinver-min-cov", type=float, default=0.05)
+    ap.add_argument("--dinver-size-phase-root", default=None, metavar="PHASE_ROOT",
+                    help="GROUP-only dinver runs: load this phase production root ONLY to size "
+                         "the SWinvert layering from the fundamental PHASE wavelength (lmin/3, "
+                         "lmax/df); phase curves are NOT inverted. Without it a group-only run "
+                         "sizes from group U*T, ~30%% shallower (Basel-1: 4.7 vs 6.1 km). "
+                         "Mutually exclusive with --phase-root.")
+    ap.add_argument("--work-tag", choices=("task", "cell"), default="task",
+                    help="work-dir layout: 'task' = per Slurm task (race-safe, boosters OK, no "
+                         "cross-submission resume); 'cell' = one dir per cell under "
+                         "<outdir>/work/ so a dinver cell killed by a timeout or walltime "
+                         "resumes from its per-run caches on resubmission. NEVER run two "
+                         "arrays on the same outdir with 'cell'.")
+    ap.add_argument("--dinver-report-dir", default=None, metavar="DIR",
+                    help="node-local dir for dinver's transient ~560 MB .report (e.g. $TMPDIR). "
+                         "On BeeGFS with ~200 concurrent cells the runs were I/O-bound (20 min "
+                         "for a 3-layer run). Only the ~100 KB best-100 caches go to the work dir.")
+    ap.add_argument("--dinver-lean", action="store_true",
+                    help="write the per-cell npz with percentiles only: predicted curves as "
+                         "(2.5,16,50,84,97.5) percentile rows instead of one row per model, and "
+                         "no ens_vs/ens_misfit/ens_param. ~50 KB/cell instead of ~600 KB. "
+                         "compare_engines/data_misfit/assemble read it unchanged; the per-model "
+                         "diagnostics (dinver_diagnostics.py) do not apply.")
+    ap.add_argument("--dinver-n-resample", type=int, default=30)
     ap.add_argument("--shard", default=None,
                     help="'i/N': process only task slice tasks[i::N] (SLURM array fan-out). "
                          "All shards write to the shared cells/ dir; run --assemble-only after.")
@@ -191,9 +298,25 @@ def main():
                     help="skip stitching cells/ into volume_*.npz (use on array workers)")
     ap.add_argument("--assemble-only", action="store_true",
                     help="skip inversion; only stitch existing cells/*.npz into volume_*.npz")
+    ap.add_argument("--reverse", action="store_true",
+                    help="walk the task list back-to-front. Lets a second ('booster') array "
+                         "chew the same outdir from the opposite end while the main array runs "
+                         "forward: skip-if-exists keeps them from redoing each other's cells, "
+                         "and they only meet in the middle at the very end.")
     args = ap.parse_args()
     celldir = os.path.join(args.outdir, "cells")
-    workroot = os.path.join(args.outdir, "work")
+    # Work dirs are PER TASK, not shared. Two workers racing on the same cell would otherwise
+    # interleave in one scratch dir (config.json, disp_*.txt, bh_results) and corrupt each
+    # other's inputs. With separate dirs the loser simply redoes work, and the atomic npz
+    # write means whichever finishes last replaces an equivalent file. This is what makes
+    # over-provisioning (a booster array on idle short-walltime nodes) safe.
+    _tag = (f"{os.environ['SLURM_ARRAY_JOB_ID']}_{os.environ.get('SLURM_ARRAY_TASK_ID', '0')}"
+            if os.environ.get("SLURM_ARRAY_JOB_ID") else str(os.getpid()))
+    # --work-tag cell: ONE work dir per cell, shared across submissions, so a resubmitted
+    # array resumes a half-done dinver cell from its caches. The price is the race-safety
+    # above: never over-provision (booster) an arm that uses it.
+    workroot = os.path.join(args.outdir, "work", _tag if args.work_tag == "task" else "")
+    workroot = workroot.rstrip("/")
     os.makedirs(celldir, exist_ok=True)
 
     want = [w.strip() for w in args.wavesets.split(",") if w.strip()]
@@ -260,6 +383,36 @@ def main():
     if args.use_mp:
         cfg_common["use_mp"] = True
         cfg_common["mp_nthreads"] = args.mp_nthreads
+    # ---- engine selection: interpreter + runner + engine-private config ---------------------
+    cfg_common["_engine"] = args.engine
+    if args.engine == "dinver":
+        import sys
+        if args.radial or args.vpvs_range or args.noise_regime != "free":
+            raise SystemExit("--engine dinver: --radial / --vpvs-range / --noise-regime are "
+                             "BayHunter-only (Dinver has free Poisson's ratio, no zeta, no "
+                             "hierarchical noise)")
+        eng_py = args.dinver_python or sys.executable
+        eng_runner = args.dinver_runner or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "run_dinver_cell.py")
+        cfg_common["_dinver"] = dict(
+            dinver_bin=args.dinver_bin,
+            lns=[int(x) for x in args.dinver_lns.split(",")],
+            lrs=[float(x) for x in args.dinver_lrs.split(",")],
+            ntrials=args.dinver_ntrials, ns=args.dinver_ns, nr=args.dinver_nr,
+            ns0=args.dinver_ns0, n_pool=args.dinver_n_pool,
+            depth_factor=args.dinver_depth_factor, n_resample=args.dinver_n_resample,
+            min_cov=(args.dinver_min_cov or None),
+            vp_bounds=[float(x) for x in args.dinver_vp.split(",")],
+            pr_bounds=[float(x) for x in args.dinver_pr.split(",")], rho=args.dinver_rho,
+            jobs=args.dinver_jobs, seed0=1, keep_reports=False, lean=bool(args.dinver_lean),
+            report_dir=args.dinver_report_dir,
+            size_only_phase=bool(args.dinver_size_phase_root))
+        if args.dinver_size_phase_root and args.phase_root:
+            raise SystemExit("--dinver-size-phase-root and --phase-root are mutually exclusive")
+    else:
+        if not (args.bayhunter_python and args.bayhunter_runner):
+            raise SystemExit("--engine bayhunter needs --bayhunter-python and --bayhunter-runner")
+        eng_py, eng_runner = args.bayhunter_python, args.bayhunter_runner
 
     # build tasks; overtone restricted to T>=overtone-min-t for the fundot waveset, then the
     # per-cell reliability criterion trims each curve to its well-resolved periods.
@@ -284,6 +437,7 @@ def main():
     # (bases_ph -> curves_phase -> phase targets in the runner) and the group slot stays an
     # empty CellData that only carries the cell coords.
     bases, bases_ph = {}, {}
+    gate_report = {}
     for (ix, iy) in cells_ij:
         if args.measure == "phase":
             base = vi.CellData(ix=int(ix), iy=int(iy))
@@ -298,10 +452,20 @@ def main():
                                        wave_roots=wave_roots)
             if pr_group:
                 base = vi.restrict_periods(base, pr_group)
-            if args.phase_root:
+            # mode-identification gate: remove GROUP samples that cannot be the branch they
+            # claim to be. Applied AFTER the period-range trim so the band decision stands and
+            # this only removes what is physically impossible within it.
+            if args.mode_gate_phase or args.mode_gate_overtone:
+                base = vi.mode_id_gate(base, ix, iy,
+                                       phase_root=args.mode_gate_phase,
+                                       overtone_root=args.mode_gate_overtone,
+                                       waves=load_waves, wave_roots=wave_roots,
+                                       margin=args.mode_gate_margin, report=gate_report)
+            size_root = getattr(args, "dinver_size_phase_root", None)
+            if args.phase_root or size_root:
                 ph_roots = {"love": args.love_phase_root} if (need_love and args.love_phase_root) \
                     else None
-                ph = vi.load_cell_curves(args.phase_root, ix, iy, waves=load_waves,
+                ph = vi.load_cell_curves(args.phase_root or size_root, ix, iy, waves=load_waves,
                                          wave_roots=ph_roots)
                 if pr_phase:
                     ph = vi.restrict_periods(ph, pr_phase)
@@ -309,6 +473,11 @@ def main():
                 bases_ph[(ix, iy)] = ph
         vi.attach_cell_coords(base, args.config)
         bases[(ix, iy)] = base
+    if gate_report:
+        print("mode-identification gate (dropped / judged samples):", flush=True)
+        for (w, meas), (bad, tot) in sorted(gate_report.items()):
+            print(f"    {w:<10} vs {meas:<9} {bad:>7} / {tot:<7} "
+                  f"({100.0 * bad / max(tot, 1):.1f}%)", flush=True)
 
     # ---- criterion 2: per-(cell, period) group mask from the pick tables, built ONCE --------
     c2_tables = {}
@@ -393,7 +562,11 @@ def main():
             out_npz = os.path.join(celldir, f"cell_{ix}_{iy}_{wskey}.npz")
             wd = os.path.join(workroot, f"{ix}_{iy}_{wskey}")
             tasks.append((cell, cell_ph_ws, wavesets[wskey], out_npz, wd,
-                          args.bayhunter_python, args.bayhunter_runner, cfg_common))
+                          eng_py, eng_runner, cfg_common))
+
+    if args.reverse:
+        tasks = tasks[::-1]
+        print(f"--reverse: walking {len(tasks)} tasks back-to-front", flush=True)
 
     # SLURM-array fan-out: this task processes a deterministic disjoint slice. The full task
     # list is identical across shards (cells_ij is np.where order), so tasks[i::N] partitions it.
@@ -434,11 +607,28 @@ def assemble_volume(celldir, wavesets, outdir):
         dep = None
         ij, lonlat, xy, med, p16, p84, p025, p975, chi_f, chi_o, chi_l, nlay = \
             ([] for _ in range(12))
+        # radial anisotropy: gamma(z)=(Vsh-Vsv)/Vsv and the Voigt-referenced zeta are the whole
+        # point of a --radial run, so stack them alongside Vs instead of leaving them reachable
+        # only per cell. Isotropic runs carry the same keys filled with NaN -- stacking those is
+        # harmless and keeps every volume the same shape.
+        aniso_keys = ("gamma_median", "gamma_p16", "gamma_p84", "gamma_p_pos",
+                      "zeta_median", "zeta_p16", "zeta_p84")
+        aniso = {k: [] for k in aniso_keys}
+        # per-cell depth reach. Figures MUST mask below z_reliable_max ("the ring fix"): below
+        # its data reach the trans-D posterior parsimoniously extends the last constrained
+        # velocity downward, painting an unphysical slow ring at depth. Carrying it here keeps
+        # the figure scripts independent of the per-cell tree (which stays on scratch).
+        zrel = {"z_reliable_min": [], "z_reliable_max": []}
         for f in files:
             try:
                 r = vi.load_result(f)
             except Exception:
                 continue
+            for k in aniso_keys:
+                if k in r:
+                    aniso[k].append(np.asarray(r[k], float))
+            for k in zrel:
+                zrel[k].append(float(r[k]) if k in r else np.nan)
             dep = r["depth"]
             ix, iy = (int(v) for v in r.get("cell_ixiy", (-1, -1)))
             lon, lat = (float(v) for v in r.get("cell_lonlat", (np.nan, np.nan)))
@@ -446,17 +636,25 @@ def assemble_volume(celldir, wavesets, outdir):
             med.append(r["vs_median"]); p16.append(r["vs_p16"]); p84.append(r["vs_p84"])
             p025.append(r["vs_p025"]); p975.append(r["vs_p975"])
             nlay.append(float(np.mean(r.get("n_layers_post", [np.nan]))))
+            # A phase-only run stores its curves under "<wave>_phase", so looking up the bare
+            # wave name leaves chi_* entirely NaN and silently drops the misfit QC column from
+            # every phase volume. A config is group OR phase, never both, so falling back to
+            # the _phase key keeps one column per wave whatever the measure.
             mis = vi.data_misfit(r)
-            chi_f.append(mis.get("fund", np.nan)); chi_o.append(mis.get("overtone", np.nan))
-            chi_l.append(mis.get("love", np.nan))
+            chi_f.append(mis.get("fund", mis.get("fund_phase", np.nan)))
+            chi_o.append(mis.get("overtone", mis.get("overtone_phase", np.nan)))
+            chi_l.append(mis.get("love", mis.get("love_phase", np.nan)))
         out = os.path.join(outdir, f"volume_{wskey}.npz")
+        extra = {k: np.array(v) for k, v in aniso.items() if len(v) == len(ij)}
+        extra.update({k: np.array(v) for k, v in zrel.items() if len(v) == len(ij)})
         np.savez_compressed(out, depth=dep, cells=np.array(ij), lonlat=np.array(lonlat),
                             vs_median=np.array(med), vs_p16=np.array(p16), vs_p84=np.array(p84),
                             vs_p025=np.array(p025), vs_p975=np.array(p975),
                             chi_fund=np.array(chi_f), chi_overtone=np.array(chi_o),
                             chi_love=np.array(chi_l),
-                            n_layers=np.array(nlay), waveset=wskey)
-        print(f"wrote {out}: {len(ij)} cells", flush=True)
+                            n_layers=np.array(nlay), waveset=wskey, **extra)
+        print(f"wrote {out}: {len(ij)} cells"
+              + (f" (+{len(extra)} anisotropy arrays)" if extra else ""), flush=True)
 
 
 if __name__ == "__main__":

@@ -53,3 +53,37 @@ resubmitted with the same command.
 The conda env (`bayhunter_aniso`, py3.10/numpy1.24 + BayHunter_Aniso fork + disba +
 swtomotv) was built by `~/vs_prod3_setup/build_env.sbatch`; verify with
 `python ~/BayHunter_Aniso/check_deploy.py` and the `LoveDispersionGroup` import.
+
+## Dinver (SWinvert) arm — `dinver_vs.sbatch`, `submit_dinver.sh`, `smoke_dinver.sh`
+
+Sibling of the vs_prod3 campaign, same sharding/resume semantics, outputs under
+`~/scratch/vs_dinver/{runs/<net>/<cfg>/cells,logs}` (inputs symlinked to vs_prod3's — no copy).
+
+```
+./smoke_dinver.sh riehen R0gR1g      # 1 cell, ns=500, debug-cpu, writes to smoke/ only
+./submit_dinver.sh riehen R0gR1g     # 32 shards x 24 cpus, %8 throttle, + dependent assemble
+```
+
+- Engine: `module load GCC/11.3.0 OpenMPI/4.1.4 geopsy/3.4.2` (`activate_dinver`), `dinver -j 1`,
+  runner in `bayhunter_aniso` (numpy/disba + `pip install swprepost`, done on a compute node).
+- One task = 24 cells running concurrently, each walking 8 params x 3 trials x 60 000 models
+  (~2.7 core-h/cell locally). Riehen R0gR1g = 4355 cells ≈ 12 000 core-h; a 32-shard array of
+  ~136 cells at 24-wide is ~1 day of wall per shard.
+- **Strict-minimum outputs**: `--dinver-lean` (percentile-only npz, ~50 KB/cell, no ensembles),
+  reports deleted after the best-100 extraction, per-cell work dir removed on completion.
+  Transient disk per running cell ≤ 1 report (~560 MB) → ≤ ~13 GB per task.
+- Sizing: `--dinver-size-phase-root $PHASE_PROD` sizes the SWinvert layering from the
+  fundamental PHASE λ without inverting phase (group U·T would put dmax ~30 % too shallow).
+- Priors per network are in the sbatch (`DMAX`/`VSMAX`); ν 0.2–0.35 is the runner default.
+- **First submission post-mortem (2026-08-19).** dinver streams a ~560 MB `.report` per run;
+  with 192 cells writing to BeeGFS a 3-layer run took 1120–1320 s (vs 325–355 s locally), every
+  cell hit the 6 h `--cell-timeout`, and the driver deleted the work dir on timeout — 1150
+  core-h for 3 cells. Measured A/B on one node, same run: `/tmp` 509 s vs BeeGFS 642 s
+  (uncontended). Fixes now in `dinver_vs.sbatch`: `--dinver-report-dir $TMPDIR` (transient
+  report on node-local disk, only the ~100 KB caches touch scratch), `--work-tag cell` + keep
+  the work dir on timeout/error (per-(param,trial) resume across submissions — so **no booster
+  arrays on this arm**), `CELL_TIMEOUT` 24 h as a soft bound. Expect ~520 s/run, ~3.5 h/cell,
+  ~23 h per 24-cpu shard for Riehen. A second cause, `overtone: resampled target is invalid`,
+  was the log-λ resample producing unordered frequencies on steep group curves even when λ(T)
+  is monotone — `to_modal_target` now validates and falls back to log-frequency; verified on
+  all 8 601 curves of the 4 355 Riehen cells.

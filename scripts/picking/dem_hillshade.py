@@ -16,7 +16,22 @@ def load_dem(path, bbox=None, pad=0.02):
         if bbox is not None:
             lon0, lon1, lat0, lat1 = bbox
             win = from_bounds(lon0 - pad, lat0 - pad, lon1 + pad, lat1 + pad, d.transform)
-            elev = d.read(1, window=win).astype(float)
+            # BOUNDLESS. A plain read() silently CLIPS a window that runs off the raster
+            # (Haute-Sorne asks for lon 6.87 but tile N47E007 starts at 7.00, so col_off was
+            # -400 and 1599 of 1999 columns came back) while window_transform() still returns
+            # the transform of the FULL requested window -- the short array then gets labelled
+            # with the wide extent and every feature is displaced. Measured: 0.111 deg =
+            # 8.35 km of eastward shift in the hautesorne hillshade. Reading boundless keeps
+            # array and extent consistent and marks the uncovered strip as nodata.
+            b = d.bounds
+            if (lon0 - pad < b.left or lon1 + pad > b.right
+                    or lat0 - pad < b.bottom or lat1 + pad > b.top):
+                print(f"  load_dem: requested bbox exceeds {path} "
+                      f"({b.left:.3f}..{b.right:.3f}, {b.bottom:.3f}..{b.top:.3f}); "
+                      f"reading boundless, uncovered area = nodata")
+            elev = d.read(1, window=win, boundless=True,
+                          fill_value=(d.nodata if d.nodata is not None else -32768)
+                          ).astype(float)
             t = d.window_transform(win)
             h, w = elev.shape
             left, top = t * (0, 0)

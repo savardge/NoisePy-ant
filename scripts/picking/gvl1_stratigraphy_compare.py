@@ -13,9 +13,10 @@ can honestly be tested against tops:
      increases with depth as the lithology implies (carbonate/evaporite over clastics over
      Permo-Carboniferous over crystalline basement).
 
-Depth convention: tops are MEASURED depth in m below ground; GVL-1's upper section is
-near-vertical so MD ~ TVD, and the inversion depth grid is TVD in km below surface. The
-comparison is therefore approximate at the 10-m level, far below the inversion's resolution.
+Depth convention: the spreadsheet tops are MEASURED depth; the inversion depth grid is TVD
+below surface. swisstopo gives 4041.5 m MD / 4005.9 m TVD for Glovelier-1, so MD is converted
+to TVD by 0.9912 (tops move 9-20 m shallower -- below the 50 m depth grid, so no result
+changes). Ground elevation is 494.2 m a.s.l.; the DEM interpolates 505.5 m at this point.
 
 Usage:
   python gvl1_stratigraphy_compare.py                       # 6 km first pass
@@ -39,11 +40,19 @@ CCOL = {"R0gL0g": "tab:blue", "R0pL0p": "tab:orange", "R0gL0gR0pL0p": "tab:green
 KEY_TOPS = ["Muschelkalk", "Buntsandstein", "Permo-Carboniferous", "Crystalline Basement"]
 
 
+# swisstopo Glovelier-1: 4041.5 m MD / 4005.9 m TVD -> the hole is near-vertical (0.9%
+# difference over 4 km). The spreadsheet tops are MEASURED depth; the inversion depth axis is
+# TVD, so convert. The shift is 9-20 m over the section of interest -- below the 50 m depth
+# grid, so no conclusion moves, but the axes should still mean the same thing.
+MD_TO_TVD = 4005.9 / 4041.5
+GROUND_ELEV_M = 494.2          # swisstopo; the DEM interpolates 505.5 m here (+11.3 m)
+
+
 def load_strat():
     g = pd.read_excel(STRAT, sheet_name="Groups")
     g = g.rename(columns={"MD Top [m]": "top_m", "MD Base [m]": "base_m"})
-    g["top_km"] = g.top_m / 1000.0
-    g["base_km"] = g.base_m / 1000.0
+    g["top_km"] = g.top_m * MD_TO_TVD / 1000.0
+    g["base_km"] = g.base_m * MD_TO_TVD / 1000.0
     return g
 
 
@@ -128,12 +137,17 @@ def main():
                     fontsize=7.5, rotation=0)
     ax.set_xticks([]); ax.set_ylabel("depth [km]")
     ax.set_title("GVL-1 stratigraphy\n(groups; NO velocity log exists)", fontsize=9.5)
+    ax.set_xlim(0, 1)
 
-    zmax_fig = 6.0
+    # depth axis follows the RUNS, not a constant: the 8 km re-runs were being clipped to
+    # 6 km by a hardcoded limit, hiding a quarter of the profile.
+    any_npz = glob.glob(f"{EHM}/hautesorne/tomo/2_vs_depth_inversion/tests/"
+                        f"{a.iso_tag}/GVL1_cell_*/*/bayhunter_result.npz")
+    zmax_fig = float(np.load(any_npz[0], allow_pickle=True)["depth"].max())
     for k, mode in enumerate(("iso", "radial")):
         ax = axs[1 + k]
-        for g_ in S.itertuples():
-            ax.axhspan(g_.top_km, g_.base_km, color=g_._6 if False else "none")
+        for g_ in S.itertuples():          # faint lithology bands behind the profiles
+            ax.axhspan(g_.top_km, min(g_.base_km, zmax_fig), color=g_._6, alpha=0.13, zorder=0)
         for t in key:
             ax.axhline(t, color="0.35", ls="--", lw=1.1, zorder=1)
         for combo in COMBOS:
