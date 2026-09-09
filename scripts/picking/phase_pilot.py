@@ -87,7 +87,7 @@ def process_pair(path, cref):
         return []
     try:
         c0, c1 = dispersion.phase_corrected_components(tr["ZZ"], tr["RR"], tr["RZ"], tr["ZR"])
-        sig = {"G_LR0": dispersion.tf_pws(c0, dt), "G_LR1": dispersion.tf_pws(c1, dt)}
+        sig = {"G_LR0": dispersion.ts_pws(c0, dt), "G_LR1": dispersion.ts_pws(c1, dt)}
         rows = []
         for comp, wave in (("G_LR0", "fund"), ("G_LR1", "overtone")):
             cw = dispersion.compute_cwt(sig[comp], dist, dt, Tmin=Tmin, vmin=vmin,

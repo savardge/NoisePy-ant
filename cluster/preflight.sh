@@ -146,7 +146,7 @@ for fn in files:
                 blocks.append(acc / cnt)
     if len(blocks) < 6:
         continue
-    t0 = time.time(); dispersion.tf_pws(np.asarray(blocks), dt); tot += time.time() - t0
+    t0 = time.time(); dispersion.ts_pws(np.asarray(blocks), dt); tot += time.time() - t0
 n = max(len(nw), 1)
 per_pair = tot / n * 9.0          # one component timed; the build does 9
 print("  %-11s windows/pair ~%d | lag samples %d | %.2f s/pair/core (9 comps)"

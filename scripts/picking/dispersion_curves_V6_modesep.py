@@ -524,8 +524,8 @@ for stack_method in stack_methods:
             ccf["ZZ"][GLR_LAG], ccf["RR"][GLR_LAG], ccf["RZ"][GLR_LAG], ccf["ZR"][GLR_LAG],
             receiver_side_flip=GLR_RECEIVER_SIDE_FLIP)
         if GLR_STACK == 'tfpws':
-            g0 = dispersion.tf_pws(comps0, dt)
-            g1 = dispersion.tf_pws(comps1, dt)
+            g0 = dispersion.ts_pws(comps0, dt)
+            g1 = dispersion.ts_pws(comps1, dt)
         else:                                          # 'linear' = eqs (3)/(4) exactly
             g0 = np.sum(comps0, axis=0)
             g1 = np.sum(comps1, axis=0)

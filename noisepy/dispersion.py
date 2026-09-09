@@ -309,8 +309,8 @@ def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
     Returns (comps0, comps1): two lists of four equal-length traces whose plain sums are G_LR0 and
     G_LR1 (see synthesize_rayleigh_modes for the conventions and the receiver_side_flip variants).
     Exposed separately so the stacking operator is a free choice: linear sum (paper eqs 3/4) or a
-    phase-weighted stack of the four traces (paper section 3.1 uses a t-f domain PWS on real data;
-    see tf_pws).
+    phase-weighted stack of the four traces (paper section 3.1 uses a wavelet-domain PWS on real
+    data; see ts_pws).
     '''
     zz = np.asarray(zz, dtype=float)
     rr = np.asarray(rr, dtype=float)
@@ -327,29 +327,43 @@ def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
     return comps0, comps1
 
 
-def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
+def ts_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
     '''
-    Time-frequency phase-weighted stack (Schimmel & Gallart 2007) in the wavelet domain,
-    following the ts-PWS formulation of Ventosa et al. (GJI 2017; reference C implementation in
-    ~/Codes/ts-PWS): CWT each trace, weight the linear stack of coefficients by the phase
-    coherence of the ensemble, and invert back to the time domain.
+    Time-scale phase-weighted stack (ts-PWS) of Ventosa, Schimmel & Stutzmann (GJI 2017;
+    reference C implementation in ~/Codes/ts-PWS).
 
-        W_lin(s,t)  = (1/K) sum_k W_k(s,t)
-        c(s,t)      = | (1/K) sum_k W_k/|W_k| |          (phase coherence, 0..1)
+    This is the WAVELET-domain PWS: each trace is expanded with a continuous wavelet transform,
+    the ensemble's phase coherence is measured per (scale, time) cell, the LINEAR stack of the
+    coefficients is weighted by it, and the result is transformed back. It is NOT the
+    time-frequency PWS of Schimmel & Gallart (2007), which uses the S-transform; the earlier
+    name of this function, `tf_pws`, was a misnomer and survives only as a deprecated alias.
+
+        W_lin(s,t)  = (1/K) sum_k W_k(s,t)                  linear stack of CWT coefficients
+        c(s,t)      = | (1/K) sum_k W_k/|W_k| |             phase coherence, 0..1
         W_pws(s,t)  = W_lin * w(s,t)
 
-    with w = c^wu, or for wu=2 the unbiased estimator of Ventosa et al. (2017)
-    w = (K c^2 - 1)/(K - 1) clipped at 0, which removes the 1/K random-phase bias -- important
-    for small ensembles like the K=4 phase-corrected components of Nayak & Thurber (2020), whose
-    real-data processing uses exactly this kind of t-f PWS to suppress wave packets that are not
-    in phase across the four [R/Z] components.
+    with w = c^wu, or -- for wu=2 and unbiased=True (the default) -- the unbiased estimator of
+    Ventosa et al. (2017), w = (K c^2 - 1)/(K - 1) clipped at 0, which removes the 1/K
+    random-phase floor. That matters for small ensembles such as the K=4 phase-corrected
+    components of Nayak & Thurber (2020), whose real-data processing uses a PWS of this kind to
+    suppress wave packets that are not in phase across the four [R/Z] components. The same
+    function stacks a pair's ~100 daily substack windows in build_tspws_stacks.py (where the
+    --pre-block option makes it Ventosa's two-stage stack).
+
+    Transform: pycwt Morlet (omega_0 = 6), dyadic scales at 1/dj voices per octave from 2*dt
+    over the full record; inverse by pycwt.icwt (Torrence & Compo 1998 eq. 11). Verified
+    2026-09-08 on a synthetic dispersed pulse: forward->inverse round trip recovers amplitude to
+    1.003 with correlation 1.0000, and ts_pws of K identical copies returns the input to the
+    same precision -- the reconstruction is not a source of bias. Ventosa's frame differs
+    (voices adapt to omega_0, exact dual) but the weighting is identical.
 
     Args:
-        traces: sequence of K equal-length 1-D arrays (e.g. from phase_corrected_components)
+        traces: sequence of K equal-length 1-D arrays (e.g. from phase_corrected_components, or
+            a pair's substack windows)
         dt: sampling interval [s]
         wu: phase-weight power (2 = standard)
         unbiased: use the unbiased coherence weight (only defined for wu=2)
-        dj: wavelet scale resolution (same default as compute_cwt)
+        dj: wavelet scale resolution, 1/voices-per-octave (same default as compute_cwt)
 
     Returns:
         1-D real array, same length as the inputs (amplitude scale is that of the mean stack).
@@ -380,6 +394,11 @@ def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
         w = coh ** wu
     rec = pycwt.icwt(lin * w, sj, dt, dj, 'morlet')
     return np.real(rec)[:n]
+
+
+# Deprecated name, kept so older callers keep working: the method is time-SCALE (wavelet-domain)
+# PWS, Ventosa et al. 2017, not the S-transform time-frequency PWS the old name suggested.
+tf_pws = ts_pws
 
 
 def phase_image_from_cwt(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3.,

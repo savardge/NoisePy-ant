@@ -1,7 +1,7 @@
 # ts-PWS production chain on yggdrasil
 
 Moves the pipeline that was running on the laptop to Slurm. Produces, per network, the
-production pick tables: **tf-PWS stacks + substack-jackknife sigma**.
+production pick tables: **ts-PWS stacks + substack-jackknife sigma**.
 
 Everything is **skip-if-exists** at per-pair granularity, so any job that hits a time limit
 is fixed by resubmitting the identical command — nothing is recomputed and nothing is
@@ -66,7 +66,7 @@ It exits non-zero if anything blocking is wrong, and prints six sections:
 4. **Configs agree with `env.sh`** — including a hard check that no `/Users` or `/Volumes`
    laptop path survived.
 5. **Input substacks** — pair count per network and how many stacks already exist.
-6. **Per-pair cost probe** — times a real `tf_pws` on three pairs per network so you can
+6. **Per-pair cost probe** — times a real `ts_pws` on three pairs per network so you can
    re-derive the array widths below on actual hardware.
 
 **Sizing from the probe:** `tasks x cpus-per-task ≈ pairs x s_per_pair / target_seconds`.

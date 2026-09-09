@@ -51,7 +51,7 @@ control (+0.09) — a wrong sign would show a half-fringe offset. The old code c
 - Rayleigh: G_LR0 (fundamental, retrograde) / G_LR1 (1st higher, prograde) are synthesized from
   ZZ/RR/RZ/ZR via the ±π/2 phase corrections of Nayak & Thurber (2020) eqs 3/4
   (`dispersion.phase_corrected_components`) and combined with a t-f phase-weighted stack
-  (`dispersion.tf_pws`, Ventosa 2017). Needs two orthogonal components 90° apart (elliptical Z–R
+  (`dispersion.ts_pws`, Ventosa 2017). Needs two orthogonal components 90° apart (elliptical Z–R
   coupling).
 - Love is single-component SH — **no orthogonal partner exists, so no G_LR analog is possible even
   in principle.** Love fundamental/overtone separate only in the image/array domain: per-pair FTAN
@@ -75,7 +75,7 @@ stack's image at its (T, U) — Nayak & Thurber's core discriminating physics).
 Input: `Allstack_pws` H5 stacks (NoisePy-ant format), components ZZ/RR/RZ/ZR + TT + cross-terms
 TZ/ZT/RT/TR (Love SNR context). All picks on the **sym** lag fold.
 
-1. **Rayleigh**: fold → `phase_corrected_components` → `tf_pws` → G_LR0/G_LR1 traces →
+1. **Rayleigh**: fold → `phase_corrected_components` → `ts_pws` → G_LR0/G_LR1 traces →
    CWT (`compute_cwt`) → FTAN image (`disp_image_from_cwt`) for BOTH modes first (two-pass, so
    every pick can be checked against the other mode's image) → picks by `extract_dispersion`
    (argmax, segment-aware) AND `extract_curves_topology` → COI removal →

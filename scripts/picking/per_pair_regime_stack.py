@@ -210,7 +210,7 @@ for n, ip in enumerate(sel_pairs):
         try:
             c0, _c1 = dispersion.phase_corrected_components(sym["ZZ"], sym["RR"], sym["RZ"],
                                                             sym["ZR"])
-            g_lr0 = dispersion.tf_pws(c0, dt)
+            g_lr0 = dispersion.ts_pws(c0, dt)
         except Exception:
             g_lr0 = None
         for comp, sig in (("ZZ", sym["ZZ"]), ("TT", sym["TT"]), ("G_LR0", g_lr0)):

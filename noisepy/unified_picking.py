@@ -16,7 +16,7 @@ Theory note (why Love is not symmetric with Rayleigh):
     same +pi/4 shift as ZZ/RR (TT is an auto-component with NO cross-component 90-deg term). Wave type
     enters the library only through the scalar `phase_shift` and the callable `c_ref`.
   * Mode SEPARATION is fundamentally different. Rayleigh's G_LR0/G_LR1 synthesis
-    (phase_corrected_components + tf_pws) needs two orthogonal components 90 deg apart (elliptical Z-R
+    (phase_corrected_components + ts_pws) needs two orthogonal components 90 deg apart (elliptical Z-R
     coupling). Love is single-component SH; there is no orthogonal partner, hence NO G_LR analog. Love
     fundamental/overtone separate only in the image/array domain: here we pick TT ridges (argmax +
     topology) and LABEL them fundamental/overtone against data-derived Love reference curves. Where the
@@ -449,7 +449,7 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
             ccf["ZZ"][cfg.GLR_LAG], ccf["RR"][cfg.GLR_LAG], ccf["RZ"][cfg.GLR_LAG],
             ccf["ZR"][cfg.GLR_LAG], receiver_side_flip=cfg.GLR_RECEIVER_SIDE_FLIP)
         if cfg.GLR_STACK == "tfpws":
-            g0, g1 = dispersion.tf_pws(comps0, dt), dispersion.tf_pws(comps1, dt)
+            g0, g1 = dispersion.ts_pws(comps0, dt), dispersion.ts_pws(comps1, dt)
         else:
             g0, g1 = np.sum(comps0, axis=0), np.sum(comps1, axis=0)
         glr = {}

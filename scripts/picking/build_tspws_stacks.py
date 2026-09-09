@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build an `Allstack_tspws` stack tree from the substack windows, for production picking.
 
-Wavelet-domain phase-weighted stack (ts-PWS, Ventosa et al. 2017 -- `dispersion.tf_pws`)
+Wavelet-domain phase-weighted stack (ts-PWS, Ventosa et al. 2017 -- `dispersion.ts_pws`)
 across a pair's T* substack windows, per ENZ component, then rotated to RTZ. Replaces the
 stored time-domain `Allstack_pws`, which distorts dispersed weak bands (see the 2026-07-30
 substack-jackknife evidence: 13-33% of picks >2 sigma from their own substack consensus).
@@ -106,7 +106,7 @@ def one_pair(path):
                     per_comp[c].append(v / cnt[c])
         if any(len(v) < MIN_WINDOWS for v in per_comp.values()):
             return "few-windows"
-        stacked = np.stack([dispersion.tf_pws(np.asarray(per_comp[c]), params["dt"])
+        stacked = np.stack([dispersion.ts_pws(np.asarray(per_comp[c]), params["dt"])
                             for c in ENZ])
         rt = rotation(stacked, params, {})
     except Exception as e:
