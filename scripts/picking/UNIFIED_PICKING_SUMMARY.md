@@ -135,7 +135,7 @@ Ordered defaults:
 
 | gate | applies to | default |
 |---|---|---|
-| snr | all | snr_nbG ≥ 5 |
+| snr | all | snr_nbG ≥ 5 (since 2026-09-26 measured on `Allstack_linear` with the noise window after the signal; NaN = no noise window = rejected. The threshold was set on the old SNR and has not been re-chosen — see `extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_tspws_snr_noise_window/`) |
 | vbounds | all | fundamental 0.5–5.0, overtone 1.5–5.0 km/s (group and phase separately; relaxed from 3.6/4.5 so long-period PHASE picks are not clipped — the GROUP-side 3.6/4.5 bounds are re-applied downstream by `export_unified_tomo_picks.py`, which consumes group picks only) |
 | farfield | group only | ratio_d_lambda ≥ 2.0 (deep-LVZ near-field finding; phase keeps the 1λ picker gate — phase is valid to ~1λ) |
 | suppression | **Rayleigh OVERTONE only** | xmode_amp ≤ 0.6 |
