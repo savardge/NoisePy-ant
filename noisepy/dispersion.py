@@ -327,6 +327,18 @@ def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
     return comps0, comps1
 
 
+def _icwt_morlet_tc98(W, sj, dt, dj):
+    '''
+    Inverse CWT, Torrence & Compo (1998) eq. 11, Morlet omega0 = 6 (Cdelta = 0.776, psi(0) = pi^-1/4):
+        x(t) = dj*sqrt(dt)/(Cdelta*psi(0)) * sum_j Re(W_j(t)) / sqrt(s_j)
+    Written out here instead of calling pycwt.icwt because pycwt 0.3.0a22 (the yggdrasil `noisepy`
+    env until 2026-09) computes dj*sqrt(dt)/Cdelta*psi(0) * sum Re(W)/s -- a zero-phase sqrt(f)
+    tilt on every reconstruction. Identical to pycwt 0.4.0b0's icwt. See
+    extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_pycwt_icwt_version_effect/.
+    '''
+    return dj * np.sqrt(dt) / (0.776 * np.pi ** -0.25) * (np.real(W) / np.sqrt(sj)[:, None]).sum(axis=0)
+
+
 def ts_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
     '''
     Time-scale phase-weighted stack (ts-PWS) of Ventosa, Schimmel & Stutzmann (GJI 2017;
@@ -351,7 +363,8 @@ def ts_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
     --pre-block option makes it Ventosa's two-stage stack).
 
     Transform: pycwt Morlet (omega_0 = 6), dyadic scales at 1/dj voices per octave from 2*dt
-    over the full record; inverse by pycwt.icwt (Torrence & Compo 1998 eq. 11). Verified
+    over the full record; inverse by _icwt_morlet_tc98 (Torrence & Compo 1998 eq. 11, inlined:
+    pycwt.icwt is version-dependent, see that function). Verified
     2026-09-08 on a synthetic dispersed pulse: forward->inverse round trip recovers amplitude to
     1.003 with correlation 1.0000, and ts_pws of K identical copies returns the input to the
     same precision -- the reconstruction is not a source of bias. Ventosa's frame differs
@@ -392,7 +405,7 @@ def ts_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
         w = np.clip((K * coh ** 2 - 1.0) / (K - 1.0), 0.0, None)
     else:
         w = coh ** wu
-    rec = pycwt.icwt(lin * w, sj, dt, dj, 'morlet')
+    rec = _icwt_morlet_tc98(lin * w, sj, dt, dj)
     return np.real(rec)[:n]
 
 
