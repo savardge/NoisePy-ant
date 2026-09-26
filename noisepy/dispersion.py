@@ -937,7 +937,8 @@ def remove_picks_coi(pick_per, pick_vel, pick_sco, vel, coi):
     return pick_per_f, pick_vel_f, pick_sco_f
 
 
-def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
+def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5, noise_window="legacy",
+                  gap_periods=2.0, min_noise_s=10.0):
     """
     Narrowband Gaussian filtering to get SNR at each frequency
     Args:
@@ -948,6 +949,14 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         alpha: Gaussian window parameter
         vmin: Minimum group velocity to determine signal window
         vmax: Maximum group velocity to determine signal window
+        noise_window: 'legacy' = the historical window [len-2S, len-S] (S = signal length); raises
+            ValueError when it would reach into the signal window -- on a lag-trimmed trace the
+            start index is negative and numpy used to wrap it INTO the signal (2026-09-26: 89-93 %
+            of 'noise' samples were signal on every production ts-PWS stack; see
+            extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_tspws_snr_noise_window/).
+            'after' = a window starting gap_periods*T after dist/vmin, length min(S, remainder);
+            NaN for a period whose window is shorter than max(min_noise_s, 5 T).
+        gap_periods, min_noise_s: see 'after'
 
     Returns:
         snr_nbG: SNR array for the CCF filtered at each frequency of fn_array
@@ -957,9 +966,19 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
     """
     # Define signal and noise windows
     signal_win = np.arange(int(dist / vmax / dt), int(dist / vmin / dt))
-    noise_istart = len(ccf) - 2 * len(signal_win)
-    noise_win = np.arange(noise_istart, noise_istart + len(signal_win))
-    noise_rms = np.sqrt(np.sum(ccf[noise_win] ** 2) / len(noise_win))
+    sig_end = signal_win[-1] + 1
+    if noise_window == "legacy":
+        noise_istart = len(ccf) - 2 * len(signal_win)
+        if noise_istart < sig_end:
+            raise ValueError("nb_filt_gauss: trace too short for the legacy noise window "
+                             "(%d samples, signal window ends at %d, noise would start at %d)"
+                             % (len(ccf), sig_end, noise_istart))
+        noise_win = np.arange(noise_istart, noise_istart + len(signal_win))
+    elif noise_window == "after":
+        noise_win = np.arange(sig_end, min(len(ccf), sig_end + len(signal_win)))  # broadband: no gap
+    else:
+        raise ValueError("noise_window must be 'legacy' or 'after'")
+    noise_rms = np.sqrt(np.sum(ccf[noise_win] ** 2) / len(noise_win)) if len(noise_win) else np.nan
     snr_bb = np.max(np.abs(ccf[signal_win])) / noise_rms  # broadband snr
 
     # Narrowband filtering with Gaussian
@@ -999,7 +1018,17 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         # else:
         #    noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
         #    snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
-        noise_rms = np.sqrt(np.sum(amplitude_envelope[noise_win] ** 2) / len(noise_win))
+        if noise_window == "after":
+            T = 2 * np.pi / omgn
+            s0 = sig_end + int(np.ceil(gap_periods * T / dt))
+            s1 = min(len(ccf), s0 + len(signal_win))
+            if (s1 - s0) * dt < max(min_noise_s, 5 * T):
+                snr_nbG[iomgn] = np.nan
+                continue
+            nw = np.arange(s0, s1)
+        else:
+            nw = noise_win
+        noise_rms = np.sqrt(np.sum(amplitude_envelope[nw] ** 2) / len(nw))
         snr_nbG[iomgn] = np.max(amplitude_envelope[signal_win]) / noise_rms
 
     return snr_nbG, snr_bb, ccf_time_nbG, ccf_time_nbG_env
