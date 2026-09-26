@@ -146,7 +146,7 @@ def main():
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--band", type=float, nargs=2, default=[1.0, 2.0],
                     help="period band [s] for the focused geology comparison")
-    ap.add_argument("--out", default=f"{EHM}/_inversion_comparison")
+    ap.add_argument("--out", default=f"{EHM}/method_tests/5_vs_inversion/engine_comparison_dettmer")
     a = ap.parse_args()
     nets = list(DX) if a.all else [a.net]
     os.makedirs(a.out, exist_ok=True)

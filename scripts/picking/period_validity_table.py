@@ -51,8 +51,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
-CMP = f"{EHM}/_inversion_comparison"
-OUT = f"{EHM}/_period_validity"
+CMP = f"{EHM}/method_tests/5_vs_inversion/engine_comparison_dettmer"
+OUT = f"{EHM}/method_tests/5_vs_inversion/period_band_selection"
 DX = {"riehen": "0.2", "aargau": "0.5", "hautesorne": "0.5"}
 # the recommended Cd per measure (see each net's 1_velocity_maps/README.md)
 CD = {"group": "scaled", "phase": "blanket"}

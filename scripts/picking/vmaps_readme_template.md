@@ -19,7 +19,7 @@ its own npz files.
 | `production` (symlink) | compatibility shim → `1_production`, so older commands and cluster rsync targets still resolve |
 | `tests/ evidence/ _archive/` | pre-existing families from the 2026-07-16 reorg (riehen/aargau only); each carries its own provenance README — untouched by the 2026-08-05 reorg |
 
-Cross-network diagnostics (se-wall sweeps, cd_scale census) live at `Projects/_se_wall_sweep/`.
+Cross-network diagnostics (se-wall sweeps, cd_scale census) live at `Projects/method_tests/3_velocity_map_inversion/damping_and_grid_sweeps/`.
 
 ## Provenance
 
@@ -34,7 +34,7 @@ with the authoritative QC parameter record in `QC_provenance/`),
 
 **The Cd recommendation differs by measure.** From the 2026-08-05 quantitative comparison
 (3 nets × 2 k × 3 Cd × 2 measures × 3 waves × all periods = 3891 map-level records;
-`Projects/_inversion_comparison/`, tool `compare_inversion_choices.py`):
+`Projects/method_tests/5_vs_inversion/engine_comparison_dettmer/`, tool `compare_inversion_choices.py`):
 
 | measure | use | why |
 |---|---|---|
@@ -93,7 +93,7 @@ combinations, so it is a property of the data, not of an inversion choice (see
   period-wide DC offset — deliberate (the dispersion trend would otherwise dominate) but it
   means a systematically fast/slow map is not penalised here.
 
-### Supporting evidence in `Projects/_inversion_comparison/`
+### Supporting evidence in `Projects/method_tests/5_vs_inversion/engine_comparison_dettmer/`
 
 | artefact | what it holds |
 |---|---|

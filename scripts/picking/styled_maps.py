@@ -33,6 +33,7 @@ from swtomotv.geometry import make_grid, ll2xy
 from swtomotv.products._shared import imshow_extent
 from swtomotv.products.figures import build_hillshade, load_tecto, draw_tecto, draw_layer
 from noisepy.lv95 import wgs84_to_lv95
+from noisepy.colormaps import get_cmap
 
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 GK500_V11 = "/Users/genevievesavard/Data/swisstopo/GK500_V1_1/GK500_V1_1_FR/Shapes_WGS84"
@@ -104,6 +105,11 @@ TITLES = {"fund": "Rayleigh fundamental", "overtone": "Rayleigh overtone",
 # Bottom-strip histogram: what the inversion was GIVEN vs what it PRODUCED.
 # A model distribution much narrower than the picks means the prior absorbed the spread;
 # one that is offset means the map holds velocities the data never measured.
+# Velocity colour scale: Crameri `roma` (perceptually uniform, greyscale- and
+# CVD-safe, low = red -> high = blue). Replaced `inferno` on 2026-09-05 (user
+# preference); pass --cmap inferno to reproduce the older figures.
+DEFAULT_CMAP = "roma"
+
 C_PICKS = "#1b7837"   # input pairwise picks
 C_CELLS = "#762a83"   # velocity-map cells
 HIST_ALPHA = 0.50
@@ -238,7 +244,7 @@ def draw_extras(ax, ext, water, towns, wells_xy):
             ax.plot(x, y, marker="D", ms=7, mfc="none", mec="yellow", mew=0.7, zorder=8)
 
 
-def run_net(net, picks_dir=None, measure=None):
+def run_net(net, picks_dir=None, measure=None, cmap=DEFAULT_CMAP):
     cfg = NETS[net]
     # `measure` decides which pick table pairs with this run and how the axes are labelled.
     # Derive it from the run directory when not given: tspws_<measure>_<cd>_dx<dx>[_tag].
@@ -310,8 +316,8 @@ def run_net(net, picks_dir=None, measure=None):
             gsf = fig.add_gridspec(2, 1, height_ratios=[1.0, 0.30], hspace=0.30)
             ax = fig.add_subplot(gsf[0])
             axh = fig.add_subplot(gsf[1])
-            draw_layer(ax, V, "inferno", "%s velocity (km/s)" % measure, hs, hs_ext, ext,
-                       vmin=lo, vmax=hi)
+            draw_layer(ax, V, get_cmap(cmap), "%s velocity (km/s)" % measure,
+                       hs, hs_ext, ext, vmin=lo, vmax=hi)
             draw_tecto(ax, tecto, legend=True)
             draw_extras(ax, ext, water, towns, wells_xy)
             ax.set_xlim(ext[0], ext[1]); ax.set_ylim(ext[2], ext[3])
@@ -340,11 +346,14 @@ if __name__ == "__main__":
     #                    bottom velocity-distribution strip. Without it the strip shows the
     #                    map cells alone.
     # --measure group|phase  overrides the guess taken from the run directory name.
+    # --cmap <name>      velocity colour scale; a Crameri name ("roma", "roma_r",
+    #                    "cmc.roma") or any matplotlib name. Default DEFAULT_CMAP.
     args = list(sys.argv[1:])
     overrides = {}
     keep = []
     picks_dir = None
     measure = None
+    cmap = DEFAULT_CMAP
     i = 0
     while i < len(args):
         if args[i] == "--run-root" and i + 1 < len(args):
@@ -357,10 +366,13 @@ if __name__ == "__main__":
         elif args[i] == "--measure" and i + 1 < len(args):
             measure = args[i + 1]
             i += 2
+        elif args[i] == "--cmap" and i + 1 < len(args):
+            cmap = args[i + 1]
+            i += 2
         else:
             keep.append(args[i])
             i += 1
     for net in (keep or list(overrides) or ("riehen", "aargau", "hautesorne")):
         if net in overrides:
             NETS[net]["group_root"] = overrides[net]
-        run_net(net, picks_dir=picks_dir, measure=measure)
+        run_net(net, picks_dir=picks_dir, measure=measure, cmap=cmap)

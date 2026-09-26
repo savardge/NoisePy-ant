@@ -241,7 +241,7 @@ land in `<out>/<src>/<pair>_unified.csv`; schema v1 (no xmode_amp) is incompatib
 
 Outputs per network: `Projects/<net>/dispersion_unified/{<src>/<pair>_unified.csv,
 picks_unified_QCd.csv, qc_rejection_budget.txt, qc_before_after.png}`. Cross-network diagnostics
-(`compare_unified_networks.py`): `Projects/unified_diagnostics/{unified_compare_distributions.png,
+(`compare_unified_networks.py`): `Projects/method_tests/2_pick_qc/mode_contamination_screens/{unified_compare_distributions.png,
 unified_compare_ray_maps.png, unified_compare_stats.txt}` — side-by-side post-QC distributions and
 ray-path coverage maps (16-18k pairs with surviving picks per type per network; whole-array
 azimuthal coverage, no dead sectors).

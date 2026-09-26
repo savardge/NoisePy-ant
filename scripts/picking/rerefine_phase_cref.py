@@ -42,10 +42,17 @@ N_SEARCH = 16
 PICKER_NSEARCH = 8      # resolve_phase_curve_unwrap n_search: |M| <= 8 (absolute)
 
 
-def load_ref(path):
-    a = np.loadtxt(path); o = np.argsort(a[:, 0])
-    T, c = a[o, 0], a[o, 1]
-    return lambda t: np.interp(t, T, c, left=np.nan, right=np.nan)
+import sys as _sys
+_sys.path.insert(0, "/Users/genevievesavard/Codes/NoisePy-ant")
+from noisepy.regional_ref import load_ref, RegionalRef, station_eastings_km   # ONE implementation, shared with the picker
+from noisepy.regional_ref import pair_west_fraction as _pair_west_fraction
+
+
+def pair_west_fraction(net, pairs, boundary_e_km):
+    """Thin wrapper keeping this script's (net, pairs, boundary) signature; the rule lives in
+    noisepy.regional_ref so the picker (dispersion_unified.py) uses the identical code."""
+    ex = station_eastings_km(f"{P}/{net}/tomo/1_velocity_maps/0_inputs/exported_picks_tspws/stations_all.csv")
+    return _pair_west_fraction(ex, pairs, boundary_e_km)
 
 
 def reanchor(df, cref, seg_dU=0.25, seg_gap=2.5):
@@ -54,6 +61,7 @@ def reanchor(df, cref, seg_dU=0.25, seg_gap=2.5):
     T = df["nominal_period"].to_numpy(float); U = df["group_velocity"].to_numpy(float)
     C = df["phase_velocity"].to_numpy(float); D = df["distance"].to_numpy(float)
     S = df["scale_j"].to_numpy(int); NA = df["N_ambiguity"].to_numpy(int)
+    PAIR = df["pair"].to_numpy()
     gid = df.groupby(KEYS, sort=False).ngroup().to_numpy()
     order = np.lexsort((T, gid))               # by curve, then T ascending = the picker's emission order
     gid_s = gid[order]
@@ -67,6 +75,7 @@ def reanchor(df, cref, seg_dU=0.25, seg_gap=2.5):
         rep = ii[first]
         rep = rep[np.argsort(-T[rep])]                 # then w ascending (T descending) as in the unwrap
         Tr, Ur, Cr, dist = T[rep], U[rep], C[rep], D[rep[0]]
+        pair_key = PAIR[rep[0]]
         w = 2 * np.pi / Tr
         # segmentation as in resolve_phase_curve_unwrap
         brk = np.zeros(len(rep), bool)
@@ -75,7 +84,7 @@ def reanchor(df, cref, seg_dU=0.25, seg_gap=2.5):
             brk[1:] = (np.abs(np.diff(Ur)) > seg_dU) | ((dTmed > 0) & (np.abs(np.diff(Tr)) > seg_gap * dTmed))
         seg = np.cumsum(brk)
         K = w * dist / Cr
-        cr = cref(Tr)
+        cr = cref(Tr, pair_key)
         best = np.zeros(len(rep), int); cn = np.full(len(rep), np.nan)
         for s in np.unique(seg):
             m = seg == s
@@ -101,20 +110,34 @@ def reanchor(df, cref, seg_dU=0.25, seg_gap=2.5):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--net", required=True)
-    ap.add_argument("--ref-new", required=True, help="filename under <net>/vsg_modesep/")
+    ap.add_argument("--ref-new", default=None, help="filename under <net>/vsg_modesep/ (single reference)")
+    ap.add_argument("--ref-west", default=None, help="regional reference WEST of --boundary-e")
+    ap.add_argument("--ref-east", default=None, help="regional reference EAST of --boundary-e; with "
+                    "--ref-west this builds a per-pair length-weighted HARMONIC mixture (see RegionalRef)")
+    ap.add_argument("--boundary-e", type=float, default=2616.0,
+                    help="LV95 easting [km] of the domain boundary (riehen graben border fault)")
     ap.add_argument("--ref-old", default="ref_fundamental_phase.txt")
     ap.add_argument("--tag", default="FJ")
     ap.add_argument("--no-write", action="store_true", help="evaluate only, do not write the patched table")
+    ap.add_argument("--tree", default=TREE,
+                    help=f"pick tree under Projects/<net>/ (default {TREE}). PRODUCTION riehen is "
+                         "dispersion_unified_vmin0.2_tspws -- the default is the superseded linear-stack "
+                         "tree (2026-09-14 lesson: the first regional re-anchor ran on the wrong tree).")
     a = ap.parse_args()
-    tree = f"{P}/{a.net}/{TREE}"; qc = os.path.realpath(f"{tree}/qc_current"); label = os.path.basename(qc)
+    tree = f"{P}/{a.net}/{a.tree}"; qc = os.path.realpath(f"{tree}/qc_current"); label = os.path.basename(qc)
     out = f"{tree}/{label}_cref{a.tag}"; os.makedirs(out, exist_ok=True)
     src = f"{qc}/picks_unified_QCd.csv"
     ref_old = load_ref(f"{P}/{a.net}/vsg_modesep/{a.ref_old}")
-    ref_new = load_ref(f"{P}/{a.net}/vsg_modesep/{a.ref_new}")
+    regional = bool(a.ref_west and a.ref_east)
+    if regional == bool(a.ref_new):
+        raise SystemExit("give EITHER --ref-new OR both --ref-west and --ref-east")
+    ref_new = None   # built after the pick table is read (needs the pair list)
     log = open(f"{out}/summary.txt", "w")
     def say(*s):
         print(*s); print(*s, file=log); log.flush()
-    say(f"# {a.net}: re-anchor Rayleigh-fundamental phase to {a.ref_new} (old: {a.ref_old}); source {src}")
+    what = (f"regional pair mixture of {a.ref_west} / {a.ref_east} at E={a.boundary_e} km"
+            if regional else a.ref_new)
+    say(f"# {a.net}: re-anchor Rayleigh-fundamental phase to {what} (old: {a.ref_old}); source {src}")
 
     # ---- pass 1: collect fund phase rows with their absolute row numbers
     t0 = time.time(); parts = []; off = 0
@@ -123,6 +146,17 @@ def main():
         sub = ch.loc[m].copy(); sub["row"] = sub.index.to_numpy(); parts.append(sub); off += len(ch)   # chunk index is GLOBAL
     df = pd.concat(parts, ignore_index=True); n_total = off
     say(f"rows total {n_total:,}; rayleigh-fund rows with phase {len(df):,}; curves {df.groupby(KEYS).ngroups:,}  ({time.time()-t0:.0f}s)")
+
+    if regional:
+        fW = pair_west_fraction(a.net, df["pair"].unique(), a.boundary_e)
+        ref_new = RegionalRef(f"{P}/{a.net}/vsg_modesep/{a.ref_west}",
+                              f"{P}/{a.net}/vsg_modesep/{a.ref_east}", fW)
+        v = np.array(list(fW.values()))
+        say(f"regional reference: {len(fW):,} pairs located | entirely W {100*np.mean(v>=0.999):.1f}% | "
+            f"entirely E {100*np.mean(v<=0.001):.1f}% | MIXED {100*np.mean((v>0.001)&(v<0.999)):.1f}% "
+            f"(median fW of mixed {np.median(v[(v>0.001)&(v<0.999)]):.2f})")
+    else:
+        ref_new = load_ref(f"{P}/{a.net}/vsg_modesep/{a.ref_new}")
 
     # ---- validation: re-anchor to the OLD reference -> expect no change
     c_val, dM_val = reanchor(df, ref_old)
@@ -148,7 +182,8 @@ def main():
     df["c_new"] = c_new; df["dM"] = dM
     # QC re-flag (rayleigh fund phase): snr, band_edge, vbounds(fund), phase_phys, station(if used)
     import yaml
-    prm = yaml.safe_load(open(f"{qc}/qc_params_used.yaml"))["resolved"]
+    _y = yaml.safe_load(open(f"{qc}/qc_params_used.yaml"))
+    prm = _y.get("resolved") or _y["qc"]   # run_qc.py writes `resolved:`, the 2026-07-31 tspws run wrote `qc:`
     lo, hi = [float(x) for x in str(prm["vbounds_fund"]).split(",")]
     RUNG = 2.0 ** (1.0 / 12.0)
     killers = set(df["phase_killer"].fillna("").unique())
@@ -191,7 +226,15 @@ def main():
         f"noise-level (adjacent branch at large d/lambda): {100*(chg & ~material)[okO].mean():.2f}%")
     # baseline for a like-with-like comparison: this machinery with the OLD reference
     chg_b = chg
-    crn = ref_new(df["nominal_period"].to_numpy(float)); cro = ref_old(df["nominal_period"].to_numpy(float))
+    # per-row reference value: a regional reference is pair-dependent, so evaluate it per pair
+    Tn = df["nominal_period"].to_numpy(float)
+    if regional:
+        crn = np.full(len(df), np.nan)
+        for pr, idx in df.groupby("pair", sort=False).indices.items():
+            crn[idx] = ref_new(Tn[idx], pr)
+    else:
+        crn = ref_new(Tn)
+    cro = ref_old(Tn)
     m_ = chg & okO & np.isfinite(crn)
     say(f"  cost check on changed accepted rows: median |c-cref_NEW|/cref  production branch {np.nanmedian(np.abs(df['phase_velocity'].to_numpy()[m_]-crn[m_])/crn[m_]):.3f} -> new branch {np.nanmedian(np.abs(df['c_new'].to_numpy()[m_]-crn[m_])/crn[m_]):.3f};"
         f"  vs cref_OLD: production {np.nanmedian(np.abs(df['phase_velocity'].to_numpy()[m_]-cro[m_])/cro[m_]):.3f} -> new {np.nanmedian(np.abs(df['c_new'].to_numpy()[m_]-cro[m_])/cro[m_]):.3f}")
@@ -208,7 +251,8 @@ def main():
                          frac_changed_vs_baseline=round(float(chg_b[mo].mean()) if mo.any() else np.nan, 4),
                          c_med_old=round(float(np.median(df["phase_velocity"].to_numpy()[mo])) if mo.any() else np.nan, 3),
                          c_med_new=round(float(np.median(df["c_new"].to_numpy()[mn])) if mn.any() else np.nan, 3),
-                         ref_old=round(float(ref_old(0.5*(t0_+t1_))), 3), ref_new=round(float(ref_new(0.5*(t0_+t1_))), 3)))
+                         ref_old=round(float(np.atleast_1d(ref_old(0.5*(t0_+t1_)))[0]), 3),
+                         ref_new=round(float(np.nanmedian(crn[m])) if m.any() else np.nan, 3)))
     ev = pd.DataFrame(rows); ev.to_csv(f"{out}/phase_cref_eval.csv", index=False)
     say(ev.to_string(index=False))
 
@@ -235,7 +279,11 @@ def main():
     for ax in axs:
         Tg = np.arange(0.5, 6, 0.05)
         ax.plot(Tg, ref_old(Tg), "--", color="orange", lw=1.6, label="c_ref OLD (slant-stack)")
-        ax.plot(Tg, ref_new(Tg), "-", color="lime", lw=1.6, label="c_ref NEW (F-J)")
+        if regional:
+            ax.plot(Tg, ref_new(Tg, None) if False else ref_new.cw(Tg), "-", color="lime", lw=1.6, label="c_ref NEW west")
+            ax.plot(Tg, ref_new.ce(Tg), "-", color="darkgreen", lw=1.6, label="c_ref NEW east")
+        else:
+            ax.plot(Tg, ref_new(Tg), "-", color="lime", lw=1.6, label=f"c_ref NEW ({a.tag})")
         ax.set_xlim(0.2, 6); ax.set_ylim(0.5, 4.5); ax.set_xlabel("period [s]"); ax.set_ylabel("phase velocity [km/s]")
         ax.grid(alpha=.25); ax.legend(fontsize=7, loc="upper left")
     fig.suptitle(f"{a.net}: Rayleigh-fundamental phase picks re-anchored to the F-J reference "
@@ -256,7 +304,13 @@ def main():
             sel = ch.index[h]
             ch.loc[sel, "phase_velocity"] = patch_c[idx[h]]
             ch.loc[sel, "N_ambiguity"] = ch.loc[sel, "N_ambiguity"].to_numpy() + patch_dM[idx[h]]
-            ch.loc[sel, "phase_ok"] = patch_ok[idx[h]]
+            # preserve the column's ORIGINAL dtype. Writing python bools into an int64 column
+            # makes it object, and the file then round-trips as the strings {'0','1','True',
+            # 'False'} -- every downstream `phase_ok == True` silently matches nothing
+            # (found 2026-09-14, after the table had already been written once).
+            _ok = patch_ok[idx[h]]
+            ch.loc[sel, "phase_ok"] = _ok.astype(ch["phase_ok"].dtype, copy=False) \
+                if ch["phase_ok"].dtype != object else _ok
             # killer bookkeeping: rows that flip status
             newly_bad = sel[~patch_ok[idx[h]] & ch.loc[sel, "phase_killer"].eq("").to_numpy()]
             ch.loc[newly_bad, "phase_killer"] = "cref_requal"

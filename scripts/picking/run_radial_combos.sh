@@ -12,7 +12,7 @@ NP=/Users/genevievesavard/Codes/NoisePy-ant
 EHM=/Users/genevievesavard/Codes/extract_higher_modes/Projects
 PY_BB=/opt/anaconda3/envs/bayesbay_dev/bin/python
 PY_BH=/opt/anaconda3/envs/bayhunter/bin/python
-RANGES=$EHM/_period_validity/period_ranges_DECISIONS_v1.csv
+RANGES=$EHM/method_tests/5_vs_inversion/period_band_selection/period_ranges_DECISIONS_v1.csv
 TAG=test_2026-08-07_radial_cz_combos
 
 # only combos mixing Love and Rayleigh constrain zeta

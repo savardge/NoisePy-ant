@@ -495,7 +495,16 @@ def phase_velocity_image(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, 
     '''
     Proper phase-velocity image whose POSITIVE crests are the phase-velocity branches.
 
-        img(T, c) = cos( w*dist*(1/c - 1/U(T)) - phi(t_u) - phase_shift - phase_offset )
+        img(T, c) = cos( w*dist*(1/c - 1/U(T)) + phi(t_u) - phase_shift - phase_offset )
+
+    Sign note (bug fixed 2026-08-31): the resolvers (phase_velocity, resolve_phase_curve*)
+    enter the measured phase NEGATED -- their branch condition is
+    w*d*(1/c - 1/U) = -phi + phase_shift + phase_offset + 2*pi*N -- so for a pick to land on
+    a crest the image argument must carry +phi. The previous -phi drew every fringe displaced
+    by 2*phi(t_u): picks appeared up to half a fringe off the crests (empirically the image
+    value at a pick was cos(2*phi), r=0.98 over a test pair) even though the picked c was
+    correct. Verified against a Yao-style spectral-phase image (independent FFT phase) and
+    the synthetic recovery test.
 
     For the picks from measure_corrections_and_phase() to land EXACTLY on the crests, the image
     must use the SAME group arrival as the picks: pass the picked group-velocity curve via
@@ -533,7 +542,7 @@ def phase_velocity_image(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, 
             U = dist / tvec[it]
             phi = float(np.angle(row[it]))
         w = 2.0 * np.pi * freq[j]
-        img_native[j, :] = np.cos(w * dist * (s_c - 1.0 / U) - phi - phase_shift - phase_offset)
+        img_native[j, :] = np.cos(w * dist * (s_c - 1.0 / U) + phi - phase_shift - phase_offset)
     o = np.argsort(period_native)
     img = scipy.interpolate.interp1d(period_native[o], img_native[o, :], axis=0,
                                      bounds_error=False, fill_value=np.nan)(per)
@@ -1370,6 +1379,20 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
             cost = np.nanmedian(np.abs(c - cref[ii]) / cref[ii])
             if np.isfinite(cost) and cost < best_cost:
                 best_cost, best_M = cost, M
+        if best_M is None and getattr(c_ref, "fallback", None) is not None:
+            # 2026-09-15: a per-pair REGIONAL reference (noisepy.regional_ref) is NaN outside its
+            # band on purpose -- in-band periods alone must decide the segment's integer, exactly as
+            # the validated offline re-anchor does (nanmedian ignores the NaN entries). Only a
+            # segment with NO in-band period reaches here; it is anchored to the network fallback,
+            # i.e. it keeps the production branch. Inert for every reference without `.fallback`.
+            cfb = np.array([float(c_ref.fallback(t)) for t in T[ii]])
+            for M in range(-n_search, n_search + 1):
+                denom = kr[ii] + 2.0 * np.pi * M
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    c = np.where(denom > 0, w[ii] * dist / denom, np.nan)
+                cost = np.nanmedian(np.abs(c - cfb) / cfb)
+                if np.isfinite(cost) and cost < best_cost:
+                    best_cost, best_M = cost, M
         if best_M is None:
             continue
         denom = kr[ii] + 2.0 * np.pi * best_M
@@ -1478,6 +1501,55 @@ def phase_from_group(pick_per, pick_gv, dist, phases, phase_shift=np.pi / 4.0,
         return c_pred                                     # no physically admissible alias
     c_pred[idx] = best[1]
     return c_pred
+
+
+def hankel_finite_distance_correction(c_phase, periods, dist, n_iter=4):
+    """Correct two-station phase velocities for the finite-distance (near-field) phase of the
+    exact 2-D Green's function vs its far-field asymptote (Yao et al. 2006, GJI, their
+    "Bessel" correction; applied at export, NOT in the picker).
+
+    Every two-station phase formula in this package converts phase to velocity through the
+    far-field asymptote H0^(2)(kr) ~ sqrt(2/(pi*kr)) * e^{-i(kr - pi/4)} -- the source of the
+    pi/4 term. At finite kr the exact Hankel kernel's phase lags that asymptote by
+    dphi ~ 1/(8*kr) rad, so the uncorrected c is biased FAST by ~1/(8*(2*pi*d/lambda)^2):
+    +0.26% at 1.1 wavelengths, +0.06% at 2.25, falling as (d/lambda)^-2. This solves
+    kr_true + dphi(kr_true) = kr_est by fixed point (dphi is tiny and smooth; 4 iterations
+    converge to machine precision) and returns c_corr = c * kr_est / kr_true.
+
+    Validated end-to-end 2026-09-01 on all three networks
+    (Projects/<net>/tomo/1_velocity_maps/3_diagnostics/hankel_correction/): pick shift median
+    -0.03 to -0.08%; map-level effect is a period-COHERENT spatial systematic at long T
+    (adjacent-period r 0.95-0.99) but <= ~1x map uncertainty for fund/love and <=6% of anomaly
+    amplitude everywhere. GROUP velocities are NOT corrected: the group arrival is an envelope
+    (amplitude) measurement and the finite-kr group-delay effect is second order.
+
+    Args:
+        c_phase: phase velocities [km/s] (array or scalar)
+        periods: periods [s], same shape
+        dist:    inter-station distance [km] (scalar or same shape)
+    Returns:
+        corrected phase velocities, NaN where inputs are non-finite/non-positive.
+    """
+    from scipy.special import hankel2
+    c = np.asarray(c_phase, dtype=float)
+    T = np.asarray(periods, dtype=float)
+    d = np.broadcast_to(np.asarray(dist, dtype=float), c.shape).astype(float)
+    out = np.full(c.shape, np.nan)
+    ok = np.isfinite(c) & np.isfinite(T) & np.isfinite(d) & (c > 0) & (T > 0) & (d > 0)
+    if not ok.any():
+        return out if out.ndim else float("nan")
+    kr_est = 2.0 * np.pi * d[ok] / (c[ok] * T[ok])
+
+    def dphi(kr):
+        ex = hankel2(0, kr)
+        ff = np.sqrt(2.0 / (np.pi * kr)) * np.exp(-1j * (kr - np.pi / 4.0))
+        return np.angle(ff * np.conj(ex))
+
+    kr = kr_est.copy()
+    for _ in range(n_iter):
+        kr = kr_est - dphi(kr)
+    out[ok] = c[ok] * kr_est / kr
+    return out
 
 
 def group_from_phase(periods, c_phase):

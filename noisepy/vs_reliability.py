@@ -35,6 +35,35 @@ DELTA_LOGL = 5.0       # absolute log-likelihood units; chains within this of th
                        # 0.4 logL away, keeping 1/16).  A likelihood RATIO is the meaningful
                        # quantity; a relative deviation is not.  Tightening dev does not help --
                        # it is the same artifact scaled down.
+DELTA_LOGL_MEDIAN = 20.0   # 2026-09-11 rule: keep chains within this of the MEDIAN chain's median
+                           # logL. The best-chain rule (DELTA_LOGL above) is hijackable under a
+                           # free noise sigma: one chain collapses sigma on one target, gains 20-30
+                           # logL and is kept alone (measured GVL-1 41_20: 6/24 kept, median off
+                           # 0.18 km/s; aargau Leuggern 23_46: 1/24 kept, a 3.5 km/s column).
+                           # Genuinely failed chains sit ~-15 vs +60..+114 for everything that
+                           # converged, so 20 below the median drops them and nothing else
+                           # (identical to the best rule at 15/16 test cells). See the hautesorne
+                           # PRODUCTION_RECIPE.md section 9.
+QUORUM_MIN = 4             # smallest top cluster accepted as the basin (see kept_mask "cluster")
+QUORUM_FRAC = 0.15         # ... or this fraction of the chains, whichever is larger
+SELECT_RULE = "cluster"    # "cluster" (production, 2026-09-11) | "median" | "best" (campaign default to 2026-09-10)
+# Likelihood-dominance escape for rule="cluster". The quorum walks DOWN the log-likelihood
+# clusters and keeps the first with enough chains, which silently discards a sub-quorum top
+# cluster no matter how much better it fits. On the Aargau phase-only grid that fired at 18 of
+# 1767 cells (2026-09-14, tests/test_2026-09-14_north_outliers): the best basin drew only 1-3 of
+# 24 chains and the rule kept one 72-115 logL worse, whose Rayleigh residuals reach 9.7 sigma.
+# Above this margin the top cluster is kept instead. 50 sits in the empty gap between the
+# legitimate deficits (<= 18.5) and the pathological ones (>= 71.7), and well above the 20-30
+# logL a sigma-collapsed hijacker gains -- the case the quorum exists to block.
+DOMINANCE_LOGL = 50.0
+# WHY "cluster" and not "median" (tested 2026-09-11 on 14 aargau ensemble cells): per-chain median
+# logL sits in well-separated clusters -- a top basin of 7-23 chains, sometimes a second basin
+# 20-120 logL below it (a different sigma/Vs solution), and failed chains near 0 or -10. A
+# sigma-collapsed hijacker is a top "cluster" of 1-3 chains 10-30 logL above a big one. The
+# median-with-fixed-window rule repaired the hijacks but at the 3-target radial cells admitted the
+# second basin (17 logL below the median) and the profile lost its basement; the best-window rule
+# kept the hijacker alone. Rule: link chains into clusters by logL gaps <= DELTA_LOGL; walk down
+# from the top; keep the first cluster with >= max(QUORUM_MIN, QUORUM_FRAC*n) members.
 RHO_MAX = 1.0          # rho <= 1 is the natural boundary: kept chains' medians spread by no
                        # more than their own posterior width (between <= within), i.e. the
                        # per-chain posteriors overlap.  (0.7 proved overly strict: it cut bands
@@ -193,8 +222,53 @@ def confidence(frac_kept, reln_frac, n_kept):
     return "low"
 
 
+def kept_mask(loglike_med, delta=DELTA_LOGL, rule=SELECT_RULE, delta_median=DELTA_LOGL_MEDIAN,
+              dominance=DOMINANCE_LOGL):
+    """Chains to keep from their post-burn-in median log-likelihoods.
+
+    rule="cluster": group chains into log-likelihood clusters (gap > delta starts a new one) and
+    keep the best cluster holding a quorum -- UNLESS the top cluster beats it by more than
+    dominance, in which case the top cluster is kept (see DOMINANCE_LOGL).
+    rule="median": keep loglike >= median(finite loglike) - delta_median (robust to a hijacking
+    minority, because the median chain is by construction inside the majority).
+    rule="best":   keep best - loglike <= delta (the 2026-08 campaign rule; hijackable).
+    -inf entries (chains that never went cold under PT) are always dropped."""
+    ll = np.asarray(loglike_med, float)
+    if ll.size == 0:
+        return np.ones(0, bool)
+    fin = np.isfinite(ll)
+    if not fin.any():
+        return np.zeros(ll.size, bool)
+    if rule == "cluster":
+        idx = np.flatnonzero(fin)
+        order = idx[np.argsort(-ll[idx])]              # descending logL
+        clusters, cur = [], [order[0]]
+        for a_, b_ in zip(order[:-1], order[1:]):
+            if ll[a_] - ll[b_] <= delta:
+                cur.append(b_)
+            else:
+                clusters.append(cur); cur = [b_]
+        clusters.append(cur)
+        quorum = max(QUORUM_MIN, int(np.ceil(QUORUM_FRAC * ll.size)))
+        keep = np.zeros(ll.size, bool)
+        top = ll[clusters[0][0]]
+        for c in clusters:
+            if len(c) >= quorum:
+                if top - ll[c[0]] > dominance:
+                    break                              # dominance escape: see DOMINANCE_LOGL
+                keep[c] = True
+                return keep
+        keep[clusters[0]] = True                       # no quorum, or top cluster dominates
+        return keep
+    if rule == "median":
+        ref = np.nanmedian(ll[fin])
+        return fin & (ll >= ref - delta_median)
+    best = np.nanmax(ll[fin])
+    return fin & ((best - ll) <= delta)
+
+
 def assess(depth, p16, p50, p84, loglike_med, periods=None, velocities=None,
-           delta=DELTA_LOGL, rho_max=RHO_MAX):
+           delta=DELTA_LOGL, rho_max=RHO_MAX, rule=SELECT_RULE, delta_median=DELTA_LOGL_MEDIAN):
     """Convenience: kept-mask (absolute Delta-logL cut) -> reliability -> confidence, one call.
 
     loglike_med: (nchain,) per-chain post-burnin median log-likelihood (best = max).
@@ -204,8 +278,14 @@ def assess(depth, p16, p50, p84, loglike_med, periods=None, velocities=None,
     Returns a dict with rho(z), reliable mask/interval, and scalar QC (frac_kept, confidence).
     """
     loglike_med = np.asarray(loglike_med, float)
-    best = np.nanmax(loglike_med) if loglike_med.size else np.nan
-    if np.isfinite(best):
+    if rule in ("median", "cluster"):
+        kept = kept_mask(loglike_med, delta, rule, delta_median)
+        best = np.nan
+    else:
+        best = np.nanmax(loglike_med) if loglike_med.size else np.nan
+    if rule in ("median", "cluster"):
+        pass
+    elif np.isfinite(best):
         # -inf entries (chains that never sampled at T=1 under PT, per
         # bh_diagnostics.median_at_t1) give inf > delta and are correctly dropped here.
         kept = (best - loglike_med) <= delta

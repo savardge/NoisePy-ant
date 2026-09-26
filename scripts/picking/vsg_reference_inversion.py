@@ -68,12 +68,19 @@ def load_ref(net, wave, n_dec=N_DEC, suffix=""):
     a = np.loadtxt(f"{EHM}/{net}/vsg_modesep/{fn}")
     T, c = a[:, 0], a[:, 1]
     o = np.argsort(T); T, c = T[o], c[o]
+    grid = np.exp(np.linspace(np.log(T.min()), np.log(T.max()), n_dec))
+    cd = np.interp(grid, T, c)
+    if a.ndim > 1 and a.shape[1] >= 3:
+        # THIRD COLUMN = supplied sigma. Used by the subarray-median curves, where the honest
+        # uncertainty is the spread ACROSS subarrays (real lateral heterogeneity within the
+        # group), not the smoothness of the median -- a median of many curves is smooth by
+        # construction and the scatter estimate below would return the floor.
+        sd = np.interp(grid, T, a[o, 2])
+        return grid, cd, np.maximum(sd, SIG_FLOOR)
     # scatter about a smooth fit = repeatability of the ridge pick
     deg = 4 if len(T) > 30 else 2
     resid = c - np.polyval(np.polyfit(np.log(T), c, deg), np.log(T))
     sig = max(float(np.std(resid)), SIG_FLOOR)
-    grid = np.exp(np.linspace(np.log(T.min()), np.log(T.max()), n_dec))
-    cd = np.interp(grid, T, c)
     return grid, cd, np.full(n_dec, sig)
 
 
@@ -123,8 +130,8 @@ def main():
         T, c, s = load_ref(a.net, w, suffix=a.ref_suffix)
         curves[w] = (T, c, s)
         print(f"{w:<10}{len(raw):>7}{f'{T.min():.2f}-{T.max():.2f}':>15}{s[0]:>9.3f}")
-    print(f"\ndecimated to {N_DEC} pts/curve; sigma = scatter about a smooth fit "
-          f"(floor {SIG_FLOOR})\n")
+    print(f"\ndecimated to {N_DEC} pts/curve; sigma = supplied 3rd column where present, else "
+          f"scatter about a smooth fit (floor {SIG_FLOOR})\n")
 
     for name in [c.strip() for c in a.configs.split(",") if c.strip()]:
         waves = CONFIGS[name]

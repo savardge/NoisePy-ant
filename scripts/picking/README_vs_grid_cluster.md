@@ -77,7 +77,7 @@ do want intra-cell `mp_inversion`, see the last section.
    python smooth_maps.py         --net <net> --griddir <outdir>
    ```
    and the before/after LVZ comparison (`lvz_before_after.py` in
-   Projects/azimuthal_source_bias/) picks up the new `farfield` volumes.
+   Projects/method_tests/2_pick_qc/nearfield_and_azimuthal_bias/) picks up the new `farfield` volumes.
 
 ## Sanity check the convergence actually improved
 

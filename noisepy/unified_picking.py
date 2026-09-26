@@ -465,7 +465,10 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
         cross_of = {"G_LR0": "G_LR1", "G_LR1": "G_LR0"}
         # fundamental group curve for the overtone flags: the pair's own G_LR0 argmax, with the
         # reference-derived curve as fallback when G_LR0 yields nothing
-        U0_ray_ref = phase_ref_to_group_ref(refs.get(("rayleigh", "fundamental")), per_grid)
+        _cf = refs.get(("rayleigh", "fundamental"))
+        # a per-pair regional phase reference (noisepy.regional_ref) carries the NETWORK curve as
+        # `.for_group_ref` so the overtone flags stay on the reference they were validated with
+        U0_ray_ref = phase_ref_to_group_ref(getattr(_cf, "for_group_ref", _cf), per_grid)
 
         def u0_at(T):
             u = _curve_at(*ray_curves.get("fundamental", (None, None)), T=T, t_tol=cfg.LOVE_RAY_T_TOL)

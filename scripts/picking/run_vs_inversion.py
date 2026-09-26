@@ -107,6 +107,14 @@ def main():
     ap.add_argument("--dinver-ns", type=int, default=50_000, help="models searched (=It*Ns)")
     ap.add_argument("--dinver-nr", type=int, default=100)
     ap.add_argument("--dinver-ns0", type=int, default=10_000)
+    ap.add_argument("--dinver-vs-rev", action="store_true",
+                    help="allow Vs REVERSALS (LVZs) in the Dinver layering. Default off = "
+                         "the SWinvert notebook convention (Vs non-decreasing), which "
+                         "BayHunter does not share -- flag any comparison accordingly.")
+    ap.add_argument("--dinver-n-keep", type=int, default=None,
+                    help="models extracted per (param, trial) run; default = --dinver-nr. "
+                         "Raise (e.g. 1000) with --dinver-n-pool to widen the pooled "
+                         "ensemble beyond the NA convergence tip without changing the search.")
     ap.add_argument("--dinver-n-pool", type=int, default=100,
                     help="lowest-misfit models pooled per accepted parameterization")
     ap.add_argument("--dinver-depth-factor", type=float, default=2.0)
@@ -249,7 +257,7 @@ def main():
                 waves=keys, lns=[int(x) for x in args.dinver_lns.split(",")],
                 lrs=[float(x) for x in args.dinver_lrs.split(",")],
                 ntrials=args.dinver_ntrials, ns=args.dinver_ns, nr=args.dinver_nr,
-                ns0=args.dinver_ns0, n_pool=args.dinver_n_pool,
+                ns0=args.dinver_ns0, n_pool=args.dinver_n_pool, n_keep=args.dinver_n_keep, vs_rev=args.dinver_vs_rev,
                 depth_factor=args.dinver_depth_factor, n_resample=args.dinver_n_resample,
                 min_cov=(args.dinver_min_cov or None), depth_max=args.depth_max,
                 vs_bounds=(args.vs_min, args.vs_max),

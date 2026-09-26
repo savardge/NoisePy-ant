@@ -271,6 +271,177 @@ def mode_id_gate(cell, ix, iy, phase_root=None, overtone_root=None, waves=("fund
     return c
 
 
+def _summary_from_chains(r, mask):
+    """Recompute the Vs summary + reliability of cell dict r from the chains in `mask`
+    (per-chain normal-mixture approximation, as in rebasin_cell). Mutates r."""
+    prof = np.asarray(r["chain_vs_profiles"], float)
+    p16c = np.asarray(r["chain_vs_p16"], float)
+    p84c = np.asarray(r["chain_vs_p84"], float)
+    mu = prof[mask]
+    sig = np.maximum((p84c[mask] - p16c[mask]) / 2.0, 1e-3)
+    rng = np.random.default_rng(12345)
+    draws = rng.normal(mu[None, :, :], sig[None, :, :], size=(200, mask.sum(), mu.shape[1]))
+    pool = draws.reshape(-1, mu.shape[1])
+    r["vs_median"] = np.nanmedian(pool, axis=0)
+    r["vs_p16"], r["vs_p84"] = np.nanpercentile(pool, [16, 84], axis=0)
+    r["vs_p025"], r["vs_p975"] = np.nanpercentile(pool, [2.5, 97.5], axis=0)
+    from . import vs_reliability as vr
+    zf = float(r.get("z_floor", np.inf))
+    rel = vr.reliability(np.asarray(r["depth"], float), p16c, prof, p84c,
+                         kept=mask, z_floor=(zf if np.isfinite(zf) else None))
+    r["reliable_mask"] = rel["reliable"]
+    r["z_reliable_min"] = rel["z_reliable_min"]
+    r["z_reliable_max"] = rel["z_reliable_max"]
+    for k in list(r.keys()):
+        if k.startswith(("gamma_", "zeta_")):
+            r[k] = np.full_like(np.asarray(r[k], float), np.nan)
+    r["chains_kept"] = mask
+    r["n_chains_kept"] = int(mask.sum())
+    return r
+
+
+def reselect_cell(r, delta_median=None):
+    """Re-apply the chain-selection rule at ASSEMBLY from the stored per-chain summaries
+    (2026-09-11): vs_reliability.kept_mask with the production SELECT_RULE ("cluster": the top
+    logL cluster that has a quorum; see vs_reliability for why not "median"/"best"). Cells whose stored kept set already equals the
+    new one are untouched; otherwise the Vs summary and reliability are recomputed from the new
+    set (mixture approximation; gamma/zeta set to NaN as in rebasin_cell). Sets
+    r["reselect_applied"]. Mutates and returns r."""
+    from . import vs_reliability as vr
+    need = ("chain_vs_profiles", "chain_vs_p16", "chain_vs_p84", "chains_kept", "depth",
+            "chain_loglike_med")
+    if any(k not in r for k in need):
+        r["reselect_applied"] = False
+        return r
+    ll = np.asarray(r["chain_loglike_med"], float)
+    old = np.asarray(r["chains_kept"], bool)
+    new = vr.kept_mask(ll, rule=vr.SELECT_RULE,
+                       delta_median=(vr.DELTA_LOGL_MEDIAN if delta_median is None else delta_median))
+    if new.sum() == 0 or np.array_equal(new, old):
+        r["reselect_applied"] = False
+        return r
+    _summary_from_chains(r, new)
+    r["reselect_applied"] = True
+    return r
+
+
+def rebasin_cell(r, link_tol_floor=0.08, min_major_frac=0.5):
+    """Override a likelihood-hijacked basin selection with the chain-MAJORITY basin.
+
+    The runner keeps chains within DELTA_LOGL of the single best chain. With the noise sigma a
+    free hyper-parameter, one chain can collapse sigma on one target and sit 20-30 logL above
+    everyone (measured: overtone loglike 23-46 in the kept minority vs -3..18 in the discarded
+    majority, while its FUNDAMENTAL fit is worse) -- and the "basin" becomes 1-3 chains whose
+    Vs contradicts every neighbouring cell. Per the continuous-zeta calibration, basins must be
+    judged on Vs-consistency, not logL.
+
+    This reclusters the stored per-chain median profiles (single-linkage, RMS distance over the
+    depths all chains resolve; link tolerance = half the median within-chain width, floored at
+    `link_tol_floor` km/s). If the largest cluster holds >= `min_major_frac` of the chains AND
+    the stored kept set is NOT mostly inside it, the cell's Vs summary and reliability are
+    recomputed from the majority cluster and r["rebasin_applied"] is set.
+
+    Approximation note: the cell npz stores per-chain (p16, p50, p84) profiles, not the full
+    ensemble, so recomputed percentiles come from a per-chain normal mixture. Medians are
+    essentially exact; p025/p975 are approximate. gamma/zeta summaries CANNOT be re-derived
+    from chain Vs profiles and are set to NaN for overridden cells rather than left standing
+    on the wrong basin.
+
+    Mutates and returns r.
+    """
+    need = ("chain_vs_profiles", "chain_vs_p16", "chain_vs_p84", "chains_kept", "depth")
+    if any(k not in r for k in need):
+        r["rebasin_applied"] = False
+        return r
+    prof = np.asarray(r["chain_vs_profiles"], float)
+    p16c = np.asarray(r["chain_vs_p16"], float)
+    p84c = np.asarray(r["chain_vs_p84"], float)
+    kept = np.asarray(r["chains_kept"], bool)
+    n = len(prof)
+    if n < 8:
+        r["rebasin_applied"] = False
+        return r
+    good = np.isfinite(prof).all(axis=0)
+    if good.sum() < 10:
+        r["rebasin_applied"] = False
+        return r
+
+    within = np.nanmedian(p84c[:, good] - p16c[:, good])
+    tol = max(link_tol_floor, 0.5 * within)
+    # single-linkage components on RMS profile distance
+    d = np.sqrt(np.nanmean((prof[:, None, good] - prof[None, :, good]) ** 2, axis=2))
+    lab = -np.ones(n, int)
+    for i in range(n):
+        if lab[i] >= 0:
+            continue
+        lab[i] = i
+        stack = [i]
+        while stack:
+            a = stack.pop()
+            nb = np.where((d[a] <= tol) & (lab < 0))[0]
+            lab[nb] = i
+            stack.extend(nb.tolist())
+    # Second stage: merge clusters whose CENTROID profiles are within one within-chain width.
+    # Single linkage alone is brittle -- measured case: the fast basin split 8+10 into two
+    # clusters 0.04 km/s apart (each < 50%) while a 6-chain slow basin stayed intact, so no
+    # majority existed and a genuinely fixable cell was left alone.
+    merge_tol = max(2.0 * link_tol_floor, within)
+    changed = True
+    while changed:
+        changed = False
+        labs = np.unique(lab)
+        cents = {L: np.nanmean(prof[lab == L][:, good], axis=0) for L in labs}
+        for ii in range(len(labs)):
+            for jj in range(ii + 1, len(labs)):
+                a, bl = labs[ii], labs[jj]
+                if np.sqrt(np.nanmean((cents[a] - cents[bl]) ** 2)) <= merge_tol:
+                    lab[lab == bl] = a
+                    changed = True
+                    break
+            if changed:
+                break
+    labs, counts = np.unique(lab, return_counts=True)
+    major_lab = labs[np.argmax(counts)]
+    major = lab == major_lab
+    if major.sum() < min_major_frac * n:
+        # No absolute majority -- genuine multimodality (e.g. one cell measured 8/10/6 after
+        # merging). Even then, REPORTING a tiny sigma-collapsed basin is indefensible when a
+        # cluster several times larger exists: fall back to the largest cluster iff the stored
+        # kept basin is a small minority and the largest cluster dwarfs it. Otherwise hands off.
+        tiny_kept = kept.sum() <= max(3, 0.15 * n)
+        if not (tiny_kept and major.sum() >= max(6, 2 * kept.sum())):
+            r["rebasin_applied"] = False
+            return r
+    if kept.sum() and (kept & major).sum() >= 0.5 * kept.sum():
+        r["rebasin_applied"] = False          # stored basin already IS (in) the majority
+        return r
+
+    # ---- recompute the summary from the majority cluster (normal-mixture approximation) ----
+    mu = prof[major]
+    sig = np.maximum((p84c[major] - p16c[major]) / 2.0, 1e-3)
+    rng = np.random.default_rng(12345)        # fixed seed: assemble must be reproducible
+    draws = rng.normal(mu[None, :, :], sig[None, :, :], size=(200, major.sum(), mu.shape[1]))
+    pool = draws.reshape(-1, mu.shape[1])
+    r["vs_median"] = np.nanmedian(pool, axis=0)
+    r["vs_p16"], r["vs_p84"] = np.nanpercentile(pool, [16, 84], axis=0)
+    r["vs_p025"], r["vs_p975"] = np.nanpercentile(pool, [2.5, 97.5], axis=0)
+
+    from . import vs_reliability as vr
+    zf = float(r.get("z_floor", np.inf))
+    rel = vr.reliability(np.asarray(r["depth"], float), p16c, prof, p84c,
+                         kept=major, z_floor=(zf if np.isfinite(zf) else None))
+    r["reliable_mask"] = rel["reliable"]
+    r["z_reliable_min"] = rel["z_reliable_min"]
+    r["z_reliable_max"] = rel["z_reliable_max"]
+    for k in list(r.keys()):
+        if k.startswith(("gamma_", "zeta_")):
+            r[k] = np.full_like(np.asarray(r[k], float), np.nan)
+    r["chains_kept"] = major
+    r["n_chains_kept"] = int(major.sum())
+    r["rebasin_applied"] = True
+    return r
+
+
 def restrict_periods(cell, period_ranges):
     """Return a copy of `cell` with each wave's curve trimmed to a period range.
 
@@ -329,13 +500,25 @@ def attach_cell_coords(cell, swtomotv_yaml):
     try:
         from swtomotv.config import DatasetConfig
         from swtomotv.geometry import make_grid
+        ds = DatasetConfig.from_yaml(swtomotv_yaml)
+        grid = make_grid(ds.bounds, ds.dx_km)
+        xc = float(grid.x[cell.ix] + grid.dx / 2)
+        yc = float(grid.y[cell.iy] + grid.dx / 2)
+        olat, olon = grid.origin
     except Exception:
-        return cell
-    ds = DatasetConfig.from_yaml(swtomotv_yaml)
-    grid = make_grid(ds.bounds, ds.dx_km)
-    xc = float(grid.x[cell.ix] + grid.dx / 2)
-    yc = float(grid.y[cell.iy] + grid.dx / 2)
-    olat, olon = grid.origin
+        # swtomotv lives in the bayesbay env only. Its grid is x = 0:dx:ceil(xmax) from the
+        # origin (min_lat, min_lon) -- geometry.make_grid -- so the cell centre needs nothing
+        # but the yaml's bounds and dx_km. Before this fallback every cell run from the
+        # bayhunter env (all local _wq4 arms) carried cell_lonlat = NaN.
+        try:
+            import yaml
+            with open(swtomotv_yaml) as fh:
+                y = yaml.safe_load(fh)
+            olat, olon = float(y["bounds"][0]), float(y["bounds"][2])
+            dx = float(y["dx_km"])
+        except Exception:
+            return cell
+        xc, yc = cell.ix * dx + dx / 2, cell.iy * dx + dx / 2
     R = 6371.0                                    # geometry.R_EARTH_KM
     cell.x_km, cell.y_km = xc, yc
     cell.lat = float(olat + yc / R * 180.0 / np.pi)                       # invert y = R*(lat-olat)
@@ -791,7 +974,7 @@ DINVER_BIN_DEFAULT = os.path.expanduser(
 
 def dinver_config(cell, out_npz, dinver_bin=DINVER_BIN_DEFAULT, waves=("fund", "overtone"),
                   lns=(3, 4, 5, 7), lrs=(3.0, 2.0, 1.5, 1.2), ntrials=3, ns=50_000, nr=100,
-                  ns0=10_000, n_pool=100, depth_factor=2.0, n_resample=30, min_cov=0.05,
+                  ns0=10_000, n_pool=100, n_keep=None, vs_rev=False, depth_factor=2.0, n_resample=30, min_cov=0.05,
                   depth_max=6.5, vs_bounds=(0.5, 4.2), vp_bounds=(0.8, 8.0),
                   pr_bounds=(0.2, 0.35), rho=2000.0, jobs=1, seed0=1, workdir=None,
                   gpdcreport_bin=None, run_timeout=None, keep_reports=False, n_parallel=1,
@@ -839,6 +1022,7 @@ def dinver_config(cell, out_npz, dinver_bin=DINVER_BIN_DEFAULT, waves=("fund", "
                curves=curvefiles, out_npz=out_npz, workdir=workdir, dinver_bin=dinver_bin,
                gpdcreport_bin=gpdcreport_bin, lns=list(lns), lrs=list(lrs), ntrials=int(ntrials),
                ns=int(ns), nr=int(nr), ns0=int(ns0), n_pool=int(n_pool),
+               n_keep=(None if n_keep is None else int(n_keep)), vs_rev=bool(vs_rev),
                depth_factor=float(depth_factor), n_resample=int(n_resample),
                min_cov=(None if min_cov is None else float(min_cov)),
                depth_max=float(depth_max), vs_bounds=list(vs_bounds), vp_bounds=list(vp_bounds),

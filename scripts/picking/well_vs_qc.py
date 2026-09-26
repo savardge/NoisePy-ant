@@ -57,7 +57,30 @@ WELLS = {
     "aargau": [("Boettstein", 47.565033, 8.227163, 1501), ("Riniken", 47.504507, 8.189936, 1800),
                ("Leuggern", 47.589033, 8.205224, 1689), ("Kaisten", 47.539828, 8.031539, 1306),
                ("Schafisheim", 47.369472, 8.148685, 2006), ("Weiach-1", 47.563788, 8.458407, 2482),
-               ("Weiach-2", 47.565144, 8.453530, 2013), ("Benken", 47.644915, 8.649547, 1007)],
+               ("Weiach-2", 47.565144, 8.453530, 2013), ("Benken", 47.644915, 8.649547, 1007),
+               # Added 2026-09-14: six further deep wells INSIDE the aargau model footprint, all
+               # within 0.02-0.34 km of a grid cell (the original three are 0.11-0.33 km), from the
+               # swisstopo "Deep wells" layer + the Nagra reports in
+               # ~/Documents/swissgeol/aargau/Nagra reports/. Coordinates converted from LV95.
+               # They are SHALLOWER than the first three (320-1036 m) so they constrain the top of
+               # the section -- which is where the maps resolve best. NOTE: no interval-Vp CSV
+               # exists for any of them yet, so well_profile_compare draws them without an overlay
+               # until a log is digitised (see test_2026-09-14_new_wells/README.md).
+               ("Boezberg-1", 47.478879, 8.154974, 1036),
+               ("Boezberg-2", 47.506543, 8.131758, 829),
+               ("Schinznach-Bad-S3", 47.454191, 8.164903, 876),
+               ("Zurzach-Jungrebe", 47.581479, 8.290868, 320),
+               ("Zurzach-L3", 47.582934, 8.276375, 517),
+               ("Zurzach-S2", 47.587809, 8.258677, 607),
+               # Added 2026-09-14: two boreholes of the 1979-80 "Geothermische Prospektion
+               # Koblenz-Wildegg-Dielsdorf" campaign, from the swissgeol archive sheets SGD 12307
+               # and 12308. They are NOT the four wells above -- Schinznach S2 is 0.32 km from
+               # Schinznach-Bad-S3 and Zurzach Z-3 is 1.12 km from Zurzach-Jungrebe -- so they are
+               # registered at their OWN coordinates rather than having their columns transferred.
+               # Both carry a full logged stratigraphy (see well_stratigraphy_aargau.csv);
+               # Zurzach Z-3 reaches crystalline basement at 460 m.
+               ("Schinznach-S2", 47.457008, 8.164413, 136),
+               ("Zurzach-Z3", 47.591007, 8.286035, 701)],
     # GVL-1 (Geo-Energie Suisse exploration well). NOTE it has stratigraphy but NO sonic/Vp/Vs
     # log, so a Vs comparison there is against formation tops, not a velocity curve --
     # see gvl1_stratigraphy_compare.py.
@@ -70,11 +93,20 @@ WELLS = {
     "hautesorne": [("GVL-1", 47.33308, 7.22020, 4006)],
 }
 NAGRA_VP = "/Users/genevievesavard/Data/aargau/nagra-wells-vp"   # {well}-geoIntervalVp.csv (Vp,depth)
-# Riehen in-situ Vs. The T7Shield copy is the original, but that drive is usually unmounted
-# and this is the project's ONLY true Vs ground truth (the aargau overlays are interval Vp with
-# an assumed Vp/Vs, which spans 1.5-3.4 km/s and cannot discriminate a 0.2 km/s difference).
-# So fall back to the OneDrive copy rather than silently dropping the overlay.
+# Riehen in-situ Vs -- the project's ONLY true Vs ground truth. (The aargau overlays are
+# interval Vp over an assumed Vp/Vs spanning 1.5-3.4 km/s, far too wide to discriminate a
+# 0.2 km/s difference; hautesorne GVL-1 has no sonic log at all.)
+#
+# Use the .model, NOT the Vsmodel_well_Basel1_Otterbach_Michel2016.csv that
+# riehen_michel_compare.py reads: the CSV is Vs-only, while the overlays below also need Vp for
+# the Vp/ratio curves. The two carry the same model -- the CSV is this file's 17 layers
+# serialised as a 34-row depth staircase (verified byte-for-byte via the shared layer values).
+#
+# T7blue first: it is the canonical mounted drive. The T7Shield path was the original and is
+# stale (that drive is usually unmounted); OneDrive is a last resort so the overlay never
+# silently disappears -- all three copies are md5-identical.
 _MICHEL_CANDIDATES = [
+    "/Volumes/T7blue/riehen-data/well-data/Michel2016_gpdc.model",
     "/Volumes/T7Shield/riehen/well-data/Michel2016_gpdc.model",
     os.path.expanduser("~/Library/CloudStorage/OneDrive-LumidasInc/Switzerland/matlab-swant/"
                        "scripts/vs_depth_inversion/riehen/Michel2016_gpdc.model"),
@@ -100,6 +132,29 @@ def _read_geopsy_model(path):
     vs = np.array([float(t[2]) for t in toks[1:1 + n]])
     tops = np.concatenate([[0.0], np.cumsum(th)[:-1]])
     return tops / 1000.0, vp / 1000.0, vs / 1000.0
+
+
+# Continuous sonic logs (the digitised Bözberg composite plots) are sampled at ~0.3 m. Drawn raw
+# against a Vs profile whose vertical resolution is ~0.1 km they are an unreadable hairball, so a
+# dense log is reduced to a running median over SONIC_MEDIAN_M before plotting. The CSV on disk
+# stays the raw digitisation -- this is a display choice, and the window is well under the model's
+# own resolution, so it removes nothing the comparison could have used.
+SONIC_MEDIAN_M = 20.0
+SONIC_DENSE_N = 500       # more samples than this means a continuous log, not a blocky model
+
+
+def _running_median_depth(dep, val, win_m=SONIC_MEDIAN_M, step_m=2.0):
+    """Median of val in a win_m window, evaluated every step_m, on the log's own gaps.
+    Windows that straddle a logging gap are dropped rather than bridged."""
+    out_d, out_v = [], []
+    z = np.arange(dep.min() + 0.5 * win_m, dep.max() - 0.5 * win_m + step_m, step_m)
+    for zc in z:
+        m = (dep >= zc - 0.5 * win_m) & (dep <= zc + 0.5 * win_m)
+        if m.sum() < 0.3 * win_m / np.median(np.diff(dep)):
+            continue                      # inside a gap: not enough samples, leave a break
+        out_d.append(zc)
+        out_v.append(np.median(val[m]))
+    return np.array(out_v), np.array(out_d)
 
 
 def _staircase(tops, vals, zmax=6.0):
@@ -129,9 +184,14 @@ def overlay_curves(net, wellname):
         fp = os.path.join(NAGRA_VP, f"{stem}-geoIntervalVp.csv")
         if os.path.exists(fp):
             d = np.genfromtxt(fp, delimiter=",", skip_header=1)
-            dep, vp = d[:, 1] / 1000.0, d[:, 0] / 1000.0
+            dep_m, vp_ms = d[:, 1], d[:, 0]
+            note = ""
+            if dep_m.size > SONIC_DENSE_N:
+                vp_ms, dep_m = _running_median_depth(dep_m, vp_ms)
+                note = f" ({SONIC_MEDIAN_M:.0f} m med.)"
+            dep, vp = dep_m / 1000.0, vp_ms / 1000.0
             for ratio, col, ls in VPVS_RATIOS:
-                out.append((vp / ratio, dep, f"Nagra {wellname} Vp/{ratio:g}", col, ls))
+                out.append((vp / ratio, dep, f"Nagra {wellname} Vp/{ratio:g}{note}", col, ls))
     return out
 
 

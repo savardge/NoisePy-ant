@@ -36,6 +36,12 @@ Downstream, swtomotv must render periods with enough decimals to keep the rungs 
 (`period_decimals: 3` in the dataset YAML); at 1 decimal two scales silently share a cache
 file. `--period-axis nominal` restores the legacy behaviour.
 
+PHASE velocities get the exact-Hankel finite-distance correction (default ON since 2026-09-01;
+`--no-hankel` reproduces older exports; group is never corrected — envelope measurement).
+The correction is recorded in each table's .meta.json; see
+dispersion.hankel_finite_distance_correction and the per-network A/B validation under
+Projects/<net>/tomo/1_velocity_maps/3_diagnostics/hankel_correction/.
+
 VELOCITY bounds are applied HERE and differ by measure — the QC script's vbounds were relaxed to
 5.0 so valid long-period phase picks are not clipped:
   group: fund/love <= 3.6, overtone 1.5-4.5   (a ~5 km/s "fundamental group velocity" on these
@@ -94,6 +100,11 @@ ap.add_argument("--period-axis", default="scale", choices=("scale", "nominal"),
                 help="scale (default) = the picker's native CWT scale ladder (uneven, "
                      "log-spaced ~5.95%%); nominal = the legacy uniform 0.1 s FTAN grid "
                      "for group. See the docstring for why scale is correct.")
+ap.add_argument("--no-hankel", action="store_true",
+                help="skip the exact-Hankel finite-distance correction on PHASE velocities "
+                     "(dispersion.hankel_finite_distance_correction; default ON for "
+                     "--measure phase since 2026-09-01, never applied to group). Use only "
+                     "to reproduce pre-correction exports.")
 ap.add_argument("--vbounds", default=None,
                 help="override the built-in VBOUNDS for the chosen measure, as "
                      "'fund=0.2:3.6,overtone=1.5:4.5,love=0.2:3.6[,love_ot=1.5:4.5]'. "
@@ -135,6 +146,23 @@ df = pd.read_csv(src, usecols=["pair", TCOL, VCOL, "wave_type", "mode", OKCOL,
 # float noise so the ladder collapses to its ~47 discrete rungs. On the legacy nominal axis
 # the 0.1 s grid is the label.
 df["_T"] = df[TCOL].round(4 if args.period_axis == "scale" else 1)
+
+# Exact-Hankel finite-distance correction: PHASE only, per-row, before vbounds/aggregation.
+# Group velocities are envelope measurements and are deliberately NOT corrected.
+HANKEL_APPLIED = (args.measure == "phase") and not args.no_hankel
+if HANKEL_APPLIED:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.abspath(_os.path.join(_os.path.dirname(
+        _os.path.abspath(__file__)), "..", "..")))
+    from noisepy.dispersion import hankel_finite_distance_correction
+    _c0 = df[VCOL].values
+    df[VCOL] = hankel_finite_distance_correction(_c0, df[TCOL].values,
+                                                 df["distance"].values)
+    _rel = df[VCOL].values / _c0 - 1.0
+    _fin = np.isfinite(_rel)
+    print("hankel correction (phase): median dc/c %+.4f%%, p5 %+.4f%%, max|.| %.4f%%"
+          % (100 * np.nanmedian(_rel[_fin]), 100 * np.nanpercentile(_rel[_fin], 5),
+             100 * np.nanmax(np.abs(_rel[_fin]))))
 
 if args.bounds_file:
     if not os.path.exists(args.bounds_file):
@@ -187,6 +215,10 @@ for wkey, (wt, md) in WAVES.items():
                    "period_axis": TCOL, "period_rounding": 1, "wave": wkey,
                    "wave_type": wt, "mode": md, "vbounds_km_s": [lo, hi],
                    "max_std": args.max_std, "flagged_excluded": sorted(flagged),
+                   "hankel_correction": ("exact H0^(2) finite-distance correction applied "
+                                         "per-row before vbounds (dispersion."
+                                         "hankel_finite_distance_correction)"
+                                         if HANKEL_APPLIED else "NOT applied"),
                    "rows": int(len(A)), "pairs": int(A.station_pair.nunique()),
                    "generator": "export_unified_tomo_picks.py"}, fh, indent=2)
     print(f"{wkey:9s}: {len(A):,} (pair,T) rows ({n0 - len(A):,} branch-ambiguous dropped) | "

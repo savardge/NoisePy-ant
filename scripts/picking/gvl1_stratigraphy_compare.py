@@ -75,7 +75,17 @@ def align_score(peaks, tops, rng, zmax, n_null=10000, topn=4):
     test vacuous: a trans-D posterior median carries ~15-22 small peaks in a 6 km box, so a
     RANDOM peak already sits ~0.1 km from any given top and observed ~ null by construction.
     The strongest peaks are also the only ones a surface-wave inversion could claim as
-    interfaces."""
+    interfaces.
+
+    DO NOT RANK ARMS ON SMALL DIFFERENCES IN THIS SCORE. Measured 2026-08-28 at GVL-1 by
+    scoring each kept chain of an arm separately: the within-arm spread across chains
+    (p16-p84 ~ 0.08-0.20 km) is as large as the between-arm differences, and the score of
+    the MEDIAN PROFILE is not even centred on the chain distribution -- stacking chains
+    creates and destroys gradient peaks, so the median profile scored 0.336 where its own
+    chains sat at 0.111 (Rgp_t2_g5) and 0.039 where its chains sat at 0.105 (RLgp_t2).
+    Only a score whose p_vs_random is small is worth reporting at all; ordering among arms
+    that all fail to beat chance is noise. Fit quality, chain agreement and reliable-depth
+    reach discriminate between arms far better than this does."""
     if not peaks:
         return np.nan, np.nan
     peaks = sorted(peaks, key=lambda t: -t[1])[:topn]
@@ -88,8 +98,77 @@ def align_score(peaks, tops, rng, zmax, n_null=10000, topn=4):
     return obs, float(np.mean(null <= obs))
 
 
+GVL1_LONLAT = (7.22020, 47.33308)      # swisstopo; matches GVL-1.shp to 0.3 m
+
+
+def score_volume(root, spec, S, key, rng, zcap=None):
+    """Score one vs_prod3 arm at the GVL-1 cell.
+
+    Only `depth` and `vs_median` are needed, which is why this weaker median-profile test is
+    the one available here: the stronger ensemble statistic in gvl1_interface_probability.py
+    needs per-model layer boundaries, and vs_prod3 cells store `n_layers_post` but not the
+    boundary depths.
+    """
+    arm, vf = spec.split(":", 1)
+    f = os.path.join(root, arm, vf)
+    if not os.path.exists(f):
+        return None
+    z = np.load(f, allow_pickle=True)
+    ll = z["lonlat"]
+    dist = np.hypot((ll[:, 0] - GVL1_LONLAT[0]) * np.cos(np.deg2rad(GVL1_LONLAT[1])) * 111.32,
+                    (ll[:, 1] - GVL1_LONLAT[1]) * 111.32)
+    i = int(np.argmin(dist))
+    if dist[i] > 2.5:
+        return None
+    d, vs = z["depth"], z["vs_median"][i]
+    # score only where the posterior is data-constrained; below z_reliable_max it is prior
+    zmax = float(z["z_reliable_max"][i]) if "z_reliable_max" in z.files else float(d.max())
+    zmax = min(zmax, float(d.max()))
+    # A COMMON cap is required to compare arms. align_score's null is uniform over [0, zmax]
+    # and only the top-4 peaks are scored, so a deeper window changes both the null and which
+    # peaks compete: hautesorne L0g_modegate scored 1.466 km on its own 6.00 km window but
+    # 0.766 km capped at the 3.15 km its ungated twin reached -- the apparent collapse was
+    # entirely the window, not the model.
+    if zcap:
+        zmax = min(zmax, zcap)
+    m = np.isfinite(vs) & (d <= zmax)
+    if m.sum() < 8:
+        return None
+    pk = grad_peaks(d[m], vs[m], zmax)
+    obs, p = align_score(pk, key, rng, zmax)
+    r = dict(arm=arm, cell_km=round(float(dist[i]), 2), z_used=round(zmax, 2),
+             n_peaks=len(pk),
+             z_strongest_km=round(float(max(pk, key=lambda t: t[1])[0]), 2) if pk else np.nan,
+             med_dist_km=round(obs, 3) if np.isfinite(obs) else np.nan,
+             p_vs_random=round(p, 3) if np.isfinite(p) else np.nan)
+    means = []
+    for _, g in S.iterrows():
+        mm = (d >= g.top_km) & (d < min(g.base_km, zmax)) & np.isfinite(vs)
+        if mm.sum() >= 2:
+            v = round(float(np.mean(vs[mm])), 3)
+            r[f"Vs_{g.Group}"] = v
+            means.append((g.top_km, v))
+    # test B: does Vs increase with depth as the lithology implies?
+    means.sort()
+    seq = [v for _, v in means]
+    r["n_groups"] = len(seq)
+    r["monotonic_frac"] = (round(float(np.mean(np.diff(seq) > 0)), 3) if len(seq) > 1 else np.nan)
+    return r
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--root", default=None,
+                    help="score vs_prod3 ARMS instead of the 2026-08-07 per-cell test tree, "
+                         "e.g. Projects/hautesorne/tomo/2_vs_depth_inversion/vs_prod3")
+    ap.add_argument("--arms", nargs="+", default=None,
+                    help="with --root: arm:volume_file.npz, e.g. R0g:volume_fund.npz")
+    ap.add_argument("--out", default=None, help="directory for the csv (default: the test tree)")
+    ap.add_argument("--zcap", type=float, default=None,
+                    help="cap every arm at this depth so the alignment test is "
+                         "like-for-like; 'auto' behaviour is --zcap-auto")
+    ap.add_argument("--zcap-auto", action="store_true",
+                    help="cap all arms at the SHALLOWEST arm's reliable depth")
     ap.add_argument("--iso-tag", default="test_2026-08-07_gvl1_iso_combos")
     ap.add_argument("--radial-tag", default="test_2026-08-07_gvl1_radial_combos")
     a = ap.parse_args()
@@ -98,6 +177,40 @@ def main():
     S = load_strat()
     tops = S.top_km.values[1:]                    # skip the 0-m surface
     key = S[S.Group.isin(KEY_TOPS)].top_km.values
+
+    if bool(a.root) != bool(a.arms):
+        raise SystemExit("--root and --arms must be given together")
+    if a.root:
+        zcap = a.zcap
+        if a.zcap_auto:
+            probe = [score_volume(a.root, s, S, key, rng) for s in a.arms]
+            zs = [r['z_used'] for r in probe if r]
+            zcap = min(zs) if zs else None
+            print(f'common depth cap (shallowest arm): {zcap} km\n')
+        rows = [r for r in (score_volume(a.root, s, S, key, rng, zcap) for s in a.arms) if r]
+        if not rows:
+            raise SystemExit("no arm produced a scoreable GVL-1 cell")
+        D = pd.DataFrame(rows)
+        outdir = a.out or a.root
+        os.makedirs(outdir, exist_ok=True)
+        p = os.path.join(outdir, "gvl1_stratigraphy_compare.csv")
+        D.to_csv(p, index=False)
+        cols = ["arm", "z_used", "n_peaks", "z_strongest_km", "med_dist_km", "p_vs_random",
+                "n_groups", "monotonic_frac"]
+        print("=== GVL-1: |dVs/dz| peak alignment to mapped tops (A) and layer-velocity "
+              "ordering (B) ===")
+        print(D[cols].sort_values("med_dist_km").to_string(index=False))
+        print("\nmed_dist_km  median distance from each key top to its nearest strong peak "
+              "(lower better)")
+        print("p_vs_random  fraction of random-peak draws at least as close -- small = the "
+              "alignment beats chance")
+        print("monotonic_frac  fraction of adjacent stratigraphic groups whose mean Vs "
+              "increases with depth")
+        print("\nNOTE this is the WEAKER median-profile statistic. The ensemble "
+              "interface-probability test\n(gvl1_interface_probability.py) needs per-model "
+              "layer boundaries, which vs_prod3 cells do not store.")
+        print(f"\nwrote {p}")
+        return
 
     rows, prof = [], {}
     for tag, mode in ((a.iso_tag, "iso"), (a.radial_tag, "radial")):

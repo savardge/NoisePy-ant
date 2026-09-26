@@ -98,6 +98,11 @@ def main():
                          "constrain. res = threshold on the resolution diagonal alone (it already "
                          "encodes the smoothing), which is self-consistent with the prior.")
     ap.add_argument("--se", type=float, default=0.025, help="prior slowness std sigma_eff s/km (fixed)")
+    ap.add_argument("--two-step", action="store_true",
+                    help="Liu & Yao (2017) two-step TV: rays whose step-1 misfit exceeds 2 std get their "
+                         "variance inflated and the model is re-solved (swtomotv tv_two_step two_step=True, "
+                         "the variant the Love production runs used). Default OFF: every existing map was "
+                         "single-step and this driver ignores the dataset YAML's two_step field.")
     ap.add_argument("--vplaus", default="off",
                     help="plausibility mask from THIS period's pick distribution, hiding "
                          "cells the data cannot support. Modes:\n"
@@ -143,6 +148,11 @@ def main():
     ap.add_argument("--fast", action="store_true",
                     help="skip the per-period sigma_eff audit scan + per-period figures (fixed lc/se); "
                          "much faster for fine grids")
+    ap.add_argument("--topo", action="store_true",
+                    help="topography-corrected kernels: G row sums become path lengths ALONG the "
+                         "DEM smoothed over lambda/4 = v_moy*T/4 (swtomotv dem.smoothed_surface; "
+                         "Wang et al. 2017). Needs a `dem:` block in the dataset YAML. Kernels are "
+                         "cached with tag _topo; without this flag the flat code path is untouched.")
     args = ap.parse_args()
 
     ds = DatasetConfig.from_yaml(args.config)
@@ -178,6 +188,17 @@ def main():
                    _want, _bad[0]))
     build_cache(ds, grid, args.wave, force=True)
     periods = available_periods(ds, args.wave)
+    if args.topo:
+        from swtomotv.dem import build_local_dem, smoothed_surface
+        from swtomotv.data.stations import load_stations
+        DEM = build_local_dem(ds, method, grid)
+        print("[topo] DEM %s on the local frame: %.0f-%.0f m, fill fraction inside the box %.4f"
+              % (ds.dem["path"], DEM["h"].min(), DEM["h"].max(), DEM["fill_frac"]), flush=True)
+        if DEM["fill_frac"] > 0.01:
+            raise SystemExit("FATAL: DEM has no data over %.1f%% of the inversion box"
+                             % (100 * DEM["fill_frac"]))
+        _st = load_stations(ds, grid)
+        STX, STY = _st["xstat"].values, _st["ystat"].values
 
     sta = pd.read_csv(ds.cache_dir / "stations_in_grid.csv")
     sx, sy = ll2xy(sta.latitude.values, sta.longitude.values, *grid.origin)
@@ -317,7 +338,23 @@ def main():
         if N < 40:                          # too few rays for a meaningful map
             continue
         # rebuild kernels (pick set changed on re-export -> cached G is stale)
-        G, mask, G_sum = build_G(ds, method, grid, args.wave, T, use_cache=False)
+        if args.topo:
+            # v_moy is this tree's own velocity (group or phase), so lambda = v_moy*T is the
+            # wavelength the smoothing window tracks in either measurement.
+            itp, topo_win = smoothed_surface(ds, method, grid, T, v_moy, dem=DEM)
+            G, mask, G_sum = build_G(ds, method, grid, args.wave, T, use_cache=False,
+                                     topo=itp, tag="_topo")
+            # lengthening vs the flat kernel's own row sum: same samples, weight dl each
+            dproj = np.hypot(STX[z["ircv"]] - STX[z["isrc"]], STY[z["ircv"]] - STY[z["isrc"]])
+            flat = (np.floor(dproj / method.dl_km) + 1) * method.dl_km
+            topo_pct = 100.0 * (np.asarray(G.sum(axis=1)).ravel() / flat - 1.0)
+            print("    [topo] T=%-6g window %.2f km | path lengthening median %.3f%%, "
+                  "p95 %.3f%%, max %.3f%%" % (T, topo_win, np.median(topo_pct),
+                                              np.percentile(topo_pct, 95), topo_pct.max()),
+                  flush=True)
+        else:
+            G, mask, G_sum = build_G(ds, method, grid, args.wave, T, use_cache=False)
+            topo_win, topo_pct = np.nan, np.array([np.nan])
         if args.cd_mode in ("measured", "scaled"):
             ts = np.asarray(z["tau_std"], dtype=float)
             # a pick with no usable repeatability falls back to the blanket error rather
@@ -356,7 +393,7 @@ def main():
         se_star = args.se
         # production solve at the fixed se, with posterior + resolution
         m2, stats, extras = tv_two_step(G, tau, v_moy, CMi, se_star, want_post=True,
-                                        two_step=False,
+                                        two_step=bool(args.two_step),
                                         cd=Cd if args.cd_mode != "blanket" else None)
         V = 1.0 / grid.vec_to_map(m2)
         R = grid.vec_to_map(extras["res_diag"])
@@ -408,7 +445,7 @@ def main():
         chi2_red = float(np.sum(stats["misfit_post"] ** 2 / Cd) / N)
         cov = int(np.sum(show))
         np.savez_compressed(outdir / f"map_T{ds.tfmt(T)}.npz",
-                            period=T, vel=Vm, vel_full=np.where(covered, V, np.nan),
+                            period=T, two_step=bool(args.two_step), vel=Vm, vel_full=np.where(covered, V, np.nan),
                             mask=show, res_diag=R, unc_s=U, res_thresh=rthr,
                             se=se_star, LC=LC_T, chi2_red=chi2_red,
                             vplaus=args.vplaus, n_vplaus_hidden=n_vplaus,
@@ -416,8 +453,13 @@ def main():
                             cd_mode=args.cd_mode, cd_n_fallback=n_bad,
                             cd_scale=cd_scale,
                             cd_median=float(np.median(np.sqrt(Cd))),
-                            var_red=stats["var_red"], N=N, coverage=cov)
+                            var_red=stats["var_red"], N=N, coverage=cov,
+                            topo=bool(args.topo), topo_window_km=topo_win,
+                            topo_pct_median=float(np.median(topo_pct)))
         rows.append(dict(T=T, N=N, se_eff=se_star, LC=LC_T,
+                         topo_window_km=topo_win,
+                         topo_pct_median=round(float(np.median(topo_pct)), 4),
+                         topo_pct_p95=round(float(np.percentile(topo_pct, 95)), 4),
                          var_red=round(stats["var_red"], 3),
                          restit_post=round(stats["restit_post"], 2), chi2_red=round(chi2_red, 2),
                          cells_shown=cov, cells_covered=int((mask > 0).sum())))

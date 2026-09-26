@@ -47,7 +47,12 @@ def _resolve():
         net = cfg["network"]["code"]
         limit = a.limit if a.limit is not None else int(cfg["batch"].get("limit", 0))
         ref_dir = cfg["paths"]["ref_dir"]
-        return stack, out, nproc, net, limit, ref_dir
+        # optional per-pair regional phase reference (absent/null = single network reference,
+        # bit-identical to every run before 2026-09-15); see noisepy.regional_ref
+        regional = (cfg.get("unified_picking") or {}).get("regional_phase_ref") or None
+        if isinstance(regional, dict):
+            regional = [regional]            # one block (rayleigh, 2026-09-15) or a list of blocks (+ love, 2026-09-16)
+        return stack, out, nproc, net, limit, ref_dir, regional
     # ---- legacy positional + DISP_* env (Aargau defaults) ----
     stack = a.pos[0]
     out = a.pos[1] if len(a.pos) > 1 else stack.rstrip("/") + "_unified"
@@ -57,10 +62,10 @@ def _resolve():
     ref_dir = os.environ.get(
         "DISP_REF_DIR",
         "/Users/genevievesavard/Codes/extract_higher_modes/Projects/aargau/vsg_modesep")
-    return stack, out, nproc, net, limit, ref_dir
+    return stack, out, nproc, net, limit, ref_dir, None
 
 
-STACK_ROOT, OUT_ROOT, NPROC, NET, LIMIT, REF_DIR = _resolve()
+STACK_ROOT, OUT_ROOT, NPROC, NET, LIMIT, REF_DIR, REGIONAL = _resolve()
 STACK_METHOD = os.environ.get("DISP_STACK", "pws")    # single stack method (validated production = pws)
 OVERWRITE = "--overwrite" in sys.argv or os.environ.get("DISP_OVERWRITE") == "1"
 LOVE_OT = os.environ.get("DISP_LOVE_OT") == "1"       # Love overtone extraction (default off; judged
@@ -98,6 +103,17 @@ def _init():
             print(f"WARN: could not load {key} reference ({fn}): {e}; phase disabled for it.")
             refs[key] = None
     _G["refs"] = refs
+    _G["regional"] = []
+    for rp in (REGIONAL or []):
+        # per-pair W/E harmonic-mixture reference for one (wave, mode) per block; everything else unchanged
+        from noisepy.regional_ref import RegionalRef, station_eastings_km, load_ref
+        key = (rp.get("wave", "rayleigh"), rp.get("mode", "fundamental"))
+        ex = station_eastings_km(rp["station_file"])
+        reg = RegionalRef(os.path.join(REF_DIR, rp["west"]), os.path.join(REF_DIR, rp["east"]),
+                          {}, default_fW=None)
+        fb = load_ref(os.path.join(REF_DIR, rp.get("fallback", REF_FILES[key])))
+        _G["regional"].append(dict(key=key, ex=ex, reg=reg, fallback=fb,
+                                   boundary=float(rp.get("boundary_e_km", 2616.0)), dispersion=dispersion))
     _G["comps"] = list(up.RAYLEIGH_COMPS) + ["TT"] + list(up.Config.LOVE_CONTEXT)
 
 
@@ -113,7 +129,15 @@ def process(path):
         params, ccf = up.load_pair(path, STACK_METHOD, _G["comps"])
         if "ZZ" not in ccf:
             return "no-ZZ"
-        rows = up.pick_all_modes(params, ccf, _G["refs"], STACK_METHOD, cfg=up.Config)
+        refs = _G["refs"]
+        for R in _G["regional"]:
+            from noisepy.regional_ref import pair_west_fraction
+            fw = pair_west_fraction(R["ex"], [pair], R["boundary"])
+            if pair in fw:                                   # unknown station -> network reference
+                R["reg"].fW[pair] = fw[pair]
+                refs = dict(refs)
+                refs[R["key"]] = R["reg"].picker_callable(pair, R["fallback"], for_group_ref=_G["refs"][R["key"]])
+        rows = up.pick_all_modes(params, ccf, refs, STACK_METHOD, cfg=up.Config)
     except Exception as e:
         return f"err:{type(e).__name__}"
     os.makedirs(out_dir, exist_ok=True)

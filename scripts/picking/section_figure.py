@@ -51,7 +51,7 @@ SECTIONS = {
     "BB": ("B (W)", "B' (E)", "test_2026-08-08_BB_section_R0g",
            (2572477, 1242491), (2595079, 1242491)),
     "CC": ("C (NW)", "C' (SE)", "test_2026-08-16_CC_section_R0g",
-           (2574985, 1256138), (2587558, 1235971)),
+           (2574007, 1255996), (2587786, 1236044)),   # GS 2026-09-10 (was 2574985,1256138 -> 2587558,1235971)
 }
 STEP_M = 500.0          # sample the line at the grid spacing, one cell per step
 TICK_KM = 2.0           # same tick interval on both axes: the panels are 1:1

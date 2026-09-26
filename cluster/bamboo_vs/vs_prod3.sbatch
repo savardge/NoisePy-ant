@@ -21,6 +21,16 @@ set -eu
 activate_env
 net_paths "$NET"
 cfg_flags "$CFG"
+# WS_OVERRIDE: the waveset for arms whose CFG does not imply it. The R0+R1 arms run
+# CFG=R0g/R0p (for the production root and flags) but invert waveset `fundot`, and
+# --assemble-only stitches whatever --wavesets says -- without this it would silently build a
+# `fund` volume from `fundot` cells.
+WS=${WS_OVERRIDE:-$WS}
+
+# CELLS is a comma-separated cell list, but sbatch --export is ITSELF comma-separated, so
+# passing it raw delivers only the first entry (a 5-cell sweep silently became 1 cell).
+# Encode commas as @C@ at submit time, exactly as EXTRA_FLAGS does.
+CELLS="${CELLS:-}"; CELLS=${CELLS//@C@/,}
 
 STAGE="${STAGE:-grid}"
 # OUTDIR_OVERRIDE: smoke tests MUST redirect output -- a tiny-iter cell written into the
@@ -44,6 +54,9 @@ I=$(( ${SLURM_ARRAY_TASK_ID:-0} ))
 # EXTRA_FLAGS: extra driver flags for booster/diagnostic arms (e.g. --reverse). Unquoted on
 # purpose. @C@ decodes back to a comma: sbatch --export is itself comma-separated, so a
 # literal comma in a value (--vpvs-range 1.5,3.5) is truncated in transit.
+# default BEFORE the substitution: `${VAR//x/y}` on an unset VAR is itself an unbound-variable
+# error under `set -u`, so submissions that set no EXTRA_FLAGS (submit_all.sh) died here.
+EXTRA_FLAGS=${EXTRA_FLAGS:-}
 EXTRA_FLAGS=${EXTRA_FLAGS//@C@/,}
 srun "$BH_PY" grid_vs_inversion.py "${COMMON[@]}" $EXTRA ${EXTRA_FLAGS:-} \
     --n-chains "${NCHAINS:-24}" \

@@ -35,6 +35,7 @@ E = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from well_vs_qc import WELLS                                     # noqa: E402
 from noisepy.lv95 import wgs84_to_lv95, extent_lv95_km          # noqa: E402
+from noisepy.colormaps import get_cmap                           # noqa: E402
 
 MAP_DEPTHS = np.arange(0.5, 6.01, 0.5)
 NEAR_KM = 0.2                                                    # stations/wells within 200 m
@@ -150,6 +151,21 @@ def main():
                          "= shared when --vlims-from is given, own otherwise. A shared scale "
                          "calibrated on a GROUP arm saturates a PHASE arm badly -- phase Vs "
                          "runs ~0.5 km/s faster, so its median can exceed the group p98.")
+    ap.add_argument("--gridded-maps", action="store_true",
+                    help="draw the MAPS from volume_<ws>_gridded.npz (the 3-D tension-spline "
+                         "field) instead of the raw cell nodes. Cells are inverted "
+                         "INDEPENDENTLY in 1-D with no lateral coupling, so a per-cell map "
+                         "steps abruptly wherever neighbouring columns place an interface at "
+                         "different depths -- a fixed-depth slice then crosses that interface "
+                         "laterally and paints a sharp-edged 'anomaly'. Sections already use "
+                         "the spline (--gridded), so without this, maps and sections of the "
+                         "SAME arm show different fields.")
+    ap.add_argument("--vlims-pct", default="2,98",
+                    help="percentiles for the 'own' colour scale, 'lo,hi'. The 2,98 default "
+                         "CLIPS 4%% of cells: harmless when the arm spans a wide Vs range, but "
+                         "on a narrow one (hautesorne aniso2t at 1 km spans 1.72-2.44 km/s) the "
+                         "clipped tails are large contiguous patches and the map reads as "
+                         "saturated. Use 0,100 for a scale that clips nothing.")
     ap.add_argument("--vlims-from", default=None,
                     help="reference griddir whose figures/vlims.json fixes the color scale "
                          "(default: use/create this griddir's own)")
@@ -162,6 +178,57 @@ def main():
                          "indistinguishable from a broken figure without this companion.")
     ap.add_argument("--maps-only", action="store_true",
                     help="skip the section figures (much faster when only maps changed)")
+    ap.add_argument("--disagree-ref", default=None,
+                    help="griddir of a REFERENCE arm (typically the phase twin). Renders an "
+                         "extra copy of every section with hatching where this arm's Vs and "
+                         "the reference's disagree beyond their combined 1-sigma posteriors -- "
+                         "|mA-mB| > sqrt(sigA^2+sigB^2), sig=(p84-p16)/2, both depths inside "
+                         "each arm's own reliable_mask. Diagnosed on the raw cells (measurement "
+                         "resolution), drawn on top of whatever the section shows.")
+    ap.add_argument("--disagree-waveset", default=None,
+                    help="waveset of the reference volume (default: same as --waveset)")
+    ap.add_argument("--disagree-suffix", default="gpdisagree",
+                    help="filename suffix for the overlay figures: sect_*_<suffix>.png")
+    ap.add_argument("--disagree-min-sigma", type=float, default=2.0,
+                    help="hatch only where |dVs| exceeds this many combined sigmas")
+    ap.add_argument("--disagree-min-relgap", type=float, default=0.25,
+                    help="AND exceeds this fraction of the mean Vs. Needed because the group "
+                         "arms are biased slow nearly everywhere (median gap 3.4 sigma, 21%% "
+                         "relative vs R0p): a sigma cut alone hatches the whole section, "
+                         "hiding the structural contradictions inside a pervasive offset.")
+    ap.add_argument("--anomaly", action="store_true",
+                    help="draw SECTIONS as the Vs anomaly in %% relative to the network median Vs at "
+                         "the SAME depth, instead of absolute Vs (Lehujeur et al. 2018, Soultz). The "
+                         "reference is the median over all reliable cells at each depth, so the "
+                         "strong vertical gradient -- which otherwise makes the whole shallow "
+                         "Mesozoic red and hides everything else -- is removed and LATERAL structure "
+                         "(a graben, a basement high) is what the colour shows. Writes into "
+                         "sections_anomaly/ so the absolute set is never overwritten.")
+    ap.add_argument("--alims", type=float, default=None, metavar="PCT",
+                    help="symmetric colour limit for --anomaly in %% (default: the 98th percentile "
+                         "of |anomaly| over the whole reliable volume, rounded up to 5%%)")
+    ap.add_argument("--anomaly-cmap", default="RdBu",
+                    help="diverging colormap for --anomaly (default RdBu: red = SLOW, blue = fast, "
+                         "the house convention for anomaly maps)")
+    ap.add_argument("--vs-field", default="vs_median", choices=("vs_median", "vs_mean"),
+                    help="which posterior point estimate to draw. vs_mean routes every output to "
+                         "figures/maps_mean and figures/sections[_anomaly]_mean so the median and "
+                         "mean figure sets stay distinct, and (with --gridded/--gridded-maps) reads "
+                         "volume_<ws>_gridded_vs_mean.npz from grid_model_surface.py --field vs_mean. "
+                         "Pair a vs_mean run with --vlims-from <this griddir> so both sets share the "
+                         "median run's color limits.")
+    ap.add_argument("--gridded", action="store_true",
+                    help="draw SECTIONS from volume_<ws>_gridded.npz (GMT surface tension "
+                         "spline) instead of raw cell columns. Each cell is one measurement at a "
+                         "discrete node, so raw sections are blocky at the parameterisation "
+                         "spacing; build the file with grid_model_surface.py (pygmt env).")
+    ap.add_argument("--cmap", default="RdYlBu",
+                    help="colour scale for Vs on maps and sections. A Crameri name "
+                         "(\"roma\", \"roma_r\", \"cmc.roma\") or any matplotlib name. Default "
+                         "`roma` since 2026-09-06 (user preference), replacing `RdYlBu`: RdYlBu "
+                         "is not perceptually uniform -- its bright band near the middle of the "
+                         "scale reads as an interface where the model is smooth. Pass "
+                         "--cmap RdYlBu to reproduce the earlier figures.")
     ap.add_argument("--rail-tol", type=float, default=0.05,
                     help="report cells within this of the volume-wide Vs min/max as "
                          "PRIOR-RAILED: at those depths the map shows the prior, and no "
@@ -170,7 +237,7 @@ def main():
                     help="which measure this arm inverted; with --period-ranges it puts the "
                          "inverted period band in every title. Inferred from --label when it "
                          "ends in g/p (R0g -> group, R0p -> phase).")
-    ap.add_argument("--period-ranges", default=f"{E}/_period_validity/"
+    ap.add_argument("--period-ranges", default=f"{E}/method_tests/5_vs_inversion/period_band_selection/"
                                                "period_ranges_DECISIONS_v1.csv",
                     help="the CSV the inversion was trimmed with; its band is annotated on "
                          "every figure. The band is not cosmetic -- a map at 0.5 km made from "
@@ -178,6 +245,7 @@ def main():
                          "and is showing downward-extended structure, so the reader needs it.")
     a = ap.parse_args()
     net = a.net
+    vcmap = get_cmap(a.cmap)
     # period band actually inverted, for the titles
     measure = a.measure
     if measure is None and a.label:
@@ -185,8 +253,12 @@ def main():
     tband = ""
     if measure and a.period_ranges and os.path.exists(a.period_ranges):
         import csv as _csv
-        base = {"fund": "fund", "love": "love"}.get(a.waveset)
-        want = [base] if base else ["fund", "love"]
+        # waveset -> the waves it actually inverts. The old {"fund","love"} lookup returned
+        # None for "fundot" and the fallback listed love in a fund+overtone arm's titles.
+        want = {"fund": ["fund"], "fundot": ["fund", "overtone"], "love": ["love"],
+                "fundlove": ["fund", "love"],
+                "fundotlove": ["fund", "overtone", "love"]}.get(a.waveset,
+                                                                ["fund", "overtone", "love"])
         bits = []
         for row in _csv.DictReader(open(a.period_ranges)):
             if (row.get("net") or "").strip() != net:
@@ -202,7 +274,15 @@ def main():
             tband = f"{measure} T: " + ", ".join(bits)
     v = np.load(os.path.join(a.griddir, f"volume_{a.waveset}.npz"), allow_pickle=True)
     cells, lonlat, z = v["cells"], v["lonlat"], np.asarray(v["depth"], float)
-    vs = np.asarray(v["vs_median"], float)                       # (ncell, ndepth)
+    if a.vs_field not in v.files:
+        raise SystemExit(f"--vs-field {a.vs_field}: not in volume_{a.waveset}.npz -- volumes "
+                         f"assembled before 2026-09-11 lack vs_mean (re-assemble, or stack it "
+                         f"from the cells as in the D-prime arm's add_vs_mean.py)")
+    vs = np.asarray(v[a.vs_field], float)                        # (ncell, ndepth)
+    STAT = "median" if a.vs_field == "vs_median" else "mean"
+    # output-dir suffix keeping the mean set distinct from the (default) median set
+    _statsfx = "" if a.vs_field == "vs_median" else "_mean"
+    _gridsfx = "" if a.vs_field == "vs_median" else "_vs_mean"   # grid_model_surface naming
     vs_raw = vs.copy()                                           # pre-mask, for --also-unmasked
     zrel = np.full(len(cells), np.nan)
     if not a.unmasked:
@@ -219,18 +299,33 @@ def main():
         # parameterisation as measurement, exactly the error the deep mask exists to prevent.
         zmin = (np.asarray(v["z_reliable_min"], float) if "z_reliable_min" in v.files
                 else np.zeros(len(cells)))
+        # Prefer the per-depth reliable_mask when the volume carries it. z_reliable_min/max is
+        # only the LONGEST contiguous reliable run, so a cell reliable both shallow AND deep
+        # with an unresolved band between loses the shorter band -- 13-17% of aargau cells, and
+        # in 5-9% the lost band is the SHALLOW one, which is what made sections show a masked
+        # shallow column sitting on unmasked deep rock. The interval remains the fallback for
+        # volumes assembled before the mask was carried.
+        relmask = (np.asarray(v["reliable_mask"], bool)
+                   if "reliable_mask" in v.files
+                   and np.shape(v["reliable_mask"]) == (len(cells), len(z))
+                   else None)
         n_masked = n_shallow = 0
         for i in range(len(cells)):
-            m = np.zeros(len(z), bool)
-            if np.isfinite(zrel[i]):
-                m |= z > zrel[i] + 1e-9
+            if relmask is not None:
+                m = ~relmask[i]
+            else:
+                m = np.zeros(len(z), bool)
+                if np.isfinite(zrel[i]):
+                    m |= z > zrel[i] + 1e-9
+                if np.isfinite(zmin[i]) and zmin[i] > 0:
+                    m |= z < zmin[i] - 1e-9
             if np.isfinite(zmin[i]) and zmin[i] > 0:
-                sm = z < zmin[i] - 1e-9
-                n_shallow += int(np.isfinite(vs[i, sm]).sum())
-                m |= sm
+                n_shallow += int(np.isfinite(vs[i, m & (z < zmin[i] - 1e-9)]).sum())
             n_masked += int(np.isfinite(vs[i, m]).sum())
             vs[i, m] = np.nan
-        print(f"reliability mask: NaN outside per-cell z_reliable_min..max "
+        how = ("per-depth reliable_mask" if relmask is not None
+               else "per-cell z_reliable_min..max interval")
+        print(f"reliability mask: NaN outside {how} "
               f"({n_masked} samples masked across {len(cells)} cells; "
               f"{n_shallow} of them ABOVE z_reliable_min)")
     dem = np.load(f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_dem.npz")
@@ -252,22 +347,25 @@ def main():
     hz_path = f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_horizons.npz"
     horizons = np.load(hz_path) if os.path.exists(hz_path) else None
     figdir = os.path.join(a.griddir, "figures")
-    os.makedirs(os.path.join(figdir, "maps"), exist_ok=True)
+    MAPDIR = "maps" + _statsfx
+    os.makedirs(os.path.join(figdir, MAPDIR), exist_ok=True)
     # Clear this arm's OWN map outputs before rewriting them. Without this, an arm re-run
     # against a shallower volume leaves the previous run's deeper maps in place: riehen/R0g
     # carried vs_map_z4.0-5.5km.png from an earlier, deeper volume while the current one
     # reaches only 3.5 km, so four figures showed a masked -- i.e. apparently measured --
     # field at depths no cell reaches. Only files this script writes are removed.
-    stale = sorted(glob.glob(os.path.join(figdir, "maps", "vs_map_z*km.png"))
-                   + glob.glob(os.path.join(figdir, "maps", "vs_map_z*km_nomask.png")))
+    stale = sorted(glob.glob(os.path.join(figdir, MAPDIR, "vs_map_z*km.png"))
+                   + glob.glob(os.path.join(figdir, MAPDIR, "vs_map_z*km_nomask.png")))
     for f_ in stale:
         os.remove(f_)
     if stale:
         print(f"cleared {len(stale)} existing map figure(s) before rewriting")
-    os.makedirs(os.path.join(figdir, "sections"), exist_ok=True)
+    SECDIR = ("sections_anomaly" if a.anomaly else "sections") + _statsfx
+    os.makedirs(os.path.join(figdir, SECDIR), exist_ok=True)
     arm = a.label or os.path.basename(os.path.normpath(a.griddir))
     lat0 = float(np.mean(lonlat[:, 1]))
 
+    _PLO, _PHI = (float(x) for x in a.vlims_pct.split(","))
     # shared color limits (reference writes, comparison arms reuse)
     use_shared = (a.vlims_mode == "shared" or (a.vlims_mode == "auto" and a.vlims_from))
     vl_path = os.path.join((a.vlims_from or a.griddir), "figures", "vlims.json")
@@ -284,7 +382,7 @@ def main():
             if col.size == 0:
                 print(f"  depth {d:g} km: no cell reaches it (fully masked) -- skipped")
                 continue
-            vlims[float(d)] = (float(np.percentile(col, 2)), float(np.percentile(col, 98)))
+            vlims[float(d)] = (float(np.percentile(col, _PLO)), float(np.percentile(col, _PHI)))
         os.makedirs(os.path.dirname(vl_path), exist_ok=True)
         vl_out = os.path.join(a.griddir, "figures", "vlims.json")
         os.makedirs(os.path.dirname(vl_out), exist_ok=True)
@@ -327,7 +425,7 @@ def main():
         k = int(np.argmin(np.abs(z - d)))
         col = vs_raw[:, k][np.isfinite(vs_raw[:, k])]
         if col.size:
-            vlims_raw[float(d)] = (float(np.percentile(col, 2)), float(np.percentile(col, 98)))
+            vlims_raw[float(d)] = (float(np.percentile(col, _PLO)), float(np.percentile(col, _PHI)))
 
     # PRIOR-RAIL REPORT. Distinct from saturation: when most cells sit within rail-tol of the
     # volume-wide Vs min/max, the posterior has hit the PRIOR BOUND and the map is showing the
@@ -345,6 +443,19 @@ def main():
                 print(f"  !! depth {d:g} km: {100*fr:.0f}% of PLOTTED cells are within "
                       f"{a.rail_tol} km/s of the Vs prior ceiling {_hi:.2f} -- this slice is "
                       f"prior-railed, not resolved")
+
+    # 3-D tension-spline field for --gridded-maps. x_km/y_km are LV95 KILOMETRES, the same
+    # frame the map axes use, so the slice drops onto the map with no re-projection.
+    _GM = None
+    if a.gridded_maps:
+        _gf = os.path.join(a.griddir, f"volume_{a.waveset}_gridded{_gridsfx}.npz")
+        if not os.path.exists(_gf):
+            raise SystemExit(f"--gridded-maps: {_gf} not found -- build it with "
+                             f"grid_model_surface.py (pygmt env) first")
+        _g = np.load(_gf, allow_pickle=True)
+        _GM = {"z": np.asarray(_g["depth"], float), "vs": np.asarray(_g["vs"], float),
+               "x": np.asarray(_g["x_km"], float), "y": np.asarray(_g["y_km"], float)}
+        print(f"maps drawn from the 3-D spline: {os.path.basename(_gf)} {_GM['vs'].shape}")
 
     # affine node grid (regular in ix/iy)
     ix, iy = cells[:, 0].astype(float), cells[:, 1].astype(float)
@@ -383,6 +494,10 @@ def main():
             continue
         k = int(np.argmin(np.abs(z - d)))
         g = _grid(vs[:, k])
+        g_map = gx_ = gy_ = None
+        if _GM is not None:
+            kg = int(np.argmin(np.abs(_GM["z"] - d)))
+            g_map, gx_, gy_ = _GM["vs"][kg], _GM["x"], _GM["y"]
         reach = _reach_grid(d)
         vmin, vmax = vlims.get(float(d), vlims_raw.get(float(d)))
         if float(d) not in vlims:
@@ -391,24 +506,25 @@ def main():
                 gr = _grid(vs_raw[:, k])
                 figx, axx = plt.subplots(figsize=(7.6, 7.2))
                 axx.imshow(hs, extent=extent_km, cmap="gray", origin="upper", zorder=0)
-                pcx = axx.pcolormesh(e2d, n2d, gr, cmap="RdYlBu", vmin=vmin, vmax=vmax,
+                pcx = axx.pcolormesh(e2d, n2d, gr, cmap=vcmap, vmin=vmin, vmax=vmax,
                                      alpha=0.68, shading="nearest", zorder=1)
                 _tecto(axx, gk)
                 axx.plot(stx, sty, ".", color="k", ms=1.6, alpha=0.55, zorder=4)
                 axx.set_xlim(extent_km[0], extent_km[1]); axx.set_ylim(extent_km[2], extent_km[3])
                 axx.set_aspect("equal")
                 axx.set_xlabel("E [km LV95]"); axx.set_ylabel("N [km LV95]")
-                axx.set_title(f"{net} Vs median at {d:g} km depth — {arm}\n"
+                axx.set_title(f"{net} Vs {STAT} at {d:g} km depth — {arm}\n"
                               f"UNMASKED — NO cell reaches this depth: 100% prior fill, "
                               f"not a measurement"
                               + (f"\n{tband}" if tband else ""), fontsize=10)
                 plt.colorbar(pcx, ax=axx, fraction=0.04, pad=0.02).set_label("Vs [km/s]")
-                ox = os.path.join(figdir, "maps", f"vs_map_z{d:03.1f}km_nomask.png")
+                ox = os.path.join(figdir, MAPDIR, f"vs_map_z{d:03.1f}km_nomask.png")
                 figx.tight_layout(); figx.savefig(ox, dpi=150); plt.close(figx)
             continue
         fig, ax = plt.subplots(figsize=(7.6, 7.2))
         ax.imshow(hs, extent=extent_km, cmap="gray", origin="upper", zorder=0)
-        pc = ax.pcolormesh(e2d, n2d, g, cmap="RdYlBu", vmin=vmin, vmax=vmax,
+        pc = ax.pcolormesh(*((gx_, gy_, g_map) if g_map is not None else (e2d, n2d, g)),
+                           cmap=vcmap, vmin=vmin, vmax=vmax,
                            alpha=0.68, shading="nearest", zorder=1)
         _tecto(ax, gk)
         ax.plot(stx, sty, ".", color="k", ms=1.6, alpha=0.55, zorder=4)
@@ -432,20 +548,20 @@ def main():
         ax.set_xlim(extent_km[0], extent_km[1]); ax.set_ylim(extent_km[2], extent_km[3])
         ax.set_aspect("equal")
         ax.set_xlabel("E [km LV95]"); ax.set_ylabel("N [km LV95]")
-        ax.set_title(f"{net} Vs median at {d:g} km depth — {arm}"
+        ax.set_title(f"{net} Vs {STAT} at {d:g} km depth — {arm}"
                      + (f"\n{tband}" if tband else ""), fontsize=11)
         plt.colorbar(pc, ax=ax, fraction=0.04, pad=0.02).set_label("Vs [km/s]")
         if np.isfinite(reach).any() and 0 < np.nanmean(reach) < 1:
             ax.contour(e2d, n2d, np.nan_to_num(reach), levels=[0.5], colors="k",
                        linewidths=1.4, linestyles="--", zorder=4)
-        out = os.path.join(figdir, "maps", f"vs_map_z{d:03.1f}km.png")
+        out = os.path.join(figdir, MAPDIR, f"vs_map_z{d:03.1f}km.png")
         fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
 
         if a.also_unmasked:
             gr = _grid(vs_raw[:, k])
             fig2, ax2 = plt.subplots(figsize=(7.6, 7.2))
             ax2.imshow(hs, extent=extent_km, cmap="gray", origin="upper", zorder=0)
-            pc2 = ax2.pcolormesh(e2d, n2d, gr, cmap="RdYlBu", vmin=vmin, vmax=vmax,
+            pc2 = ax2.pcolormesh(e2d, n2d, gr, cmap=vcmap, vmin=vmin, vmax=vmax,
                                  alpha=0.68, shading="nearest", zorder=1)
             _tecto(ax2, gk)
             if np.isfinite(reach).any():
@@ -456,22 +572,123 @@ def main():
             ax2.set_aspect("equal")
             ax2.set_xlabel("E [km LV95]"); ax2.set_ylabel("N [km LV95]")
             frac = float(np.nanmean(reach)) if np.isfinite(reach).any() else float("nan")
-            ax2.set_title(f"{net} Vs median at {d:g} km depth — {arm}\n"
+            ax2.set_title(f"{net} Vs {STAT} at {d:g} km depth — {arm}\n"
                           f"UNMASKED (dashed = reliability boundary; "
                           f"{100*frac:.0f}% of cells reach this depth)", fontsize=10)
             plt.colorbar(pc2, ax=ax2, fraction=0.04, pad=0.02).set_label("Vs [km/s]")
-            o2 = os.path.join(figdir, "maps", f"vs_map_z{d:03.1f}km_nomask.png")
+            o2 = os.path.join(figdir, MAPDIR, f"vs_map_z{d:03.1f}km_nomask.png")
             fig2.tight_layout(); fig2.savefig(o2, dpi=150); plt.close(fig2)
-    print(f"maps: {len(MAP_DEPTHS)} -> {figdir}/maps/"
+    print(f"maps: {len(MAP_DEPTHS)} -> {figdir}/{MAPDIR}/"
           + ("  (+ _nomask companions)" if a.also_unmasked else ""))
     if a.maps_only:
         print("maps-only: sections skipped")
         return
 
     # ------------------------------------------------------------------ B. sections
+    GRID = None
+    if a.gridded:
+        gf = os.path.join(a.griddir, f"volume_{a.waveset}_gridded{_gridsfx}.npz")
+        if not os.path.exists(gf):
+            raise SystemExit(f"--gridded: {gf} not found. Build it with:\n"
+                             f"  /opt/anaconda3/envs/pygmt-env/bin/python "
+                             f"scripts/picking/grid_model_surface.py --griddir {a.griddir} "
+                             f"--waveset {a.waveset}")
+        G = np.load(gf, allow_pickle=True)
+        if not np.allclose(np.asarray(G["depth"], float), z):
+            raise SystemExit("--gridded: depth axis differs from the raw volume; regrid")
+        from pyproj import Transformer as _T
+        GRID = dict(x=np.asarray(G["x_km"], float), y=np.asarray(G["y_km"], float),
+                    vs=np.asarray(G["vs"], float),
+                    tr=_T.from_crs("EPSG:4326", "EPSG:2056", always_xy=True),
+                    tension=float(G["tension"]), cell=float(G["cell_km"]),
+                    refine=int(G["refine"]))
+        print(f"sections from GMT-surface grid: tension {GRID['tension']}, "
+              f"{GRID['cell']/GRID['refine']:.3f} km nodes")
+
+    def sample_grid(plon, plat, n_along):
+        """Vs (ndepth, n_along) sampled from the tension-spline grid along a profile."""
+        from scipy.interpolate import RegularGridInterpolator
+        t = np.linspace(0, 1, n_along)
+        t0 = np.linspace(0, 1, len(plon))
+        f_lon, f_lat = np.interp(t, t0, plon), np.interp(t, t0, plat)
+        gx, gy = GRID["tr"].transform(f_lon, f_lat)
+        pts = np.c_[np.asarray(gy) / 1000.0, np.asarray(gx) / 1000.0]
+        out = np.full((len(z), n_along), np.nan)
+        for k in range(len(z)):
+            sl = GRID["vs"][k]
+            if not np.isfinite(sl).any():
+                continue
+            # NaN outside support must STAY NaN: interpolate the validity mask alongside the
+            # values and re-blank, else the spline's blanked halo bleeds back in as real data.
+            fi = RegularGridInterpolator((GRID["y"], GRID["x"]),
+                                         np.where(np.isfinite(sl), sl, 0.0),
+                                         bounds_error=False, fill_value=np.nan)
+            mi = RegularGridInterpolator((GRID["y"], GRID["x"]),
+                                         np.isfinite(sl).astype(float),
+                                         bounds_error=False, fill_value=0.0)
+            out[k] = np.where(mi(pts) > 0.98, fi(pts), np.nan)
+        return out, f_lon, f_lat
+
+    DIS = None                      # (ncells, ndepth) bool: this arm vs reference disagree
+    if a.disagree_ref:
+        rws = a.disagree_waveset or a.waveset
+        rf = os.path.join(a.disagree_ref, f"volume_{rws}.npz")
+        Rv = np.load(rf, allow_pickle=True)
+        if not np.allclose(np.asarray(Rv["depth"], float), z):
+            raise SystemExit("--disagree-ref: depth axis differs")
+        rkey = {tuple(c): i for i, c in enumerate(Rv["cells"])}
+        rmed = np.asarray(Rv["vs_median"], float)
+        rsig = 0.5 * (np.asarray(Rv["vs_p84"], float) - np.asarray(Rv["vs_p16"], float))
+        rrel = (np.asarray(Rv["reliable_mask"], bool) if "reliable_mask" in Rv.files
+                else np.isfinite(rmed))
+        amed = np.asarray(v["vs_median"], float)
+        asig = 0.5 * (np.asarray(v["vs_p84"], float) - np.asarray(v["vs_p16"], float))
+        arel = (np.asarray(v["reliable_mask"], bool) if "reliable_mask" in v.files
+                else np.isfinite(amed))
+        DIS = np.zeros(amed.shape, bool)
+        n_pair = 0
+        for i, c in enumerate(cells):
+            j = rkey.get(tuple(c))
+            if j is None:
+                continue
+            n_pair += 1
+            both = arel[i] & rrel[j] & np.isfinite(amed[i]) & np.isfinite(rmed[j])
+            gap = np.abs(amed[i] - rmed[j])
+            tol = np.sqrt(asig[i] ** 2 + rsig[j] ** 2)
+            relg = gap / np.maximum(0.5 * (amed[i] + rmed[j]), 1e-6)
+            DIS[i] = (both & (gap > a.disagree_min_sigma * tol)
+                      & (relg > a.disagree_min_relgap))
+        frac = DIS.sum() / max((arel & np.isfinite(amed)).sum(), 1)
+        dis_label = os.path.basename(a.disagree_ref.rstrip("/"))
+        print(f"disagreement overlay vs {dis_label}: {n_pair} paired cells, "
+              f"{100*frac:.1f}% of reliable samples flagged "
+              f"(>{a.disagree_min_sigma:g} sigma AND >{100*a.disagree_min_relgap:.0f}% rel gap)")
+
     st_elev = bilinear(elev, extent, st["longitude"], st["latitude"])
     global_vmin = min(vv[0] for vv in vlims.values())
     global_vmax = max(vv[1] for vv in vlims.values())
+
+    # ---- anomaly reference: the network median Vs at each depth, over RELIABLE cells only ----
+    # Prior fill below a cell's reach would drag the reference toward the prior, so it is excluded.
+    REF = None
+    if a.anomaly:
+        # `vs` is already NaN outside each cell's reliable window (see the reliability-mask
+        # block above), so finiteness IS the reliability mask here.
+        vmask = np.isfinite(vs)
+        REF = np.array([np.nanmedian(vs[vmask[:, k], k]) if vmask[:, k].any() else np.nan
+                        for k in range(len(z))])
+        # fill any depth with no reliable cell so the division never yields NaN stripes
+        good = np.isfinite(REF)
+        if good.sum() < 2:
+            raise SystemExit("--anomaly: no reliable cells to build a reference profile")
+        REF = np.interp(z, z[good], REF[good])
+        anom_all = 100.0 * (np.where(vmask, vs, np.nan) - REF[None, :]) / REF[None, :]
+        ALIM = a.alims if a.alims else max(5.0, 5.0 * np.ceil(
+            np.nanpercentile(np.abs(anom_all), 98) / 5.0))
+        print(f"--anomaly: reference = network median Vs(z) over reliable cells "
+              f"({REF[0]:.2f} km/s at {z[0]:.2f} km -> {REF[-1]:.2f} at {z[-1]:.2f}); "
+              f"colour limit +-{ALIM:.0f}%  (p98 of |anomaly| = "
+              f"{np.nanpercentile(np.abs(anom_all), 98):.1f}%)")
 
     def one_section(axis, line_idx, name=None):
         """axis='EW': fixed iy, along ix. axis='NS': fixed ix, along iy.
@@ -501,9 +718,23 @@ def main():
                 plt.close(fig) if "fig" in dir() else None
                 return False
             surf = np.interp(along, along[good], surf[good])
-        Vs = vs[sel].T                                           # (ndepth, ncol)
-        X = np.tile(along, (len(z), 1))
-        Y = surf[None, :] - 1000.0 * z[:, None]                  # m a.s.l.
+        if GRID is not None:
+            # resample the profile at the grid spacing so the section shows the spline, not the
+            # cell columns; geometry (along, topography) is unchanged
+            n_f = max(int(along[-1] / (GRID["cell"] / GRID["refine"])) + 1, len(sel))
+            Vs, f_lon2, f_lat2 = sample_grid(plon, plat, n_f)
+            along_f = np.linspace(along[0], along[-1], n_f)
+            surf_f = bilinear(elev, extent, f_lon2, f_lat2)
+            if not np.isfinite(surf_f).all():
+                gg = np.isfinite(surf_f)
+                surf_f = (np.interp(along_f, along_f[gg], surf_f[gg]) if gg.sum() >= 2
+                          else np.full_like(surf_f, np.nanmean(surf)))
+            X = np.tile(along_f, (len(z), 1))
+            Y = surf_f[None, :] - 1000.0 * z[:, None]
+        else:
+            Vs = vs[sel].T                                       # (ndepth, ncol)
+            X = np.tile(along, (len(z), 1))
+            Y = surf[None, :] - 1000.0 * z[:, None]              # m a.s.l.
 
         fig = plt.figure(figsize=(max(9, 0.55 * len(sel)) + 2.2, 7.4))
         # Colorbar gets its OWN column. Attaching it with colorbar(ax=ax) shrinks only the
@@ -534,8 +765,30 @@ def main():
                        f"{np.mean(plat if axis == 'EW' else plon):.4f} — {arm}"
                        + (f"   [{tband}]" if tband else ""), fontsize=10)
 
-        pc = ax.pcolormesh(X, Y, Vs, cmap="RdYlBu", vmin=global_vmin, vmax=global_vmax,
-                           shading="nearest")
+        if REF is not None:
+            Vs = 100.0 * (Vs - REF[:, None]) / REF[:, None]
+            pc = ax.pcolormesh(X, Y, Vs, cmap=get_cmap(a.anomaly_cmap), vmin=-ALIM, vmax=ALIM,
+                               shading="nearest")
+        else:
+            pc = ax.pcolormesh(X, Y, Vs, cmap=vcmap, vmin=global_vmin, vmax=global_vmax,
+                               shading="nearest")
+        if DIS is not None:
+            # Hatch where this arm and the reference disagree beyond combined 1-sigma.
+            # Drawn on the RAW cell columns whatever the section itself shows -- the
+            # diagnosis lives at measurement resolution, and smoothing it with the spline
+            # would blur exactly the boundary it exists to mark.
+            D = DIS[sel].T.astype(float)                         # (ndepth, ncol)
+            Xr = np.tile(along, (len(z), 1))
+            Yr = surf[None, :] - 1000.0 * z[:, None]
+            ax.contourf(Xr, Yr, D, levels=[0.5, 1.5], colors="none",
+                        hatches=["////"], zorder=4)
+            ax.contour(Xr, Yr, D, levels=[0.5], colors="k", linewidths=0.7, zorder=5)
+            frac_here = D.mean()
+            ax.annotate(f"hatched: vs {dis_label}, |ΔVs| > {a.disagree_min_sigma:g}σ and "
+                        f"> {100*a.disagree_min_relgap:.0f}% of mean ({100*frac_here:.0f}% of "
+                        f"this section)",
+                        (0.99, 1.01), xycoords="axes fraction", ha="right",
+                        va="bottom", fontsize=8, style="italic")
         ax.plot(along, surf, "k-", lw=1.0)                       # surface
         # geophones within 200 m
         dsta = dist_to_polyline_km(stx, sty, px, py)
@@ -600,7 +853,9 @@ def main():
         handles, labels = ax.get_legend_handles_labels()
         if handles:
             ax.legend(fontsize=7, loc="lower left")
-        plt.colorbar(pc, cax=cax).set_label("Vs median [km/s]")
+        plt.colorbar(pc, cax=cax).set_label(
+            f"Vs anomaly vs the network median at the same depth [%]" if REF is not None
+            else "Vs median [km/s]")
 
         # ORIENTATION: state which end is which, read from the coordinates rather than
         # assumed. EW profiles are built by sorting on ix (grid east) and NS on iy (grid
@@ -644,7 +899,9 @@ def main():
         tag = f"iy{line_idx:02d}" if axis == "EW" else f"ix{line_idx:02d}"
         if name:
             tag = f"{tag}_{name}"
-        out = os.path.join(figdir, "sections", f"sect_{axis}_{tag}.png")
+        if DIS is not None:
+            tag = f"{tag}_{a.disagree_suffix}"                   # never overwrite the plain set
+        out = os.path.join(figdir, SECDIR, f"sect_{axis}_{tag}.png")
         fig.savefig(out, dpi=145, bbox_inches="tight"); plt.close(fig)
         return True
 
@@ -652,7 +909,7 @@ def main():
     step_ix = max(1, int(round(SECT_STEP_KM / dx_km)))
     n_ew = sum(one_section("EW", l) for l in range(0, ny, step_iy))
     n_ns = sum(one_section("NS", l) for l in range(0, nx, step_ix))
-    print(f"sections: {n_ew} EW + {n_ns} NS -> {figdir}/sections/ "
+    print(f"sections: {n_ew} EW + {n_ns} NS -> {figdir}/{SECDIR}/ "
           f"(steps iy={step_iy}, ix={step_ix}; grid d={dx_km:.2f}/{dy_km:.2f} km)")
 
     # Sections THROUGH each well. The regular grid steps rarely land within the 200 m
@@ -669,7 +926,7 @@ def main():
         n_w += int(one_section("EW", int(wiy), name=safe))
         n_w += int(one_section("NS", int(wix), name=safe))
     if wells:
-        print(f"well sections: {n_w} -> {figdir}/sections/ "
+        print(f"well sections: {n_w} -> {figdir}/{SECDIR}/ "
               f"(EW+NS through each of {len(wells)} wells)")
 
 

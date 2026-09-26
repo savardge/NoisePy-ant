@@ -30,7 +30,7 @@ small. Typical size is a few MB, entirely offline.
 Usage:
   python build_period_explorer.py                    # every net x measure x wave, k3 + k2
   python build_period_explorer.py --k k3 --net riehen
-  open /Users/genevievesavard/Codes/extract_higher_modes/Projects/_period_validity/period_explorer.html
+  open /Users/genevievesavard/Codes/extract_higher_modes/Projects/method_tests/5_vs_inversion/period_band_selection/period_explorer.html
 """
 import argparse
 import base64
@@ -48,8 +48,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plot_exported_picks_hist2d import V_EDGES, rung_edges      # noqa: E402
 
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
-CMP = f"{EHM}/_inversion_comparison"
-OUT = f"{EHM}/_period_validity"
+CMP = f"{EHM}/method_tests/5_vs_inversion/engine_comparison_dettmer"
+OUT = f"{EHM}/method_tests/5_vs_inversion/period_band_selection"
 DX = {"riehen": "0.2", "aargau": "0.5", "hautesorne": "0.5"}
 WAVES = ("fund", "overtone", "love")
 MEASURES = ("group", "phase")
