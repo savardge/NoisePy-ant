@@ -137,7 +137,8 @@ def process(path):
                 R["reg"].fW[pair] = fw[pair]
                 refs = dict(refs)
                 refs[R["key"]] = R["reg"].picker_callable(pair, R["fallback"], for_group_ref=_G["refs"][R["key"]])
-        rows = up.pick_all_modes(params, ccf, refs, STACK_METHOD, cfg=up.Config)
+        ccf_snr = up.load_snr_ccf(path, STACK_METHOD, ccf, _G["comps"])   # Allstack_linear if present
+        rows = up.pick_all_modes(params, ccf, refs, STACK_METHOD, cfg=up.Config, ccf_snr=ccf_snr)
     except Exception as e:
         return f"err:{type(e).__name__}"
     os.makedirs(out_dir, exist_ok=True)
@@ -151,7 +152,11 @@ def main():
     if LIMIT and len(files) > LIMIT:                  # decimate evenly for a subset run
         files = files[:: max(1, len(files) // LIMIT)][:LIMIT]
     os.makedirs(OUT_ROOT, exist_ok=True)
+    from noisepy.unified_picking import Config as _C
+    import pycwt
     print(f"[unified] {len(files)} pairs | net={NET} stack={STACK_METHOD} nproc={NPROC}\n"
+          f"          snr on {_C.SNR_STACK} stack, noise window {_C.SNR_NOISE_WINDOW} | "
+          f"pycwt {pycwt.__version__} (ts_pws inverse is inlined, version-independent)\n"
           f"          refs={REF_DIR}\n          out={OUT_ROOT}", flush=True)
     from collections import Counter
     tally = Counter()
