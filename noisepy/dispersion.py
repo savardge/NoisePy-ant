@@ -1344,7 +1344,8 @@ def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.
 
 
 def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.0,
-                               phase_offset=0.0, n_search=8, seg_dU=0.25, seg_gap=2.5):
+                               phase_offset=0.0, n_search=8, seg_dU=None, seg_gap=2.5,
+                               seg_periods=1.0):
     '''
     Single-N phase-velocity resolution by continuous frequency-unwrapping (Bensen et al. 2007:
     "the 2*pi ambiguity inherent to any phase spectrum", their eq. 11 -- N is ONE integer for
@@ -1364,7 +1365,16 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
     Where the picked group curve jumps (mixed-geology paths: the argmax switches between two
     arrivals) or has a period gap, the phases on either side belong to different packets and
     must NOT be glued into a single continuum -- the unwrap breaks there and each segment gets
-    its own global integer (seg_dU, seg_gap control the break criteria).
+    its own global integer (seg_periods / seg_dU and seg_gap control the break criteria).
+
+    Packet-switch criterion (CHANGED 2026-09-26): a break where the group ARRIVAL TIME moves by
+    more than seg_periods periods between neighbouring picks, dist*|1/U_i - 1/U_(i-1)| >
+    seg_periods * T (T = mean period of the two). The Morlet envelope is about one period wide,
+    so a larger jump means the envelope maximum moved to another wave packet; equivalently a
+    relative group-velocity jump > seg_periods * lambda / dist. It replaces the former absolute
+    |dU| > 0.25 km/s (no physical basis; pass seg_dU=0.25 to reproduce it). On 270 random HS pairs
+    the two criteria give the same QC removals above 1 s (phase_ridge gate, see
+    extract_higher_modes/Projects/hautesorne/tests/test_2026-09-26_standalone_phase_script/).
 
     Returns (c_phase, N_amb) aligned with the inputs; NaN/0 where undefined. N_amb is the total
     per-pick integer (unwrap steps + M) for bookkeeping -- its steps across period compensate
@@ -1392,12 +1402,17 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
     cref = np.array([float(c_ref(t)) for t in T]) if c_ref is not None else \
         np.full(len(w), np.nan)
 
-    # segment boundaries: group-velocity jump (packet switch) or period gap
+    # segment boundaries: packet switch (group arrival jumps by > seg_periods periods, or the
+    # legacy |dU| > seg_dU when given) or period gap
     dTmed = np.median(np.abs(np.diff(T))) if len(T) > 1 else 0.0
     brk = np.zeros(len(idx), dtype=bool)
     for i in range(1, len(idx)):
-        if np.abs(U[i] - U[i - 1]) > seg_dU or \
-           (dTmed > 0 and np.abs(T[i] - T[i - 1]) > seg_gap * dTmed):
+        if seg_dU is not None:
+            packet = np.abs(U[i] - U[i - 1]) > seg_dU
+        else:
+            packet = (dist * np.abs(1.0 / U[i] - 1.0 / U[i - 1])
+                      > seg_periods * 0.5 * (T[i] + T[i - 1]))
+        if packet or (dTmed > 0 and np.abs(T[i] - T[i - 1]) > seg_gap * dTmed):
             brk[i] = True
     seg_id = np.cumsum(brk)
 

@@ -58,7 +58,11 @@ class Config:
     PHASE_SHIFT = {"rayleigh": +np.pi / 4.0, "love": +np.pi / 4.0}  # far-field -pi/4 -> +pi/4 (neg-phi)
     MIN_LAMBDA_PHASE = 1.0                        # phase valid to ~1 lambda (step-2 validated)
     TAU_MAX_FACTOR = None                        # None = no long-period cap (keep the deep band)
-    PHASE_USE_PERIOD = "nominal"                 # keep group & phase on the same period axis per row
+    PHASE_USE_PERIOD = "scale"                   # CHANGED 2026-09-26 (was "nominal"): omega from the
+    #   CWT scale the phase is read on (T_scale), the same period the export and the maps use
+    #   (--period-axis scale); the unwrap's packet-break test then also uses T_scale. 300 HS pairs:
+    #   median +0.25 %, 3.9 % of values change crest; synthetic error 0.0123 -> 0.0108 km/s.
+    #   See extract_higher_modes/Projects/hautesorne/tests/test_2026-09-26_standalone_phase_script/.
     PHASE_JOINT = "unwrap"                        # branch-tracking; safest across dense & sparse refs
     PHASE_SMOOTH_WEIGHT = 3.0
     # Rayleigh mode synthesis

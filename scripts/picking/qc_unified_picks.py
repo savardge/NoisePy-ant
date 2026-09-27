@@ -48,6 +48,37 @@ Gates (defaults; disable any with --disable g1,g2,... / tune via CLI):
     phase_phys    phase  : phase_velocity > group_velocity (2*pi*N branch physicality)
     scale_dedupe  phase  : one phase pick per (pair, component, lag, mode, scale_j) -- same CWT
                            scale = same measurement (phase-step2); keeps the pick nearest T_scale
+    phase_jump    phase  : Rayleigh fundamental only (ADDED 2026-09-26). On each pair's phase curve
+                           (after scale_dedupe, sorted by T_scale), where c rises by more than
+                           --phase-jump (0.25 = 25 %) from one CWT period to the next, the
+                           continuous segment on the SHORT-period side (back to the previous
+                           >25 % break, or the start of the curve) is dropped. Signature: a slow
+                           artefact ridge (0.4-0.8 km/s at 0.3-0.8 s) joined to the fundamental
+                           -- one mode cannot rise >25 % over one ~6 % period step. Only shorter
+                           periods are ever cut; downward jumps / long-T cycle skips are left to
+                           phase_phys and the export k3 bound. HS production table: 13 %% of pairs,
+                           3.3 %% of values, 23 %% at 0.3-0.5 s, 0.34 %% at 2-6 s. Evaluation:
+                           Projects/hautesorne/tests/test_2026-09-26_standalone_phase_script/.
+                           OFF BY DEFAULT (2026-09-27): on Aargau/Riehen it often drops the
+                           segment ON the reference and keeps a cycle-skipped one (the side/
+                           length rule cannot tell which is the artefact). See
+                           Projects/method_tests/1_picking/test_2026-09-27_phase_unwrap_omega_gates_crossnet/.
+    phase_ridge   phase  : Rayleigh fundamental only (ADDED 2026-09-26). The pair's phase values
+                           (after phase_jump, sorted by T_scale) are split where the group ARRIVAL
+                           TIME jumps by more than --phase-ridge-periods periods,
+                           dist*|1/U1 - 1/U2| > T (the ~one-period Morlet envelope: the maximum
+                           moved to another wave packet) -- the same breaks as the picker's unwrap,
+                           where each piece got its own reference-anchored 2*pi integer. Starting
+                           from the largest piece and walking outwards, a neighbouring piece is
+                           DROPPED if the phase-velocity step across the break exceeds half the
+                           local crest spacing c^2 T / d (it is closer to another crest). Both
+                           thresholds are derived, none tuned. Example: HS SS.21109_SS.22251, a thin
+                           U~1.1 km/s ridge below 1 s one crest below the main curve. 270 random HS
+                           pairs (linear stacks): 18 %% of pairs, most removals below 1 s, 1-5 %% above.
+                           OFF BY DEFAULT (2026-09-27): on Aargau/Riehen it often drops the
+                           segment ON the reference and keeps a cycle-skipped one (the side/
+                           length rule cannot tell which is the artefact). See
+                           Projects/method_tests/1_picking/test_2026-09-27_phase_unwrap_omega_gates_crossnet/.
     group_scale_dedupe group: same principle for GROUP picks -- the FTAN image interpolates the
                            log-spaced CWT scales onto the 0.1 s nominal grid, so above ~2 s adjacent
                            nominal-period picks are the same measurement (Aargau: x1.35 duplication
@@ -113,6 +144,14 @@ ap.add_argument("--band-edge-rungs", type=int, default=1,
                      "Tmax = distance/vave. The ladder is clipped there, so the final rung is "
                      "an accident of path length and the pick sits on the limit. 0 = off. "
                      "Riehen cost at N=1: 2.28%% of group picks, reach 1.92 -> 1.81 s.")
+ap.add_argument("--phase-ridge-periods", type=float, default=0.0,
+                help="phase_ridge gate: a new phase segment starts where the group arrival time "
+                     "jumps by more than this many periods (same rule as the picker's unwrap); a "
+                     "segment on another 2*pi crest than the main one is dropped. 0 = off (default; see the gate notes above).")
+ap.add_argument("--phase-jump", type=float, default=0.0,
+                help="Rayleigh-fundamental phase_jump gate: relative rise of c between "
+                     "neighbouring CWT periods above which the short-period segment is dropped. "
+                     "0 = off (default; 0.25 was the 2026-09-26 proposal, see the gate notes above).")
 ap.add_argument("--vave", type=float, default=3.0,
                 help="must match the picker's Config.vave (3.0); sets Tmax = distance/vave.")
 ap.add_argument("--u-bin", type=float, default=0.0,
@@ -372,6 +411,76 @@ if "scale_dedupe" not in DISABLED:
     df.loc[kill, "phase_killer"] = "scale_dedupe"
     df.loc[kill, "phase_ok"] = False
 
+# 12b phase jump (Rayleigh fundamental): drop the short-period segment below an upward >REL jump.
+if args.phase_jump > 0 and "phase_jump" not in DISABLED:
+    key = ["pair", "component", "lag", "mode"]
+    ph = df[df["phase_ok"] & (df["wave_type"] == "rayleigh") & (df["mode"] == "fundamental")
+            & np.isfinite(df["T_scale"])].sort_values(key + ["T_scale"])
+    if len(ph) > 1:
+        gid = ph.groupby(key, sort=False).ngroup().to_numpy()
+        c = ph["phase_velocity"].to_numpy(float)
+        same = gid[1:] == gid[:-1]
+        up = same & ((c[1:] - c[:-1]) / c[:-1] > args.phase_jump)          # short side slower
+        brk = same & (np.abs(np.diff(c)) / np.minimum(c[1:], c[:-1]) > args.phase_jump)
+        seg = np.cumsum(np.r_[True, ~same | brk])                           # segment id per row
+        bad_seg = np.unique(seg[:-1][up])                                   # segment ending at an up-jump
+        kill = df.index.isin(ph.index[np.isin(seg, bad_seg)])
+        n = int(kill.sum())
+        if n:
+            budget.append(("phase_jump", "rayleigh", "fundamental", "phase", n))
+        df.loc[kill, "phase_killer"] = "phase_jump"
+        df.loc[kill, "phase_ok"] = False
+
+# 12c phase ridge (Rayleigh fundamental): drop phase segments that sit on another 2*pi crest.
+def _packet_breaks(T, U, dist, n_periods):
+    """True where the group arrival time jumps by > n_periods periods (a different wave packet);
+    the SAME rule as dispersion.resolve_phase_curve_unwrap(seg_periods=...)."""
+    return dist * np.abs(np.diff(1.0 / U)) > n_periods * 0.5 * (T[1:] + T[:-1])
+
+
+def _ridge_keep(T, U, c, dist, n_periods):
+    """Keep-mask for one pair's phase values sorted by period (see docstring, phase_ridge)."""
+    seg = np.cumsum(np.r_[True, _packet_breaks(T, U, dist, n_periods)])
+    ids = np.unique(seg)
+    size = {i: int((seg == i).sum()) for i in ids}
+    anchor = max(ids, key=lambda i: (size[i], i))          # largest piece; ties: longer periods
+    keep = {anchor}
+    for step in (-1, 1):                                    # walk out from the anchor
+        last, i = anchor, anchor + step
+        while i in size:
+            a = np.where(seg == (i if step < 0 else last))[0][-1]
+            b = np.where(seg == (last if step < 0 else i))[0][0]
+            spacing = (0.5 * (c[a] + c[b])) ** 2 * 0.5 * (T[a] + T[b]) / dist   # one crest in c
+            if abs(c[b] - c[a]) <= 0.5 * spacing:
+                keep.add(i)
+                last = i
+            i += step
+    return np.isin(seg, list(keep))
+
+
+if args.phase_ridge_periods > 0 and "phase_ridge" not in DISABLED:
+    key = ["pair", "component", "lag", "mode"]
+    ph = df[df["phase_ok"] & (df["wave_type"] == "rayleigh") & (df["mode"] == "fundamental")
+            & np.isfinite(df["T_scale"])].sort_values(key + ["T_scale"])
+    kill_idx = []
+    for _, g in ph.groupby(key, sort=False):
+        if len(g) < 2:
+            continue
+        U = g["group_velocity"].to_numpy(float)
+        T = g["T_scale"].to_numpy(float)
+        dist = float(g["distance"].iloc[0])
+        if not _packet_breaks(T, U, dist, args.phase_ridge_periods).any():
+            continue
+        keep = _ridge_keep(T, U, g["phase_velocity"].to_numpy(float), dist,
+                           args.phase_ridge_periods)
+        kill_idx.extend(g.index[~keep])
+    kill = df.index.isin(kill_idx)
+    n = int(kill.sum())
+    if n:
+        budget.append(("phase_ridge", "rayleigh", "fundamental", "phase", n))
+    df.loc[kill, "phase_killer"] = "phase_ridge"
+    df.loc[kill, "phase_ok"] = False
+
 # 13 group scale dedupe: same single-scale logic for group picks (see docstring). The velocity bin
 # keeps genuinely distinct branches at one scale (topology multi-ridge) as separate measurements.
 if args.group_scale_dedupe and "group_scale_dedupe" not in DISABLED:
@@ -419,7 +528,7 @@ lines = [f"QC rejection budget -- {len(files)} pairs, {len(df):,} input rows",
          f"gates disabled: {sorted(DISABLED) if DISABLED else 'none'}", ""]
 order = [g for g in ["snr", "vbounds", "farfield", "band_edge", "suppression", "ot_res", "love_env",
                      "love_overlap", "rf_leak", "ot_leak", "phase_phys", "station",
-                     "scale_dedupe", "group_scale_dedupe"] if g not in DISABLED]
+                     "scale_dedupe", "phase_jump", "phase_ridge", "group_scale_dedupe"] if g not in DISABLED]
 for g in order:
     sub = bud[bud.gate == g]
     tot = int(sub["killed"].sum())
