@@ -44,6 +44,31 @@ cfg_flags() {           # usage: cfg_flags <cfg>  -> sets PROD, WS, EXTRA
         L0p)        PROD=$PHASE_PROD; WS=love;     EXTRA="--measure phase" ;;
         RLg_radial) PROD=$GROUP_PROD; WS=fundlove; EXTRA="--radial" ;;
         RLg_iso)    PROD=$GROUP_PROD; WS=fundlove; EXTRA="" ;;
+        # --- combos added 2026-08-21 (well-pilot first, full launch on evidence) ---
+        # Phase-bearing arms carry --vs-max 4.5: 3.6 censors the phase posterior (30% of
+        # medians at the bound in aargau L0p). Group-bearing joints carry the mode gate so the
+        # group samples that contradict the phase are removed rather than reconciled by an
+        # inflated noise sigma.
+        RLp_iso)     PROD=$PHASE_PROD; WS=fundlove; EXTRA="--measure phase --vs-max 4.5" ;;
+        RLp_radial)  PROD=$PHASE_PROD; WS=fundlove; EXTRA="--measure phase --vs-max 4.5 --radial" ;;
+        R0gp)        PROD=$GROUP_PROD; WS=fund;     EXTRA="--phase-root $PHASE_PROD --mode-gate-phase $PHASE_PROD --vs-max 4.5" ;;
+        L0gp)        PROD=$GROUP_PROD; WS=love;     EXTRA="--phase-root $PHASE_PROD --mode-gate-phase $PHASE_PROD --vs-max 4.5" ;;
+        RLgp_iso)    PROD=$GROUP_PROD; WS=fundlove; EXTRA="--phase-root $PHASE_PROD --mode-gate-phase $PHASE_PROD --vs-max 4.5" ;;
+        RLgp_radial) PROD=$GROUP_PROD; WS=fundlove; EXTRA="--phase-root $PHASE_PROD --mode-gate-phase $PHASE_PROD --vs-max 4.5 --radial" ;;
+        # --- added 2026-08-29: joint group+phase with the far-field group cut ---
+        # Validated at GVL-1 (cell 41_21, hautesorne): capping fundamental GROUP at 5 s
+        # drops Rayleigh group chi 3.04 -> 1.33 while the phase keeps the posterior
+        # data-constrained to 6 km. The 5 s cut is the user decision from the R0g Tmax
+        # sweep (the U downturn past ~5 s is far-field bias) and lives in the
+        # period_ranges_g5.csv table, which overrides the one in vs_prod3.sbatch COMMON
+        # (argparse last-wins). --phase-tmin 2 likewise overrides COMMON's 0: the 1-2 s
+        # phase band conflicts with the group data and splits the chains (2/14 kept at a
+        # 1 s floor vs 9/10 at 2 s). NOTE no --mode-gate-phase here, unlike R0gp above --
+        # the arm validated at the well did not use it, and the period cut removes the
+        # same contaminated band the gate was there to catch.
+        # hautesorne only: period_ranges_g5.csv trims the hautesorne row alone, so this
+        # cfg on riehen/aargau would silently be the untrimmed joint arm.
+        R0gp_g5)    PROD=$GROUP_PROD; WS=fund;     EXTRA="--phase-root $PHASE_PROD --phase-tmin 2 --vs-max 4.5 --period-ranges $INPUTS/period_ranges_g5.csv" ;;
         *) echo "cfg_flags: unknown cfg '$cfg'" >&2; return 2 ;;
     esac
 }

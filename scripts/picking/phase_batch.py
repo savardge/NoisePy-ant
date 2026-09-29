@@ -3,7 +3,7 @@ bug-fixed pipeline (scale-frequency labelling + per-scale de-duplication + relax
 no-tau_max gates + joint 'unwrap' branch tracking). Companion to phase_pilot.py (same per-pair
 chain) but over ALL pairs, parallel and resumable, writing tomography-ready phase picks.
 
-Per pair (Allstack_pws, sym fold): synth G_LR0/G_LR1 (tf-PWS) -> CWT -> group argmax picks ->
+Per pair (Allstack_pws, sym fold): synth G_LR0/G_LR1 (ts-PWS) -> CWT -> group argmax picks ->
 measure_corrections_and_phase(use_period='scale', joint='unwrap'). Each phase pick is emitted at
 its TRUE CWT-scale period (deduped by scale_j, so no long-period multi-count) if it is physical
 (c > refined U_ref) and >= MIN_LAMBDA_PHASE wavelengths.
@@ -85,7 +85,7 @@ def process_pair(args):
     azi = _azimuth(laS, loS, laR, loR) if np.isfinite(laS) else np.nan
     try:
         c0, c1 = dispersion.phase_corrected_components(tr["ZZ"], tr["RR"], tr["RZ"], tr["ZR"])
-        sig = {"G_LR0": dispersion.tf_pws(c0, dt), "G_LR1": dispersion.tf_pws(c1, dt)}
+        sig = {"G_LR0": dispersion.ts_pws(c0, dt), "G_LR1": dispersion.ts_pws(c1, dt)}
         lines = []
         for comp, wave in (("G_LR0", "fund"), ("G_LR1", "overtone")):
             cw = dispersion.compute_cwt(sig[comp], dist, dt, Tmin=Tmin, vmin=vmin,

@@ -31,8 +31,13 @@ import matplotlib.pyplot as plt
 from noisepy import vs_inversion as vi
 
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
-MICHEL = ("/Volumes/T7blue/riehen-data/well-data/"
-          "Vsmodel_well_Basel1_Otterbach_Michel2016.csv")
+# T7blue first (the original), then the in-project cache (copied 2026-08-28 so the well
+# comparison no longer dies when the drive is unplugged).
+_MICHEL_CANDIDATES = (
+    "/Volumes/T7blue/riehen-data/well-data/Vsmodel_well_Basel1_Otterbach_Michel2016.csv",
+    EHM + "/riehen/geo2riehen_data/Vsmodel_well_Basel1_Otterbach_Michel2016.csv",
+)
+MICHEL = next((p_ for p_ in _MICHEL_CANDIDATES if os.path.exists(p_)), _MICHEL_CANDIDATES[0])
 ROOT = f"{EHM}/riehen/tomo/2_vs_depth_inversion/tests/dinver_swinvert"
 WELLS = {"Basel-1": ((23, 47), 2.426), "Otterbach-2": ((26, 43), 2.650)}
 

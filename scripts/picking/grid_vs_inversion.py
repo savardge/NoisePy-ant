@@ -166,6 +166,13 @@ def main():
     ap.add_argument("--wavesets", default="fund,fundot",
                     help="comma list of: fund (R fund), fundot (R fund+overtone), love (Love only), "
                          "fundlove (R fund+Love), fundotlove (R fund+overtone+Love)")
+    ap.add_argument("--group-waves", default=None,
+                    help="comma list of waves that KEEP their group curve in a group-measure run; "
+                         "the waveset's other waves are inverted from their phase curve only "
+                         "(needs --phase-root). Default: every wave keeps group. E.g. "
+                         "--wavesets fundlove --group-waves fund = R group+phase + Love phase "
+                         "(added 2026-09-10 for the Love ladder; Love group is contaminated "
+                         "below 2 s and above 4.3 s at hautesorne).")
     ap.add_argument("--measure", choices=("group", "phase"), default="group",
                     help="phase = PHASE-ONLY inversion: --production must then be the PHASE "
                          "run's production root; its curves become <wave>_phase targets and no "
@@ -177,6 +184,18 @@ def main():
                          "cell. Group rows trim the group curves, phase rows the phase curves; "
                          "rows with both bounds blank impose no restriction. Needs --net when "
                          "the CSV covers several networks.")
+    ap.add_argument("--period-caps", default=None,
+                    help="CSV of PER-CELL upper period bounds on the GROUP curves: columns "
+                         "ix,iy,wave,T_max (wave = fund|love|overtone). Applied after the "
+                         "network-wide --period-ranges and the c2 mask; cells absent from the "
+                         "CSV are untouched, so they reproduce the uncapped arm exactly (a "
+                         "built-in zero-change control). Built for the far-field turnover map "
+                         "(aargau test_2026-09-09_turnover_onset, 2026-09-09). Group only -- "
+                         "the phase curves are never capped here.")
+    ap.add_argument("--min-rungs", type=int, default=4,
+                    help="after --period-caps, a GROUP curve left with fewer rungs than this is "
+                         "dropped from the cell (its phase curve, if any, still runs). A 1-3 point "
+                         "curve under a free noise sigma constrains nothing and only adds a target.")
     ap.add_argument("--net", default=None, help="riehen|aargau; required for --criterion")
     ap.add_argument("--criterion", default="none",
                     choices=("none", "tomographic", "physical", "combined"),
@@ -204,6 +223,20 @@ def main():
                     help="fund/Love PHASE envelope cut [s]: the measured cross-well upper "
                          "envelope of the kinematically inconsistent (2piN mis-branch) band; "
                          "overtone phase is never cut")
+    # Parallel tempering. Until 2026-08-24 this existed ONLY in well_vs_qc.py, so the grid
+    # driver could not express PT at all -- which is why every vs_prod3 arm on every network
+    # ran with pt_enabled=0. The runner has always read these cfg keys; only the flags were
+    # missing. Defaults come from noisepy.pt_defaults (t1chains=3, maxtemp=50), NOT from a
+    # local copy: see that module for why maxtemp=2 melts nothing.
+    ap.add_argument("--parallel-tempering", action="store_true",
+                    help="enable PT. Costs posterior samples -- BayHunter keeps only T=1 "
+                         "samples, ~t1chains/nchains of them (~19%% at the defaults), so raise "
+                         "--n-chains or --iter-main to compensate. It also changes what chain "
+                         "REJECTION means: only chains that ever ran cold are eligible.")
+    ap.add_argument("--t1chains", type=int, default=None,
+                    help="chains pinned at T=1 (default pt_defaults.PT_T1CHAINS=3)")
+    ap.add_argument("--maxtemp", type=float, default=None,
+                    help="hottest ladder temperature (default pt_defaults.PT_MAXTEMP=50)")
     ap.add_argument("--noise-regime", choices=["free", "bounded"], default="free",
                     help="bounded = sigma ~ U(0.5*S_min, 3*S_min) per target (recipe)")
     ap.add_argument("--c2-mask", action="store_true",
@@ -217,10 +250,13 @@ def main():
                          "'overtone': its faster U means larger lambda so C2 flags it hardest, "
                          "yet it never exhibited the near-field group misfit empirically "
                          "(clean at 5/6 wells; the 2026-07-17 uniform application deleted it "
-                         "at 34%/26% of Riehen/Aargau cells -- grid_pilot DECISIONS.md D9).")
+                         "at 34%%/26%% of Riehen/Aargau cells -- grid_pilot DECISIONS.md D9).")
     ap.add_argument("--radial", action="store_true",
                     help="continuous per-layer radial gamma (BayHunter_Aniso fork)")
     ap.add_argument("--radial-prior", default="-0.35,0.35")
+    ap.add_argument("--radial-zmax", type=float, default=None,
+                    help="radial anisotropy only ABOVE this depth (km): gamma is inert in the Love forward "
+                         "model below it (isotropic basement control, 2026-09-10)")
     ap.add_argument("--vpvs-range", default=None,
                     help="'lo,hi' -> free Vp/Vs (recipe: 1.5,3.5); default fixed 1.73")
     ap.add_argument("--mode-gate-phase", default=None, metavar="PHASE_ROOT",
@@ -235,6 +271,30 @@ def main():
     ap.add_argument("--mode-gate-margin", type=float, default=1.0,
                     help="drop if U >= margin*reference; 1.0 (default) removes only the "
                          "strictly impossible, <1 also trims near-misses")
+    ap.add_argument("--reselect-median", "--reselect-chains", action="store_true",
+                    dest="reselect_median",
+                    help="at assembly, re-apply the CURRENT production chain-selection rule "
+                         "(vs_reliability.SELECT_RULE, since 2026-09-11 'cluster': the top logL "
+                         "cluster that reaches a quorum) from the stored per-chain logL, and "
+                         "recompute the Vs summary where the kept set changes. Gives arms computed "
+                         "under the old best-chain rule the current rule without re-inversion. "
+                         "Applied before --rebasin. The '--reselect-median' spelling is kept "
+                         "because scripts use it; '--reselect-chains' is the accurate name.")
+    ap.add_argument("--min-obs-rungs", type=int, default=0,
+                    help="assemble: mark a cell wholly unreliable when its fundamental target "
+                         "has fewer than N observed periods. Off by default. 18 removes the "
+                         "aargau data-starved rim cells (tests/test_2026-09-14_north_outliers).")
+    ap.add_argument("--rebasin", action="store_true",
+                    help="at ASSEMBLE time, override likelihood-hijacked chain-basin choices "
+                         "with the chain-majority basin (vs_inversion.rebasin_cell). Fixes the "
+                         "isolated-slow-cell speckle where 1-3 sigma-collapsed chains outscore "
+                         "the 20-chain majority on raw logL. Cells whose stored basin already "
+                         "is the majority are untouched (bit-identical).")
+    ap.add_argument("--save-ensemble", action="store_true",
+                    help="BayHunter: dump the full model ensemble (ens_vs, iface_depths, "
+                         "ens_misfit, ens_nlayers) into each cell npz -- needed by "
+                         "well_cell_diagnostics.py. ~MBs per cell; use for targeted reruns "
+                         "(e.g. near-well cells), not full grids.")
     ap.add_argument("--use-mp", action="store_true",
                     help="fork-multiprocess the chains INSIDE each cell's BayHunter subprocess "
                          "(validated: posterior statistically identical to serial). Size "
@@ -261,12 +321,27 @@ def main():
     ap.add_argument("--dinver-ns", type=int, default=50_000)
     ap.add_argument("--dinver-nr", type=int, default=100)
     ap.add_argument("--dinver-ns0", type=int, default=10_000)
+    ap.add_argument("--dinver-vs-rev", action="store_true",
+                    help="allow Vs REVERSALS (LVZs) in the Dinver layering. Default off = "
+                         "the SWinvert notebook convention (Vs non-decreasing), which "
+                         "BayHunter does not share -- flag any comparison accordingly.")
+    ap.add_argument("--dinver-n-keep", type=int, default=None,
+                    help="models extracted per (param, trial) run; default = --dinver-nr. "
+                         "Raise (e.g. 1000) with --dinver-n-pool to widen the pooled "
+                         "ensemble beyond the NA convergence tip without changing the search.")
     ap.add_argument("--dinver-n-pool", type=int, default=100)
     ap.add_argument("--dinver-depth-factor", type=float, default=2.0)
     ap.add_argument("--dinver-rho", type=float, default=2000.0)
     ap.add_argument("--dinver-pr", default="0.2,0.35", help="Poisson range; crustal default, see run_vs_inversion.py")
     ap.add_argument("--dinver-vp", default="0.8,8.0")
     ap.add_argument("--dinver-jobs", type=int, default=1)
+    ap.add_argument("--dinver-parallel", type=int, default=1,
+                    help="(param, trial) runs executed CONCURRENTLY within one cell. Default 1: "
+                         "the pool parallelises over CELLS, which saturates the node whenever "
+                         "n_cells >= cpus. Raise it when a run has FEWER cells than cpus (e.g. "
+                         "the near-well subsets: 3 hautesorne cells on 24 cpus used 3 cores and "
+                         "took 19 h; --dinver-parallel 8 fills the node). Keep "
+                         "n_workers x dinver_parallel <= cpus.")
     ap.add_argument("--dinver-min-cov", type=float, default=0.05)
     ap.add_argument("--dinver-size-phase-root", default=None, metavar="PHASE_ROOT",
                     help="GROUP-only dinver runs: load this phase production root ONLY to size "
@@ -321,7 +396,8 @@ def main():
 
     want = [w.strip() for w in args.wavesets.split(",") if w.strip()]
     if args.assemble_only:
-        assemble_volume(celldir, want, args.outdir)
+        assemble_volume(celldir, want, args.outdir, rebasin=args.rebasin,
+                        reselect=args.reselect_median, min_obs_rungs=args.min_obs_rungs)
         return
 
     wavesets = {"fund": ("fund",), "fundot": ("fund", "overtone"), "love": ("love",),
@@ -343,6 +419,25 @@ def main():
     # in (curves vs curves_phase), not by the curve key (see invert_one / the runner).
     pr_group = {k: v for k, v in pranges.items() if not k.endswith("_phase")}
     pr_phase = {k[: -len("_phase")]: v for k, v in pranges.items() if k.endswith("_phase")}
+    pcaps = {}
+    if args.period_caps:
+        import pandas as pd
+        _pc = pd.read_csv(args.period_caps)
+        need = {"ix", "iy", "wave", "T_max"}
+        if not need.issubset(_pc.columns):
+            raise SystemExit(f"--period-caps: need columns {sorted(need)}, got {list(_pc.columns)}")
+        # optional per-cell LOWER bound (kinematic floor, kinematic_floor_map.py, 2026-09-10);
+        # NaN in either column = that bound left to the network table
+        has_min = "T_min" in _pc.columns
+        for r_ in _pc.itertuples():
+            tmin = float(r_.T_min) if has_min and np.isfinite(r_.T_min) else None
+            tmax = float(r_.T_max) if np.isfinite(r_.T_max) else None
+            if tmin is None and tmax is None:
+                continue
+            pcaps.setdefault((int(r_.ix), int(r_.iy)), {})[str(r_.wave)] = (tmin, tmax)
+        print(f"--period-caps {args.period_caps}: {len(pcaps)} cells carry a per-cell group band "
+              f"(T_max median {_pc.T_max.median():.2f} s"
+              + (f", T_min median {_pc.T_min.median():.2f} s" if has_min else "") + ")", flush=True)
 
     covf = coverage_grid(args.production, "fund")
     covo = coverage_grid(args.production, "overtone")
@@ -369,10 +464,18 @@ def main():
           f"= {len(cells_ij)*len(want)} runs, {args.n_workers} workers", flush=True)
 
     cfg_common = dict(depth_max=args.depth_max, vs_bounds=[args.vs_min, args.vs_max],
+                      period_caps=args.period_caps,
                       n_layers=[1, 20], maxfrac=vi.MAX_ADJ_FRAC, nchains=args.n_chains,
                       iter_burnin=args.iter_burnin, iter_main=args.iter_main,
                       maxmodels=args.maxmodels, pred_nsub=args.pred_nsub, skip_pred=False,
+                      save_ensemble=bool(args.save_ensemble),
                       _timeout=args.cell_timeout)
+    if args.parallel_tempering:
+        from noisepy import pt_defaults
+        t1, mt = pt_defaults.resolve(args.t1chains, args.maxtemp, args.n_chains)
+        cfg_common.update(parallel_tempering=True, t1chains=t1, maxtemp=mt)
+        print(f"parallel tempering ON: {t1}/{args.n_chains} chains at T=1, maxtemp={mt:g}",
+              flush=True)
     if args.noise_regime != "free":
         cfg_common["noise_regime"] = args.noise_regime
     if args.vpvs_range:
@@ -380,6 +483,8 @@ def main():
     if args.radial:
         cfg_common["radial_anisotropy"] = True
         cfg_common["radial_prior"] = [float(x) for x in args.radial_prior.split(",")]
+        if args.radial_zmax is not None:
+            cfg_common["radial_zmax"] = float(args.radial_zmax)
     if args.use_mp:
         cfg_common["use_mp"] = True
         cfg_common["mp_nthreads"] = args.mp_nthreads
@@ -399,12 +504,13 @@ def main():
             lns=[int(x) for x in args.dinver_lns.split(",")],
             lrs=[float(x) for x in args.dinver_lrs.split(",")],
             ntrials=args.dinver_ntrials, ns=args.dinver_ns, nr=args.dinver_nr,
-            ns0=args.dinver_ns0, n_pool=args.dinver_n_pool,
+            ns0=args.dinver_ns0, n_pool=args.dinver_n_pool, n_keep=args.dinver_n_keep, vs_rev=args.dinver_vs_rev,
             depth_factor=args.dinver_depth_factor, n_resample=args.dinver_n_resample,
             min_cov=(args.dinver_min_cov or None),
             vp_bounds=[float(x) for x in args.dinver_vp.split(",")],
             pr_bounds=[float(x) for x in args.dinver_pr.split(",")], rho=args.dinver_rho,
-            jobs=args.dinver_jobs, seed0=1, keep_reports=False, lean=bool(args.dinver_lean),
+            jobs=args.dinver_jobs, n_parallel=args.dinver_parallel,
+            seed0=1, keep_reports=False, lean=bool(args.dinver_lean),
             report_dir=args.dinver_report_dir,
             size_only_phase=bool(args.dinver_size_phase_root))
         if args.dinver_size_phase_root and args.phase_root:
@@ -520,10 +626,22 @@ def main():
         return c
 
     tasks = []
+    pcap_report = []
+    pcap_dropped = []
     for ci, (ix, iy) in enumerate(cells_ij):
         base = bases[(ix, iy)]
         if c2_tables:
             base = _apply_c2(base, ci)                    # group mask, waveset-independent
+        if pcaps and (ix, iy) in pcaps:
+            # per-cell far-field cap on the GROUP curves only (see --period-caps help)
+            _before = {w: len(base.curves[w][0]) for w in pcaps[(ix, iy)] if base.has(w)}
+            base = vi.restrict_periods(base, {w: b_ for w, b_ in pcaps[(ix, iy)].items()})
+            for w in list(_before):
+                if base.has(w) and len(base.curves[w][0]) < args.min_rungs:
+                    del base.curves[w]                     # too short to constrain anything
+                    pcap_dropped.append((ix, iy, w))
+            pcap_report.append((ix, iy, {w: (_before[w], len(base.curves[w][0]) if base.has(w) else 0)
+                                         for w in _before}))
         base_ph = bases_ph.get((ix, iy))
         if base_ph is not None:
             # ORDER MATTERS: reliability criterion FIRST (as in well_vs_qc / the validated well
@@ -543,6 +661,11 @@ def main():
                                                         "love": (args.phase_tmin, None)})
         for wskey in want:
             cell = base
+            if args.group_waves is not None:
+                import copy
+                _keep = {w for w in args.group_waves.split(",") if w}
+                cell = copy.deepcopy(base)
+                cell.curves = {w: c for w, c in cell.curves.items() if w in _keep}
             cell_ph = base_ph
             if "overtone" in wavesets[wskey] and args.overtone_min_t:
                 cell = vi.restrict_periods(base, {"overtone": (args.overtone_min_t, None)})
@@ -563,6 +686,16 @@ def main():
             wd = os.path.join(workroot, f"{ix}_{iy}_{wskey}")
             tasks.append((cell, cell_ph_ws, wavesets[wskey], out_npz, wd,
                           eng_py, eng_runner, cfg_common))
+
+    if pcaps:
+        nrem = [sum(a_ - b_ for a_, b_ in d.values()) for _, _, d in pcap_report]
+        print(f"--period-caps: {len(pcap_report)} of {len(cells_ij)} cells in coverage capped; "
+              f"periods removed per capped cell median "
+              f"{np.median(nrem) if nrem else 0:.0f}, max {max(nrem) if nrem else 0}; "
+              f"{len(cells_ij) - len(pcap_report)} cells untouched (control)", flush=True)
+        if pcap_dropped:
+            print(f"--period-caps: group curve DROPPED (< {args.min_rungs} rungs left) at "
+                  f"{len(pcap_dropped)} cells, e.g. {pcap_dropped[:5]}", flush=True)
 
     if args.reverse:
         tasks = tasks[::-1]
@@ -594,10 +727,12 @@ def main():
         print("skipping assembly (sharded/--no-assemble); run --assemble-only when all shards "
               "finish", flush=True)
     else:
-        assemble_volume(celldir, want, args.outdir)
+        assemble_volume(celldir, want, args.outdir, rebasin=args.rebasin,
+                        reselect=args.reselect_median, min_obs_rungs=args.min_obs_rungs)
 
 
-def assemble_volume(celldir, wavesets, outdir):
+def assemble_volume(celldir, wavesets, outdir, rebasin=False, reselect=False,
+                    min_obs_rungs=0):
     """Stack per-cell npz into per-waveset (ncell, ndepth) arrays with coords + uncertainty."""
     import glob
     for wskey in wavesets:
@@ -607,6 +742,10 @@ def assemble_volume(celldir, wavesets, outdir):
         dep = None
         ij, lonlat, xy, med, p16, p84, p025, p975, chi_f, chi_o, chi_l, nlay = \
             ([] for _ in range(12))
+        # posterior MEAN alongside the median (2026-09-14). The median is what every figure and
+        # statistic uses; the mean is stored so the two can be compared without re-running cells
+        # (they differ where the posterior is skewed -- near a velocity bound, or a bimodal cell).
+        mean = []
         # radial anisotropy: gamma(z)=(Vsh-Vsv)/Vsv and the Voigt-referenced zeta are the whole
         # point of a --radial run, so stack them alongside Vs instead of leaving them reachable
         # only per cell. Isotropic runs carry the same keys filled with NaN -- stacking those is
@@ -619,27 +758,55 @@ def assemble_volume(celldir, wavesets, outdir):
         # velocity downward, painting an unphysical slow ring at depth. Carrying it here keeps
         # the figure scripts independent of the per-cell tree (which stays on scratch).
         zrel = {"z_reliable_min": [], "z_reliable_max": []}
+        # ALSO carry the per-depth reliable_mask. z_reliable_min/max is only the LONGEST
+        # contiguous reliable run, so a cell that is reliable shallow AND deep with an
+        # unresolved band between loses the shorter band entirely -- measured at 13-17% of
+        # cells, and in 5-9% the discarded band is the SHALLOW one, which is what makes
+        # sections show a masked shallow column above unmasked deep rock.
+        relmask = []
+        rebasin_flags = []
+        reselect_flags = []
+        # per-cell rung COUNT for every inverted target, from the stored obsT_<target>. Cells
+        # starved of a curve are otherwise invisible in the volume: they invert on whatever is
+        # left (three aargau cells had ZERO Rayleigh phase rungs and ran on Love alone), and the
+        # result is a plausible-looking column that no Rayleigh measurement constrains. Counting
+        # here costs nothing and lets any figure gate on it -- see --min-obs-rungs.
+        nT = {}
+        nstarved = 0
         for f in files:
             try:
                 r = vi.load_result(f)
             except Exception:
                 continue
+            if reselect:
+                r = vi.reselect_cell(r)
+                reselect_flags.append(bool(r.get("reselect_applied", False)))
+            if rebasin:
+                r = vi.rebasin_cell(r)
+                rebasin_flags.append(bool(r.get("rebasin_applied", False)))
             for k in aniso_keys:
                 if k in r:
                     aniso[k].append(np.asarray(r[k], float))
             for k in zrel:
                 zrel[k].append(float(r[k]) if k in r else np.nan)
+            relmask.append(np.asarray(r["reliable_mask"], bool) if "reliable_mask" in r
+                           else None)
             dep = r["depth"]
             ix, iy = (int(v) for v in r.get("cell_ixiy", (-1, -1)))
             lon, lat = (float(v) for v in r.get("cell_lonlat", (np.nan, np.nan)))
             ij.append((ix, iy)); lonlat.append((lon, lat))
             med.append(r["vs_median"]); p16.append(r["vs_p16"]); p84.append(r["vs_p84"])
+            mean.append(r["vs_mean"] if "vs_mean" in r else np.full_like(
+                np.asarray(r["vs_median"], float), np.nan))
             p025.append(r["vs_p025"]); p975.append(r["vs_p975"])
             nlay.append(float(np.mean(r.get("n_layers_post", [np.nan]))))
             # A phase-only run stores its curves under "<wave>_phase", so looking up the bare
             # wave name leaves chi_* entirely NaN and silently drops the misfit QC column from
             # every phase volume. A config is group OR phase, never both, so falling back to
             # the _phase key keeps one column per wave whatever the measure.
+            # load_result repacks obsT_/obs_/obssig_ into r["obs"] = {wave: (T, val, sig)}
+            for tgt_, tv_ in (r.get("obs") or {}).items():
+                nT.setdefault(str(tgt_), {})[len(ij) - 1] = int(np.size(tv_[0]))
             mis = vi.data_misfit(r)
             chi_f.append(mis.get("fund", mis.get("fund_phase", np.nan)))
             chi_o.append(mis.get("overtone", mis.get("overtone_phase", np.nan)))
@@ -647,8 +814,49 @@ def assemble_volume(celldir, wavesets, outdir):
         out = os.path.join(outdir, f"volume_{wskey}.npz")
         extra = {k: np.array(v) for k, v in aniso.items() if len(v) == len(ij)}
         extra.update({k: np.array(v) for k, v in zrel.items() if len(v) == len(ij)})
+        # only ship the mask if EVERY cell had one and all share the depth axis -- a partial
+        # stack would silently mask the wrong cells
+        for tgt, d in nT.items():
+            extra[f"nT_{tgt}"] = np.array([d.get(i, 0) for i in range(len(ij))], int)
+        # --min-obs-rungs: a cell whose PRIMARY (fundamental) target carries fewer rungs than
+        # this is marked wholly unreliable rather than deleted, so coverage statistics stay
+        # honest about what was dropped. Default 0 = off, so every existing arm is unchanged.
+        starve = np.zeros(len(ij), bool)
+        if min_obs_rungs > 0:
+            prim = [k for k in nT if k.startswith("fund")]
+            if prim:
+                key = sorted(prim)[0]
+                counts = extra[f"nT_{key}"]
+                starve = counts < min_obs_rungs
+                nstarved = int(starve.sum())
+                print(f"min-obs-rungs {min_obs_rungs} on {key}: {nstarved} of {len(ij)} cells "
+                      f"marked unreliable (rung counts "
+                      f"{counts.min()}-{counts.max()}, median {int(np.median(counts))})",
+                      flush=True)
+                extra["starved_mask"] = starve
+                extra["min_obs_rungs"] = np.array(min_obs_rungs)
+                for k_ in ("z_reliable_min", "z_reliable_max"):
+                    if k_ in extra:
+                        extra[k_] = np.where(starve, np.nan, extra[k_])
+            else:
+                print(f"min-obs-rungs {min_obs_rungs}: no fundamental target in "
+                      f"{sorted(nT)} -- not applied", flush=True)
+        if len(relmask) == len(ij) and all(m is not None and len(m) == len(dep)
+                                           for m in relmask):
+            rm = np.array(relmask, bool)
+            rm[starve] = False
+            extra["reliable_mask"] = rm
+        if reselect and len(reselect_flags) == len(ij):
+            extra["reselect_applied"] = np.array(reselect_flags, bool)
+            print(f"reselect (median rule): kept set changed at {int(np.sum(reselect_flags))} of "
+                  f"{len(ij)} cells", flush=True)
+        if rebasin and len(rebasin_flags) == len(ij):
+            extra["rebasin_applied"] = np.array(rebasin_flags, bool)
+            print(f"rebasin: majority-basin override applied to "
+                  f"{int(np.sum(rebasin_flags))} of {len(ij)} cells", flush=True)
         np.savez_compressed(out, depth=dep, cells=np.array(ij), lonlat=np.array(lonlat),
-                            vs_median=np.array(med), vs_p16=np.array(p16), vs_p84=np.array(p84),
+                            vs_median=np.array(med), vs_mean=np.array(mean),
+                            vs_p16=np.array(p16), vs_p84=np.array(p84),
                             vs_p025=np.array(p025), vs_p975=np.array(p975),
                             chi_fund=np.array(chi_f), chi_overtone=np.array(chi_o),
                             chi_love=np.array(chi_l),

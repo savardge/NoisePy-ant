@@ -28,7 +28,7 @@ PRIOR = (1.5, 3.5)
 RAD_KM = 5.0
 rng = np.random.default_rng(0)
 
-rows = list(csv.DictReader(open(f"{E}/Projects/_gate_eval/vpvs_hs_full.csv")))
+rows = list(csv.DictReader(open(f"{E}/Projects/method_tests/2_pick_qc/qc_gate_evaluation/vpvs_hs_full.csv")))
 ij = np.array([[int(r["ix"]), int(r["iy"])] for r in rows])
 med = np.array([float(r["med"]) for r in rows])
 p16 = np.array([float(r["p16"]) for r in rows])
@@ -137,6 +137,6 @@ ins.legend(fontsize=6.5, loc="upper left")
 
 fig.suptitle("Haute-Sorne free-Vp/Vs arm — is there a basin signal in posterior Vp/Vs? "
              "(1,072 cells, RLg_radial)", fontsize=14)
-o = f"{E}/Projects/_gate_eval/vpvs_spatial_diagnostic.png"
+o = f"{E}/Projects/method_tests/2_pick_qc/qc_gate_evaluation/vpvs_spatial_diagnostic.png"
 fig.savefig(o, dpi=140, bbox_inches="tight")
 print("wrote", o)

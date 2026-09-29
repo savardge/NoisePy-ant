@@ -86,7 +86,7 @@ at SNR ≥ 3; every other flag value is a documented reason the pick was *not* t
 | `modesep_config.py` | shared YAML loader + helpers (`load_config`, `apply_overrides`, `ref_curve_paths`, `vsg_station_coords`) | imported by the scripts below |
 | `vsg_modesep.py` | G_LR0/G_LR1 synthesis (Nayak & Thurber 2020) + Park phase-shift beamform + network stack | VSG per-source npz → `vsg_modesep_stacks_sign±1.npz` |
 | `pick_reference_ridges.py` | windowed-argmax reference-curve picking + dominance/roughness/run QC | stack npz → `ref_*_phase.txt`, `picked_reference_curves.csv` |
-| `dispersion_curves_V6_modesep.py` | per-pair V5 + mode separation (tf-PWS G_LR0/G_LR1), group + 2πN phase picks, quicklooks | one pair `.h5` → `*_dispersion_all.csv` (+images) |
+| `dispersion_curves_V6_modesep.py` | per-pair V5 + mode separation (ts-PWS G_LR0/G_LR1), group + 2πN phase picks, quicklooks | one pair `.h5` → `*_dispersion_all.csv` (+images) |
 | `dispersion_batch_modesep.py` | lean full-network batch of the validated V6 config (pws/sym only), inline validation, resume | stack root → `dispersion_V6/**` |
 | `validate_modes.py` | consensus mode validator: confirms G_LR0 vs ZZ/RR/all4 argmax, G_LR1 separation + mutual suppression | `*_dispersion_all.csv` → `*_modes_validated.csv` (+`*_modeQA.png`) |
 | `network_station_qc.py` | per-station LSQ effect terms + robust-z flags (coupling / orientation-polarity) | validated CSVs → `station_qc.csv/png` |
@@ -136,5 +136,5 @@ at SNR ≥ 3; every other flag value is a documented reason the pick was *not* t
   method, with a Riehen worked example.
 - [`MODE_OSCULATION_NOTES.md`](MODE_OSCULATION_NOTES.md) — handling modal energy transfer
   (osculation / "kissing" curves) in FTAN picking (Bhaumik & Cox 2026).
-- `noisepy/dispersion.py` — the algorithms (CWT FTAN, `phase_corrected_components`, `tf_pws`,
+- `noisepy/dispersion.py` — the algorithms (CWT FTAN, `phase_corrected_components`, `ts_pws`,
   `phase_from_group`, 2πN resolution).

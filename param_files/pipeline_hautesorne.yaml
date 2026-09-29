@@ -31,6 +31,10 @@ qc:                                # flags for qc_unified_picks.py
   u_bin: 0.0
   group_scale_dedupe: false        # export's (pair, T_scale) median collapses duplicates
   fold_love_overtone: false
+  phase_ref_crest: true            # drop Rayleigh fund. phase pieces on another 2*pi crest than
+                                   # the piece closest to <ref_dir>/ref_fundamental_phase.txt
+                                   # (2026-09-28; method_tests/1_picking/
+                                   # test_2026-09-27_phase_unwrap_omega_gates_crossnet)
 
 export:                            # flags for export_unified_tomo_picks.py
   measure: group

@@ -180,15 +180,19 @@ def _use_abs_outlier_cut(obj, delta):
             idxs.append(cidx)
             medians.append(_chain_median_at_t1(likefile))
         idxs, medians = np.array(idxs, float), np.array(medians, float)
-        best = np.nanmax(medians)
-        dlog = best - medians
-        outliers = idxs[dlog > delta]
-        print(f"> outlier cut: keeping {len(idxs) - len(outliers)}/{len(idxs)} chains within "
-              f"{delta:g} logL of best ({best:.2f}); logL spread {np.ptp(medians):.2f}")
+        from noisepy import vs_reliability as _vr
+        keep = _vr.kept_mask(medians, delta)          # SELECT_RULE: median (2026-09-11) or best
+        outliers = idxs[~keep]
+        fin = np.isfinite(medians)
+        print(f"> outlier cut ({_vr.SELECT_RULE} rule): keeping {int(keep.sum())}/{len(idxs)} chains; "
+              f"kept logL {np.nanmin(medians[keep]) if keep.any() else np.nan:.1f}..{np.nanmax(medians[keep]) if keep.any() else np.nan:.1f}, "
+              f"all {np.nanmin(medians[fin]):.1f}..{np.nanmax(medians[fin]):.1f}")
         if len(outliers) > 0:
+            ref = np.nanmax(medians[keep]) if keep.any() else np.nanmax(medians[fin])
             with open(os.path.join(self.datapath, "outliers.dat"), "w") as f:
-                f.write(f"# Outlier chainindices with absolute delta-logL > {delta:g}\n")
-                for i, o in zip(idxs[dlog > delta], dlog[dlog > delta]):
+                f.write(f"# chains dropped by the '{_vr.SELECT_RULE}' rule; "
+                        f"column 2 = logL below the best KEPT chain ({ref:.3f})\n")
+                for i, o in zip(idxs[~keep], ref - medians[~keep]):
                     f.write("%d\t%.3f\n" % (i, o))
         return outliers
 
@@ -291,6 +295,8 @@ def main(cfgpath):
     if cfg.get("radial_anisotropy", False):
         initparams["radial_anisotropy"] = True
         priors["radial"] = tuple(cfg.get("radial_prior", (-0.35, 0.35)))
+        if cfg.get("radial_zmax") is not None:          # isotropic basement: gamma inert below zmax
+            initparams["radial_zmax"] = float(cfg["radial_zmax"])
 
     # ---- optional REAL multiprocessing -------------------------------------------------------
     # BayHunter's mp_inversion does NOT deadlock on macOS -- the long-standing comment here was
@@ -502,6 +508,9 @@ def main(cfgpath):
     prof = np.array(prof)
     p = np.nanpercentile(prof, [2.5, 16, 50, 84, 97.5], axis=0)
     gprof = np.array(gprof) if gprof else np.zeros((0, len(dep)))
+    RADIAL_ZMAX = cfg.get("radial_zmax", None)
+    if RADIAL and RADIAL_ZMAX is not None and len(gprof):
+        gprof[:, np.asarray(dep, float) >= float(RADIAL_ZMAX)] = 0.0   # inert below zmax -> report 0
     gp = (np.nanpercentile(gprof, [2.5, 16, 50, 84, 97.5], axis=0) if len(gprof)
           else np.full((5, len(dep)), np.nan))
     # CONTINUOUS gamma (CONTINUOUS_ZETA_PLAN.md): significance is the SIGN posterior, not
@@ -593,7 +602,8 @@ def main(cfgpath):
              radial=int(RADIAL),
              gamma_p025=gp[0], gamma_p16=gp[1], gamma_median=gp[2],
              gamma_p84=gp[3], gamma_p975=gp[4],     # gamma(z)=(Vsh-Vsv)/Vsv (NaN if not radial)
-             gamma_p_pos=gamma_p_pos,               # P(gamma>0)(z): sign significance (continuous)
+             gamma_p_pos=gamma_p_pos,
+             radial_zmax=(float(RADIAL_ZMAX) if (RADIAL and RADIAL_ZMAX is not None) else np.nan),               # P(gamma>0)(z): sign significance (continuous)
              zeta_p025=zp[0], zeta_p16=zp[1], zeta_median=zp[2],
              zeta_p84=zp[3], zeta_p975=zp[4],       # Voigt-referenced zeta(z), lit-comparable
              chain_disagree=conv["chain_disagree"], frac_chains_ok=conv["frac_chains_ok"],

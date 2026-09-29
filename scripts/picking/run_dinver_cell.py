@@ -36,7 +36,9 @@ import numpy as np
 from noisepy import vs_inversion as vi
 from noisepy import dinver_target as dt
 
-DEFAULTS = dict(lean=False,
+DEFAULTS = dict(lean=False, n_keep=None, vs_rev=False,   # models EXTRACTED per run; None -> nr. -nr stays a
+                                           # search parameter (best cells resampled by the NA).
+
                 lns=(3, 4, 5, 7), lrs=(3.0, 2.0, 1.5, 1.2), ntrials=3, ns0=10_000, ns=50_000,
                 nr=100, n_pool=100, depth_factor=2.0, n_resample=30, min_cov=0.05,
                 vs_bounds=(0.5, 4.2), vp_bounds=(0.8, 8.0), pr_bounds=(0.2, 0.35), rho=2000.0,
@@ -76,17 +78,22 @@ def _param_files(cfg, wmin, wmax, pdir):
     vp_lo, vp_hi = (float(x) * dt.KM for x in cfg["vp_bounds"])
     pr_lo, pr_hi = (float(x) for x in cfg["pr_bounds"])
     df = float(cfg["depth_factor"])
+    # vs_rev: allow velocity REVERSALS (LVZs). The SWinvert notebook default (and every run
+    # before 2026-08-28) is False -> Vs non-decreasing with depth, which BayHunter does NOT
+    # share (lvz=hvz=maxfrac permits reversals) and which the Basel-1 sonic log contradicts
+    # (~2.4 -> 1.6 km/s at 0.5-0.8 km). Vp follows vs_rev so the link stays consistent.
+    rev = bool(cfg.get("vs_rev", False))
     pr = swprepost.Parameter.from_ln(wmin, wmax, 1, pr_lo, pr_hi, False)
     rh = swprepost.Parameter.from_fx(float(cfg["rho"]))
     out = []
     specs = [("ln%d" % ln, lambda ln=ln: swprepost.Parameter.from_ln(
-        wmin, wmax, int(ln), vs_lo, vs_hi, False, depth_factor=df)) for ln in cfg["lns"]]
+        wmin, wmax, int(ln), vs_lo, vs_hi, rev, depth_factor=df)) for ln in cfg["lns"]]
     specs += [("lr%g" % lr, lambda lr=lr: swprepost.Parameter.from_lr(
-        wmin, wmax, float(lr), vs_lo, vs_hi, False, depth_factor=df)) for lr in cfg["lrs"]]
+        wmin, wmax, float(lr), vs_lo, vs_hi, rev, depth_factor=df)) for lr in cfg["lrs"]]
     for label, mk in specs:
         vs = mk()
         # Vp: same layering as Vs, its own bounds; Poisson condition ties them per layer.
-        vp = swprepost.Parameter.from_parameter_and_link(vp_lo, vp_hi, False, vs, ptype="vs")
+        vp = swprepost.Parameter.from_parameter_and_link(vp_lo, vp_hi, rev, vs, ptype="vs")
         prefix = os.path.join(pdir, label)
         swprepost.Parameterization(vp=vp, pr=pr, vs=vs, rh=rh).to_param(prefix, version="3.4.2")
         out.append((label, prefix + ".param", len(vs.lay_min)))
@@ -228,6 +235,7 @@ def main(cfgpath):
         tdir = os.path.join(tdir, "dinver_%d_%d" % (cell.ix, cell.iy)); os.makedirs(tdir, exist_ok=True)
     params = _param_files(cfg, wmin, wmax, pdir)
     ntr = int(cfg["ntrials"]); seed0 = cfg.get("seed0")
+    n_keep = int(cfg.get("n_keep") or cfg["nr"])
     keep = bool(cfg.get("keep_reports", False))
     # NB no `-batch`: the cluster's Geopsy 3.4.2 dinver rejects it in -optimization mode
     # ("bad option '-batch'") although its -h lists it and `-batch -app-version` passes; the
@@ -256,12 +264,12 @@ def main(cfgpath):
             # extract the best-nr cache from the (local) report, then drop the report; the
             # cache is named after `report` in rdir so resume/diagnostics find it as before
             os.replace(part, part[:-len(".part")])
-            models = _load_models(gpdcreport, part[:-len(".part")], cfg["nr"], keep_report=keep,
+            models = _load_models(gpdcreport, part[:-len(".part")], n_keep, keep_report=keep,
                                   cache_for=report)
             if keep and tdir != rdir:
                 os.replace(part[:-len(".part")], report)
             return label, tr, models, time.time() - t0, 0
-        models = _load_models(gpdcreport, report, cfg["nr"], keep_report=keep)
+        models = _load_models(gpdcreport, report, n_keep, keep_report=keep)
         try:
             dtm = float(open(report + ".time").read())
         except Exception:
@@ -279,10 +287,12 @@ def main(cfgpath):
     log("running %d (param, trial) inversions, %d at a time" % (len(jobs), npar))
     with ThreadPoolExecutor(max_workers=npar) as ex:
         futs = [ex.submit(one_run, *j) for j in jobs]
+        failed = []            # (label, trial, rc) -- kept in the npz, see below
         for fut in as_completed(futs):
             label, tr, models, dtm, rc = fut.result()
             if models is None:
                 log("  %-6s trial %d: dinver rc=%d -- skipped" % (label, tr, rc))
+                failed.append((label, int(tr), int(rc)))
                 continue
             per_param[label].append((models, dtm))
             log("  %-6s trial %d: %d models read, best misfit %.4f  (%.0fs)"
@@ -361,10 +371,26 @@ def main(cfgpath):
              cell_ixiy=np.array([cell.ix, cell.iy]), cell_lonlat=np.array([cell.lon, cell.lat]),
              sigma_ln_vs=sigma_ln, prior_bind_frac=bind_frac,
              bind_vs_frac=bind_vs_frac, bind_depth_frac=bind_depth_frac,
+             # Failed (parameterization, trial) runs. WITHOUT this a cell whose runs aborted
+             # looks normal: the driver captures runner stdout and prints it only on overall
+             # failure, and the work dir (with dinver_cell.log) is deleted once the cell
+             # succeeds -- so the only trace was a short param_labels. Measured: aargau LVZ
+             # cell 20_27 silently lost lr1.2 entirely (both trials aborted, 18 kB truncated
+             # reports), leaving a 7-parameterization pool biased toward simpler models.
+             failed_runs=np.array([f"{l}_t{t}:rc{r}" for l, t, r in failed]),
+             n_failed_runs=len(failed),
              param_labels=np.array(labels), param_nlayers=np.array(nlays),
              param_best_misfit=np.array(best), param_rejected=rej,
              param_reject_reason=np.array(why),
              wmin_m=wmin, wmax_m=wmax, wavelength_source=wsrc, dmax_param_km=dmax_param / dt.KM,
+             # SWinvert sensitivity window in the shared schema so the figure scripts' masking
+             # ("ring fix": blank below data reach) works on Dinver volumes exactly as on
+             # BayHunter ones. Same bounds as the layering itself: thinnest resolvable layer
+             # lam_min/3 (Vantassel & Cox 2021) above, dmax = lam_max/df below, capped at the
+             # depth grid. Dinver has no chain statistics, so this is a DATA window, not a
+             # convergence window -- contiguous by construction, hence no reliable_mask.
+             z_reliable_min=wmin / 3 / dt.KM,
+             z_reliable_max=min(dmax_param / dt.KM, depth_max),
              vs_bounds=np.array(cfg["vs_bounds"], float), vp_bounds=np.array(cfg["vp_bounds"], float),
              pr_bounds=np.array(cfg["pr_bounds"], float), rho=float(cfg["rho"]),
              depth_factor=float(cfg["depth_factor"]), ns0=int(cfg["ns0"]), ns=int(cfg["ns"]),

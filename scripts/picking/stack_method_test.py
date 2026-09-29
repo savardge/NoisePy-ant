@@ -1,4 +1,4 @@
-"""Does tf-PWS actually beat plain PWS (or linear) for VELOCITY PICKING?
+"""Does ts-PWS actually beat plain PWS (or linear) for VELOCITY PICKING?
 
 Tests the stacking method at the TWO independent levels where it enters the pipeline, scoring only
 what matters: agreement of the measured dispersion with the EXTERNAL network VSG reference.
@@ -11,7 +11,7 @@ what matters: agreement of the measured dispersion with the EXTERNAL network VSG
   EXPERIMENT B -- G_LR mode-synthesis stacking (`unified_picking.Config.GLR_STACK`):
       fix the input to the production-style pws window stack, then combine the FOUR phase-corrected
       components into G_LR0 with linear / pws / tf-pws and measure. Isolates the synthesis stack.
-      (Nayak & Thurber use tf-PWS here on real data; 'linear' = their eqs 3/4 exactly.)
+      (Nayak & Thurber use a wavelet-domain PWS here on real data; 'linear' = their eqs 3/4 exactly.)
 
 Metrics per (pair, method), all vs the external VSG reference so nothing is circular:
     phase_absdev median |c_phase - c_ref|  [PRIMARY -- closeness to the reference, includes bias]
@@ -69,7 +69,7 @@ def stack_traces(arr, dt, method):
     if method == "pws":
         return pws(arr, 1.0 / dt)
     if method == "tfpws":
-        return dispersion.tf_pws(list(arr), dt)
+        return dispersion.ts_pws(list(arr), dt)
     raise ValueError(method)
 
 

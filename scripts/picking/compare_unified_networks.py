@@ -1,6 +1,6 @@
 """Cross-network diagnostics for the unified picking + QC outputs (Aargau vs Riehen).
 
-Produces, in extract_higher_modes/Projects/unified_diagnostics/:
+Produces, in extract_higher_modes/Projects/method_tests/2_pick_qc/mode_contamination_screens/:
   * unified_compare_distributions.png -- side-by-side post-QC 2D pick histograms, one column per
     network, rows = {Rayleigh fund, Rayleigh overtone, Love fund} x {group, phase}, with the
     network's own data-derived phase reference overlaid on phase panels.
@@ -43,7 +43,7 @@ ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 ap.add_argument("--nets", default="aargau,riehen")
 args = ap.parse_args()
 nets = [n.strip() for n in args.nets.split(",") if n.strip() in NETWORKS]
-OUT = f"{ROOT}/unified_diagnostics"
+OUT = f"{ROOT}/method_tests/2_pick_qc/mode_contamination_screens"
 os.makedirs(OUT, exist_ok=True)
 
 

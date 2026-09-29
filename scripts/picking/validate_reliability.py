@@ -39,7 +39,7 @@ from noisepy import vs_reliability as vr
 PROJ = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 WELLS = [("riehen", "Basel-1", "9_18"), ("riehen", "Otterbach-2", "10_17"),
          ("aargau", "Boettstein", "13_20"), ("aargau", "Riniken", "10_14")]
-OUTDIR = f"{PROJ}/_reliability_validation"
+OUTDIR = f"{PROJ}/method_tests/5_vs_inversion/depth_reliability"
 VMIN, VMAX, DMAX = 0.3, 3.6, 6.0
 CONF_COL = {"high": "tab:green", "marginal": "tab:orange", "low": "tab:red"}
 WAVES_LBL = {"fundot": "fund + overtone", "fund": "fundamental only"}

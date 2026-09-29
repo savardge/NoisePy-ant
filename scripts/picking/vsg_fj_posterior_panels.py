@@ -23,7 +23,7 @@ from matplotlib.colors import ListedColormap
 from disba import PhaseDispersion
 
 P = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
-BASE = "test_2026-08-16_vsg_reference_vmax5"
+BASE = "test_2026-08-16_vsg_reference_vmax5"   # overridable with --base
 
 
 def result(net, suffix):
@@ -112,7 +112,11 @@ def main():
     ap.add_argument("--nets", default="aargau,hautesorne,riehen")
     ap.add_argument("--tags", default="_FJ,_FJB3", help="run suffixes to look for per network")
     ap.add_argument("--out", default=f"{P}/_fj_fit_and_posterior.png")
+    ap.add_argument("--base", default=None, help="run-tag stem (default: the F-J reference runs)")
     a = ap.parse_args()
+    if a.base:
+        global BASE
+        BASE = a.base
     rows = [(n, s) for n in a.nets.split(",") for s in a.tags.split(",") if result(n, s) is not None]
     fig, axs = plt.subplots(len(rows), 2, figsize=(14, 5.6 * len(rows)), squeeze=False,
                             gridspec_kw=dict(width_ratios=[1.35, 1]))

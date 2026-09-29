@@ -19,7 +19,7 @@ from uc_consistency_maps import basemap, load_assets            # noqa: E402
 from vs_model_figures import km_xy, E                            # noqa: E402
 
 NETS = ["riehen", "aargau", "hautesorne"]
-GATE = "_gate_eval/gatedrops_%s_love.csv"
+GATE = "Projects/method_tests/2_pick_qc/qc_gate_evaluation/gatedrops_%s_love.csv"
 
 fig, axes = plt.subplots(1, 3, figsize=(19, 6.2))
 for ax, net in zip(axes, NETS):
@@ -65,6 +65,6 @@ fig.suptitle("Mode-identification gate: Love group samples removed per cell "
              "(grey = untouched). Prediction: coherent patches in low ground, not scatter.",
              fontsize=13)
 fig.tight_layout()
-o = f"{E}/_gate_eval/gate_drop_maps.png"
+o = f"{E}/method_tests/2_pick_qc/qc_gate_evaluation/gate_drop_maps.png"
 fig.savefig(o, dpi=140)
 print("wrote", o)

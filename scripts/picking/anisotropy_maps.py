@@ -133,8 +133,49 @@ def main():
                      fontsize=10)
         cb = plt.colorbar(pc, ax=ax, fraction=0.04, pad=0.02, extend="both")
         cb.set_label(f"{a.field} = (Vsh-Vsv)/Vsv" if a.field == "gamma" else "zeta (Voigt)")
-        out = os.path.join(figdir, f"{a.field}_z{d:03.1f}km.png")
+        # --no-floor gets its OWN filename (2026-09-18 fix): the two variants answer different
+        # questions (production/credible vs diagnostic/every cell) and a user re-running one
+        # after the other must not silently clobber whichever came first.
+        suffix = "_nofloor" if a.no_floor else ""
+        out = os.path.join(figdir, f"{a.field}{suffix}_z{d:03.1f}km.png")
         fig.savefig(out, dpi=145, bbox_inches="tight"); plt.close(fig)
+
+        # Sign-probability companion map (2026-09-18 fix): gamma_p_pos was loaded and floor-
+        # masked above but never plotted, despite this module's own docstring promising it
+        # "written alongside" -- the standing rule is that every radial figure shows the value
+        # NEXT TO its significance (see memory: radial-figures-show-zeta). Same footprint as the
+        # value panel (same floor mask), same map furniture, own 0-1 colorbar centred at 0.5.
+        if ppos is not None:
+            pcol = ppos[:, k].copy()
+            if np.isfinite(pcol).any():
+                if not a.no_floor:
+                    pcol = np.where(np.isnan(col), np.nan, pcol)  # match the value panel's mask
+                figp, axp = plt.subplots(figsize=(7.4, 7.0))
+                axp.imshow(hs, extent=ek, cmap="gray", origin="upper", zorder=0)
+                pcp = axp.pcolormesh(Xe, Ye, grid(pcol).T, cmap="RdBu_r", vmin=0, vmax=1,
+                                     alpha=0.82, shading="flat", zorder=2)
+                _tecto(axp, gk, lw=0.8)
+                for nm, la, lo, _ in WELLS.get(a.net, []):
+                    wx, wy = km_xy(lo, la)
+                    axp.plot(wx, wy, "s", mfc="k", mec="w", ms=5, zorder=6)
+                    axp.annotate(nm, (wx, wy), xytext=(4, 4), textcoords="offset points",
+                                fontsize=7, fontweight="bold", zorder=7,
+                                bbox=dict(fc="w", alpha=0.65, ec="none", pad=1))
+                for nm, lo, la in CITIES.get(a.net, []):
+                    mx, my = km_xy(lo, la)
+                    axp.plot(mx, my, "o", mfc="w", mec="k", ms=4, zorder=6)
+                    axp.annotate(nm, (mx, my), xytext=(4, -8), textcoords="offset points",
+                                fontsize=7, style="italic", zorder=7)
+                axp.set_xlim(ek[0], ek[1]); axp.set_ylim(ek[2], ek[3]); axp.set_aspect("equal")
+                axp.set_xlabel("E [km LV95]"); axp.set_ylabel("N [km LV95]")
+                axp.set_title(f"{a.net} P(gamma > 0) at {d:g} km — {arm}\n"
+                             f"0 = confidently Vsv>Vsh, 1 = confidently Vsh>Vsv, "
+                             f"0.5 = undetermined sign; same footprint as {a.field} panel",
+                             fontsize=10)
+                cbp = plt.colorbar(pcp, ax=axp, fraction=0.04, pad=0.02)
+                cbp.set_label("P(gamma > 0)")
+                outp = os.path.join(figdir, f"{a.field}_ppos{suffix}_z{d:03.1f}km.png")
+                figp.savefig(outp, dpi=145, bbox_inches="tight"); plt.close(figp)
     with open(os.path.join(figdir, f"{a.field}_stats.json"), "w") as fh:
         json.dump(stats, fh, indent=1)
     print(f"{arm}: wrote {len(stats)} {a.field} slices -> {figdir}")

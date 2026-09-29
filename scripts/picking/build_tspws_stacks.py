@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build an `Allstack_tspws` stack tree from the substack windows, for production picking.
 
-Wavelet-domain phase-weighted stack (ts-PWS, Ventosa et al. 2017 -- `dispersion.tf_pws`)
+Wavelet-domain phase-weighted stack (ts-PWS, Ventosa et al. 2017 -- `dispersion.ts_pws`)
 across a pair's T* substack windows, per ENZ component, then rotated to RTZ. Replaces the
 stored time-domain `Allstack_pws`, which distorts dispersed weak bands (see the 2026-07-30
 substack-jackknife evidence: 13-33% of picks >2 sigma from their own substack consensus).
@@ -9,6 +9,19 @@ substack-jackknife evidence: 13-33% of picks >2 sigma from their own substack co
 The output H5 is minimal but is read by the UNCHANGED production picker via
 `DISP_STACK=tspws` (unified_picking.read_stack_components' h5py fallback needs only
 AuxiliaryData/Allstack_tspws/<comp> plus dist/dt/azi/baz attrs on ZZ).
+
+Since 2026-09-26 each file also holds AuxiliaryData/Allstack_linear: the LINEAR mean of the same
+pre-block elements, kept to +-(lin_mult*dist/vmin + pad) samples (capped at the record). The
+picker measures snr_nbG on it (unified_picking.Config.SNR_STACK) because the lag-trimmed ts-PWS
+trace has no noise window -- the old SNR wrapped into the signal -- and a ts-PWS trace is too
+noise-free for an SNR threshold to mean anything. lin_mult 2.2 leaves room for the full
+'after' noise window (signal to dist/vmin, 2 T gap, then one signal length) at every period.
+The ts-PWS input is the central +-(dist/vmin + pad) slice of the same elements, bit-identical to
+the pre-2026-09-26 build. The inverse CWT is inlined in dispersion.ts_pws (Torrence & Compo
+eq. 11), so the output no longer depends on the installed pycwt; datasets carry icwt='tc98'.
+--reuse-tspws copies Allstack_tspws from an existing tree instead of recomputing it (use only
+for a tree already built with the tc98 inverse, e.g. the laptop-built Riehen stacks).
+See extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_tspws_snr_noise_window/.
 
 Two cost controls, both validated:
   * windows are lag-trimmed to +-(dist/vmin + pad) before any CWT (~6x)
@@ -47,6 +60,11 @@ A.add_argument("--nproc", type=int, default=8)
 A.add_argument("--pre-block", type=int, default=2, help="windows averaged per PWS element")
 A.add_argument("--vmin-trim", type=float, default=0.2, help="lag trim uses dist/this")
 A.add_argument("--pad", type=int, default=64, help="extra samples kept beyond the trim")
+A.add_argument("--lin-mult", type=float, default=2.2,
+               help="Allstack_linear keeps +-(lin_mult*dist/vmin_trim + pad) samples (0 = no linear)")
+A.add_argument("--reuse-tspws", default=None, metavar="TREE",
+               help="copy Allstack_tspws from TREE/<sta>/<pair>.h5 when present (must be a tc98 "
+                    "build), compute only Allstack_linear")
 A.add_argument("--limit", type=int, default=0)
 A.add_argument("--code", default=None, metavar="XX",
                help="station-code prefix (RI/AA/SS). Restricts the pair glob to "
@@ -92,6 +110,9 @@ def one_pair(path):
             npts = aux[tg[0]][sorted(aux[tg[0]].keys())[0]].shape[0]
             mid = npts // 2
             L = min(int(params["dist"] / args.vmin_trim / params["dt"]) + args.pad, mid)
+            # elements are read to the LONGER linear half-width; ts-PWS takes the central +-L
+            Lr = max(L, min(int(args.lin_mult * params["dist"] / args.vmin_trim / params["dt"])
+                            + args.pad, mid)) if args.lin_mult > 0 else L
             per_comp = {c: [] for c in ENZ}
             K = max(1, args.pre_block)
             for i in range(0, len(tg), K):
@@ -100,15 +121,30 @@ def one_pair(path):
                     g = aux[k]
                     for c in ENZ:
                         if c in g:
-                            acc[c] = acc.get(c, 0) + g[c][mid - L:mid + L + 1].astype(np.float64)
+                            acc[c] = acc.get(c, 0) + g[c][mid - Lr:mid + Lr + 1].astype(np.float64)
                             cnt[c] = cnt.get(c, 0) + 1
                 for c, v in acc.items():
                     per_comp[c].append(v / cnt[c])
         if any(len(v) < MIN_WINDOWS for v in per_comp.values()):
             return "few-windows"
-        stacked = np.stack([dispersion.tf_pws(np.asarray(per_comp[c]), params["dt"])
-                            for c in ENZ])
-        rt = rotation(stacked, params, {})
+        rt, tspws_src = None, "computed"
+        reuse = os.path.join(args.reuse_tspws, src, pair) if args.reuse_tspws else None
+        if reuse and os.path.exists(reuse):
+            with h5py.File(reuse, "r") as f:
+                g = f["AuxiliaryData/Allstack_tspws"]
+                old = {c: g[c][()] for c in KEEP}
+            if all(len(v) == 2 * L + 1 for v in old.values()):
+                rt = [old[c] for c in RTZ]
+                tspws_src = "reused:%s" % args.reuse_tspws
+        if rt is None:
+            sl = slice(Lr - L, Lr + L + 1)
+            stacked = np.stack([dispersion.ts_pws(np.asarray(per_comp[c])[:, sl], params["dt"])
+                                for c in ENZ])
+            rt = rotation(stacked, params, {})
+        lin = None
+        if args.lin_mult > 0:
+            lin = rotation(np.stack([np.mean(np.asarray(per_comp[c]), axis=0) for c in ENZ]),
+                           params, {})
     except Exception as e:
         return "err:%s" % type(e).__name__
     # The WRITE is inside try/except too: an uncaught error here propagates out of the
@@ -120,9 +156,18 @@ def one_pair(path):
         with h5py.File(tmp, "w") as f:
             g = f.create_group("AuxiliaryData/Allstack_tspws")
             for c, i in KEEP.items():
-                d = g.create_dataset(c, data=rt[i].astype(np.float32))
+                d = g.create_dataset(c, data=np.asarray(rt[i]).astype(np.float32))
                 for k, v in params.items():
                     d.attrs[k] = v
+                d.attrs["icwt"] = "tc98"
+                d.attrs["tspws_source"] = tspws_src
+            if lin is not None:
+                g = f.create_group("AuxiliaryData/Allstack_linear")
+                for c, i in KEEP.items():
+                    d = g.create_dataset(c, data=lin[i].astype(np.float32))
+                    for k, v in params.items():
+                        d.attrs[k] = v
+                    d.attrs["pre_block"] = max(1, args.pre_block)
         os.replace(tmp, ofile)                # atomic: a killed run leaves no partial file
     except Exception as e:
         try:

@@ -25,7 +25,7 @@ import pandas as pd
 
 import modesep_config
 
-# Empirical near-field rejection rule (Projects/azimuthal_source_bias/, 2026-07):
+# Empirical near-field rejection rule (Projects/method_tests/2_pick_qc/nearfield_and_azimuthal_bias/, 2026-07):
 # short paths measure the group velocity systematically SLOW (folded-correlation
 # truncation near zero lag); the bias converges period-dependently, confirmed by
 # the three-station closure test (closure_test.py). Keep picks with
@@ -65,7 +65,7 @@ ap.add_argument("--exclude-flagged", action="store_true",
                      "(coupling / orientation-polarity / mode-sep anomalies)")
 ap.add_argument("--farfield", action="store_true",
                 help="apply the empirical period-dependent r/lambda near-field rejection rule "
-                     "(FARFIELD_RULE; see Projects/azimuthal_source_bias/pick_rejection_rule.png)")
+                     "(FARFIELD_RULE; see Projects/method_tests/2_pick_qc/nearfield_and_azimuthal_bias/pick_rejection_rule.png)")
 args = ap.parse_args()
 cfg = modesep_config.load_config(args.config)
 V6 = cfg["paths"]["dispersion_dir"]

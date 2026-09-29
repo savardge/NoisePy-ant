@@ -1,7 +1,7 @@
 """Lean full-network batch of the validated V6 mode-separation workflow.
 
 Per pair (pws stack, sym lag only -- the validated configuration):
-  * read ZZ/RR/ZR/RZ, symmetric fold, tf-PWS synthesis of G_LR0/G_LR1;
+  * read ZZ/RR/ZR/RZ, symmetric fold, ts-PWS synthesis of G_LR0/G_LR1;
   * CWT-FTAN images for ZZ, RR, RZ, ZR (+ all4 product) and G_LR0/G_LR1;
   * picks: segment-aware argmax on ZZ/RR/all4/G_LR0/G_LR1, topology on ZZ/RR (validator
     witnesses); narrowband SNR bank for G_LR0;
@@ -129,8 +129,8 @@ def process(path):
     try:
         c0, c1 = dispersion.phase_corrected_components(tr["ZZ"], tr["RR"], tr["RZ"], tr["ZR"])
         sig = dict(tr)
-        sig["G_LR0"] = dispersion.tf_pws(c0, dt)
-        sig["G_LR1"] = dispersion.tf_pws(c1, dt)
+        sig["G_LR0"] = dispersion.ts_pws(c0, dt)
+        sig["G_LR1"] = dispersion.ts_pws(c1, dt)
 
         imgs, cwts = {}, {}
         per = vel = None

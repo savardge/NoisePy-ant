@@ -309,8 +309,8 @@ def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
     Returns (comps0, comps1): two lists of four equal-length traces whose plain sums are G_LR0 and
     G_LR1 (see synthesize_rayleigh_modes for the conventions and the receiver_side_flip variants).
     Exposed separately so the stacking operator is a free choice: linear sum (paper eqs 3/4) or a
-    phase-weighted stack of the four traces (paper section 3.1 uses a t-f domain PWS on real data;
-    see tf_pws).
+    phase-weighted stack of the four traces (paper section 3.1 uses a wavelet-domain PWS on real
+    data; see ts_pws).
     '''
     zz = np.asarray(zz, dtype=float)
     rr = np.asarray(rr, dtype=float)
@@ -327,29 +327,56 @@ def phase_corrected_components(zz, rr, rz, zr, receiver_side_flip=False):
     return comps0, comps1
 
 
-def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
+def _icwt_morlet_tc98(W, sj, dt, dj):
     '''
-    Time-frequency phase-weighted stack (Schimmel & Gallart 2007) in the wavelet domain,
-    following the ts-PWS formulation of Ventosa et al. (GJI 2017; reference C implementation in
-    ~/Codes/ts-PWS): CWT each trace, weight the linear stack of coefficients by the phase
-    coherence of the ensemble, and invert back to the time domain.
+    Inverse CWT, Torrence & Compo (1998) eq. 11, Morlet omega0 = 6 (Cdelta = 0.776, psi(0) = pi^-1/4):
+        x(t) = dj*sqrt(dt)/(Cdelta*psi(0)) * sum_j Re(W_j(t)) / sqrt(s_j)
+    Written out here instead of calling pycwt.icwt because pycwt 0.3.0a22 (the yggdrasil `noisepy`
+    env until 2026-09) computes dj*sqrt(dt)/Cdelta*psi(0) * sum Re(W)/s -- a zero-phase sqrt(f)
+    tilt on every reconstruction. Identical to pycwt 0.4.0b0's icwt. See
+    extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_pycwt_icwt_version_effect/.
+    '''
+    return dj * np.sqrt(dt) / (0.776 * np.pi ** -0.25) * (np.real(W) / np.sqrt(sj)[:, None]).sum(axis=0)
 
-        W_lin(s,t)  = (1/K) sum_k W_k(s,t)
-        c(s,t)      = | (1/K) sum_k W_k/|W_k| |          (phase coherence, 0..1)
+
+def ts_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
+    '''
+    Time-scale phase-weighted stack (ts-PWS) of Ventosa, Schimmel & Stutzmann (GJI 2017;
+    reference C implementation in ~/Codes/ts-PWS).
+
+    This is the WAVELET-domain PWS: each trace is expanded with a continuous wavelet transform,
+    the ensemble's phase coherence is measured per (scale, time) cell, the LINEAR stack of the
+    coefficients is weighted by it, and the result is transformed back. It is NOT the
+    time-frequency PWS of Schimmel & Gallart (2007), which uses the S-transform; the earlier
+    name of this function, `tf_pws`, was a misnomer and survives only as a deprecated alias.
+
+        W_lin(s,t)  = (1/K) sum_k W_k(s,t)                  linear stack of CWT coefficients
+        c(s,t)      = | (1/K) sum_k W_k/|W_k| |             phase coherence, 0..1
         W_pws(s,t)  = W_lin * w(s,t)
 
-    with w = c^wu, or for wu=2 the unbiased estimator of Ventosa et al. (2017)
-    w = (K c^2 - 1)/(K - 1) clipped at 0, which removes the 1/K random-phase bias -- important
-    for small ensembles like the K=4 phase-corrected components of Nayak & Thurber (2020), whose
-    real-data processing uses exactly this kind of t-f PWS to suppress wave packets that are not
-    in phase across the four [R/Z] components.
+    with w = c^wu, or -- for wu=2 and unbiased=True (the default) -- the unbiased estimator of
+    Ventosa et al. (2017), w = (K c^2 - 1)/(K - 1) clipped at 0, which removes the 1/K
+    random-phase floor. That matters for small ensembles such as the K=4 phase-corrected
+    components of Nayak & Thurber (2020), whose real-data processing uses a PWS of this kind to
+    suppress wave packets that are not in phase across the four [R/Z] components. The same
+    function stacks a pair's ~100 daily substack windows in build_tspws_stacks.py (where the
+    --pre-block option makes it Ventosa's two-stage stack).
+
+    Transform: pycwt Morlet (omega_0 = 6), dyadic scales at 1/dj voices per octave from 2*dt
+    over the full record; inverse by _icwt_morlet_tc98 (Torrence & Compo 1998 eq. 11, inlined:
+    pycwt.icwt is version-dependent, see that function). Verified
+    2026-09-08 on a synthetic dispersed pulse: forward->inverse round trip recovers amplitude to
+    1.003 with correlation 1.0000, and ts_pws of K identical copies returns the input to the
+    same precision -- the reconstruction is not a source of bias. Ventosa's frame differs
+    (voices adapt to omega_0, exact dual) but the weighting is identical.
 
     Args:
-        traces: sequence of K equal-length 1-D arrays (e.g. from phase_corrected_components)
+        traces: sequence of K equal-length 1-D arrays (e.g. from phase_corrected_components, or
+            a pair's substack windows)
         dt: sampling interval [s]
         wu: phase-weight power (2 = standard)
         unbiased: use the unbiased coherence weight (only defined for wu=2)
-        dj: wavelet scale resolution (same default as compute_cwt)
+        dj: wavelet scale resolution, 1/voices-per-octave (same default as compute_cwt)
 
     Returns:
         1-D real array, same length as the inputs (amplitude scale is that of the mean stack).
@@ -378,8 +405,13 @@ def tf_pws(traces, dt, wu=2.0, unbiased=True, dj=1 / 12):
         w = np.clip((K * coh ** 2 - 1.0) / (K - 1.0), 0.0, None)
     else:
         w = coh ** wu
-    rec = pycwt.icwt(lin * w, sj, dt, dj, 'morlet')
+    rec = _icwt_morlet_tc98(lin * w, sj, dt, dj)
     return np.real(rec)[:n]
+
+
+# Deprecated name, kept so older callers keep working: the method is time-SCALE (wavelet-domain)
+# PWS, Ventosa et al. 2017, not the S-transform time-frequency PWS the old name suggested.
+tf_pws = ts_pws
 
 
 def phase_image_from_cwt(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, dvel=0.02, vave=3.,
@@ -476,7 +508,16 @@ def phase_velocity_image(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, 
     '''
     Proper phase-velocity image whose POSITIVE crests are the phase-velocity branches.
 
-        img(T, c) = cos( w*dist*(1/c - 1/U(T)) - phi(t_u) - phase_shift - phase_offset )
+        img(T, c) = cos( w*dist*(1/c - 1/U(T)) + phi(t_u) - phase_shift - phase_offset )
+
+    Sign note (bug fixed 2026-08-31): the resolvers (phase_velocity, resolve_phase_curve*)
+    enter the measured phase NEGATED -- their branch condition is
+    w*d*(1/c - 1/U) = -phi + phase_shift + phase_offset + 2*pi*N -- so for a pick to land on
+    a crest the image argument must carry +phi. The previous -phi drew every fringe displaced
+    by 2*phi(t_u): picks appeared up to half a fringe off the crests (empirically the image
+    value at a pick was cos(2*phi), r=0.98 over a test pair) even though the picked c was
+    correct. Verified against a Yao-style spectral-phase image (independent FFT phase) and
+    the synthetic recovery test.
 
     For the picks from measure_corrections_and_phase() to land EXACTLY on the crests, the image
     must use the SAME group arrival as the picks: pass the picked group-velocity curve via
@@ -514,7 +555,7 @@ def phase_velocity_image(cwt_data, dist, Tmin=0.4, dT=0.02, vmin=0.1, vmax=4.5, 
             U = dist / tvec[it]
             phi = float(np.angle(row[it]))
         w = 2.0 * np.pi * freq[j]
-        img_native[j, :] = np.cos(w * dist * (s_c - 1.0 / U) - phi - phase_shift - phase_offset)
+        img_native[j, :] = np.cos(w * dist * (s_c - 1.0 / U) + phi - phase_shift - phase_offset)
     o = np.argsort(period_native)
     img = scipy.interpolate.interp1d(period_native[o], img_native[o, :], axis=0,
                                      bounds_error=False, fill_value=np.nan)(per)
@@ -896,7 +937,8 @@ def remove_picks_coi(pick_per, pick_vel, pick_sco, vel, coi):
     return pick_per_f, pick_vel_f, pick_sco_f
 
 
-def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
+def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5, noise_window="legacy",
+                  gap_periods=2.0, min_noise_s=10.0):
     """
     Narrowband Gaussian filtering to get SNR at each frequency
     Args:
@@ -907,6 +949,14 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         alpha: Gaussian window parameter
         vmin: Minimum group velocity to determine signal window
         vmax: Maximum group velocity to determine signal window
+        noise_window: 'legacy' = the historical window [len-2S, len-S] (S = signal length); raises
+            ValueError when it would reach into the signal window -- on a lag-trimmed trace the
+            start index is negative and numpy used to wrap it INTO the signal (2026-09-26: 89-93 %
+            of 'noise' samples were signal on every production ts-PWS stack; see
+            extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_tspws_snr_noise_window/).
+            'after' = a window starting gap_periods*T after dist/vmin, length min(S, remainder);
+            NaN for a period whose window is shorter than max(min_noise_s, 5 T).
+        gap_periods, min_noise_s: see 'after'
 
     Returns:
         snr_nbG: SNR array for the CCF filtered at each frequency of fn_array
@@ -916,9 +966,19 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
     """
     # Define signal and noise windows
     signal_win = np.arange(int(dist / vmax / dt), int(dist / vmin / dt))
-    noise_istart = len(ccf) - 2 * len(signal_win)
-    noise_win = np.arange(noise_istart, noise_istart + len(signal_win))
-    noise_rms = np.sqrt(np.sum(ccf[noise_win] ** 2) / len(noise_win))
+    sig_end = signal_win[-1] + 1
+    if noise_window == "legacy":
+        noise_istart = len(ccf) - 2 * len(signal_win)
+        if noise_istart < sig_end:
+            raise ValueError("nb_filt_gauss: trace too short for the legacy noise window "
+                             "(%d samples, signal window ends at %d, noise would start at %d)"
+                             % (len(ccf), sig_end, noise_istart))
+        noise_win = np.arange(noise_istart, noise_istart + len(signal_win))
+    elif noise_window == "after":
+        noise_win = np.arange(sig_end, min(len(ccf), sig_end + len(signal_win)))  # broadband: no gap
+    else:
+        raise ValueError("noise_window must be 'legacy' or 'after'")
+    noise_rms = np.sqrt(np.sum(ccf[noise_win] ** 2) / len(noise_win)) if len(noise_win) else np.nan
     snr_bb = np.max(np.abs(ccf[signal_win])) / noise_rms  # broadband snr
 
     # Narrowband filtering with Gaussian
@@ -958,7 +1018,17 @@ def nb_filt_gauss(ccf, dt, fn_array, dist, alpha=5, vmin=0.5, vmax=4.5):
         # else:
         #    noise_rms = np.sqrt(np.sum(ccftnbg[noise_win] ** 2) / len(noise_win))
         #    snr_nbG[iomgn] = np.max(ccftnbg[signal_win]) / noise_rms
-        noise_rms = np.sqrt(np.sum(amplitude_envelope[noise_win] ** 2) / len(noise_win))
+        if noise_window == "after":
+            T = 2 * np.pi / omgn
+            s0 = sig_end + int(np.ceil(gap_periods * T / dt))
+            s1 = min(len(ccf), s0 + len(signal_win))
+            if (s1 - s0) * dt < max(min_noise_s, 5 * T):
+                snr_nbG[iomgn] = np.nan
+                continue
+            nw = np.arange(s0, s1)
+        else:
+            nw = noise_win
+        noise_rms = np.sqrt(np.sum(amplitude_envelope[nw] ** 2) / len(nw))
         snr_nbG[iomgn] = np.max(amplitude_envelope[signal_win]) / noise_rms
 
     return snr_nbG, snr_bb, ccf_time_nbG, ccf_time_nbG_env
@@ -1274,7 +1344,8 @@ def resolve_phase_curve(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.
 
 
 def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.pi / 4.0,
-                               phase_offset=0.0, n_search=8, seg_dU=0.25, seg_gap=2.5):
+                               phase_offset=0.0, n_search=8, seg_dU=None, seg_gap=2.5,
+                               seg_periods=1.0):
     '''
     Single-N phase-velocity resolution by continuous frequency-unwrapping (Bensen et al. 2007:
     "the 2*pi ambiguity inherent to any phase spectrum", their eq. 11 -- N is ONE integer for
@@ -1294,7 +1365,16 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
     Where the picked group curve jumps (mixed-geology paths: the argmax switches between two
     arrivals) or has a period gap, the phases on either side belong to different packets and
     must NOT be glued into a single continuum -- the unwrap breaks there and each segment gets
-    its own global integer (seg_dU, seg_gap control the break criteria).
+    its own global integer (seg_periods / seg_dU and seg_gap control the break criteria).
+
+    Packet-switch criterion (CHANGED 2026-09-26): a break where the group ARRIVAL TIME moves by
+    more than seg_periods periods between neighbouring picks, dist*|1/U_i - 1/U_(i-1)| >
+    seg_periods * T (T = mean period of the two). The Morlet envelope is about one period wide,
+    so a larger jump means the envelope maximum moved to another wave packet; equivalently a
+    relative group-velocity jump > seg_periods * lambda / dist. It replaces the former absolute
+    |dU| > 0.25 km/s (no physical basis; pass seg_dU=0.25 to reproduce it). On 270 random HS pairs
+    the two criteria give the same QC removals above 1 s (phase_ridge gate, see
+    extract_higher_modes/Projects/hautesorne/tests/test_2026-09-26_standalone_phase_script/).
 
     Returns (c_phase, N_amb) aligned with the inputs; NaN/0 where undefined. N_amb is the total
     per-pick integer (unwrap steps + M) for bookkeeping -- its steps across period compensate
@@ -1322,12 +1402,17 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
     cref = np.array([float(c_ref(t)) for t in T]) if c_ref is not None else \
         np.full(len(w), np.nan)
 
-    # segment boundaries: group-velocity jump (packet switch) or period gap
+    # segment boundaries: packet switch (group arrival jumps by > seg_periods periods, or the
+    # legacy |dU| > seg_dU when given) or period gap
     dTmed = np.median(np.abs(np.diff(T))) if len(T) > 1 else 0.0
     brk = np.zeros(len(idx), dtype=bool)
     for i in range(1, len(idx)):
-        if np.abs(U[i] - U[i - 1]) > seg_dU or \
-           (dTmed > 0 and np.abs(T[i] - T[i - 1]) > seg_gap * dTmed):
+        if seg_dU is not None:
+            packet = np.abs(U[i] - U[i - 1]) > seg_dU
+        else:
+            packet = (dist * np.abs(1.0 / U[i] - 1.0 / U[i - 1])
+                      > seg_periods * 0.5 * (T[i] + T[i - 1]))
+        if packet or (dTmed > 0 and np.abs(T[i] - T[i - 1]) > seg_gap * dTmed):
             brk[i] = True
     seg_id = np.cumsum(brk)
 
@@ -1351,6 +1436,20 @@ def resolve_phase_curve_unwrap(periods, phases, gv, dist, c_ref, phase_shift=np.
             cost = np.nanmedian(np.abs(c - cref[ii]) / cref[ii])
             if np.isfinite(cost) and cost < best_cost:
                 best_cost, best_M = cost, M
+        if best_M is None and getattr(c_ref, "fallback", None) is not None:
+            # 2026-09-15: a per-pair REGIONAL reference (noisepy.regional_ref) is NaN outside its
+            # band on purpose -- in-band periods alone must decide the segment's integer, exactly as
+            # the validated offline re-anchor does (nanmedian ignores the NaN entries). Only a
+            # segment with NO in-band period reaches here; it is anchored to the network fallback,
+            # i.e. it keeps the production branch. Inert for every reference without `.fallback`.
+            cfb = np.array([float(c_ref.fallback(t)) for t in T[ii]])
+            for M in range(-n_search, n_search + 1):
+                denom = kr[ii] + 2.0 * np.pi * M
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    c = np.where(denom > 0, w[ii] * dist / denom, np.nan)
+                cost = np.nanmedian(np.abs(c - cfb) / cfb)
+                if np.isfinite(cost) and cost < best_cost:
+                    best_cost, best_M = cost, M
         if best_M is None:
             continue
         denom = kr[ii] + 2.0 * np.pi * best_M
@@ -1459,6 +1558,55 @@ def phase_from_group(pick_per, pick_gv, dist, phases, phase_shift=np.pi / 4.0,
         return c_pred                                     # no physically admissible alias
     c_pred[idx] = best[1]
     return c_pred
+
+
+def hankel_finite_distance_correction(c_phase, periods, dist, n_iter=4):
+    """Correct two-station phase velocities for the finite-distance (near-field) phase of the
+    exact 2-D Green's function vs its far-field asymptote (Yao et al. 2006, GJI, their
+    "Bessel" correction; applied at export, NOT in the picker).
+
+    Every two-station phase formula in this package converts phase to velocity through the
+    far-field asymptote H0^(2)(kr) ~ sqrt(2/(pi*kr)) * e^{-i(kr - pi/4)} -- the source of the
+    pi/4 term. At finite kr the exact Hankel kernel's phase lags that asymptote by
+    dphi ~ 1/(8*kr) rad, so the uncorrected c is biased FAST by ~1/(8*(2*pi*d/lambda)^2):
+    +0.26% at 1.1 wavelengths, +0.06% at 2.25, falling as (d/lambda)^-2. This solves
+    kr_true + dphi(kr_true) = kr_est by fixed point (dphi is tiny and smooth; 4 iterations
+    converge to machine precision) and returns c_corr = c * kr_est / kr_true.
+
+    Validated end-to-end 2026-09-01 on all three networks
+    (Projects/<net>/tomo/1_velocity_maps/3_diagnostics/hankel_correction/): pick shift median
+    -0.03 to -0.08%; map-level effect is a period-COHERENT spatial systematic at long T
+    (adjacent-period r 0.95-0.99) but <= ~1x map uncertainty for fund/love and <=6% of anomaly
+    amplitude everywhere. GROUP velocities are NOT corrected: the group arrival is an envelope
+    (amplitude) measurement and the finite-kr group-delay effect is second order.
+
+    Args:
+        c_phase: phase velocities [km/s] (array or scalar)
+        periods: periods [s], same shape
+        dist:    inter-station distance [km] (scalar or same shape)
+    Returns:
+        corrected phase velocities, NaN where inputs are non-finite/non-positive.
+    """
+    from scipy.special import hankel2
+    c = np.asarray(c_phase, dtype=float)
+    T = np.asarray(periods, dtype=float)
+    d = np.broadcast_to(np.asarray(dist, dtype=float), c.shape).astype(float)
+    out = np.full(c.shape, np.nan)
+    ok = np.isfinite(c) & np.isfinite(T) & np.isfinite(d) & (c > 0) & (T > 0) & (d > 0)
+    if not ok.any():
+        return out if out.ndim else float("nan")
+    kr_est = 2.0 * np.pi * d[ok] / (c[ok] * T[ok])
+
+    def dphi(kr):
+        ex = hankel2(0, kr)
+        ff = np.sqrt(2.0 / (np.pi * kr)) * np.exp(-1j * (kr - np.pi / 4.0))
+        return np.angle(ff * np.conj(ex))
+
+    kr = kr_est.copy()
+    for _ in range(n_iter):
+        kr = kr_est - dphi(kr)
+    out[ok] = c[ok] * kr_est / kr
+    return out
 
 
 def group_from_phase(periods, c_phase):

@@ -34,9 +34,14 @@ QC_FLAGS = {"snr_min": "--snr-min", "vbounds_fund": "--vbounds-fund",
             "vave": "--vave", "u_bin": "--u-bin", "leak_tol": "--leak-tol",
             "leak_sep_factor": "--leak-sep-factor", "leak_tmax": "--leak-tmax",
             "env_min": "--env-min", "xmode_max": "--xmode-max", "disable": "--disable",
-            "short_vmax": "--short-vmax", "short_vmax_tmax": "--short-vmax-tmax"}
+            "short_vmax": "--short-vmax", "short_vmax_tmax": "--short-vmax-tmax",
+            "ref_crest_ref": "--ref-crest-ref", "ref_crest_west": "--ref-crest-west",
+            "ref_crest_east": "--ref-crest-east", "ref_crest_stations": "--ref-crest-stations",
+            "ref_crest_boundary": "--ref-crest-boundary", "ref_crest_periods": "--ref-crest-periods",
+            "ref_crest_jump": "--ref-crest-jump"}
 QC_BOOLS = {"group_scale_dedupe": "--group-scale-dedupe",
-            "fold_love_overtone": "--fold-love-overtone"}
+            "fold_love_overtone": "--fold-love-overtone",
+            "phase_ref_crest": "--phase-ref-crest"}
 EXPORT_FLAGS = {"measure": "--measure", "period_axis": "--period-axis",
                 "max_std": "--max-std", "out_suffix": "--out-suffix",
                 "vbounds": "--vbounds", "bounds_file": "--bounds-file"}

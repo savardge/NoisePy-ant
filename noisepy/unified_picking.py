@@ -16,7 +16,7 @@ Theory note (why Love is not symmetric with Rayleigh):
     same +pi/4 shift as ZZ/RR (TT is an auto-component with NO cross-component 90-deg term). Wave type
     enters the library only through the scalar `phase_shift` and the callable `c_ref`.
   * Mode SEPARATION is fundamentally different. Rayleigh's G_LR0/G_LR1 synthesis
-    (phase_corrected_components + tf_pws) needs two orthogonal components 90 deg apart (elliptical Z-R
+    (phase_corrected_components + ts_pws) needs two orthogonal components 90 deg apart (elliptical Z-R
     coupling). Love is single-component SH; there is no orthogonal partner, hence NO G_LR analog. Love
     fundamental/overtone separate only in the image/array domain: here we pick TT ridges (argmax +
     topology) and LABEL them fundamental/overtone against data-derived Love reference curves. Where the
@@ -58,7 +58,11 @@ class Config:
     PHASE_SHIFT = {"rayleigh": +np.pi / 4.0, "love": +np.pi / 4.0}  # far-field -pi/4 -> +pi/4 (neg-phi)
     MIN_LAMBDA_PHASE = 1.0                        # phase valid to ~1 lambda (step-2 validated)
     TAU_MAX_FACTOR = None                        # None = no long-period cap (keep the deep band)
-    PHASE_USE_PERIOD = "nominal"                 # keep group & phase on the same period axis per row
+    PHASE_USE_PERIOD = "scale"                   # CHANGED 2026-09-26 (was "nominal"): omega from the
+    #   CWT scale the phase is read on (T_scale), the same period the export and the maps use
+    #   (--period-axis scale); the unwrap's packet-break test then also uses T_scale. 300 HS pairs:
+    #   median +0.25 %, 3.9 % of values change crest; synthetic error 0.0123 -> 0.0108 km/s.
+    #   See extract_higher_modes/Projects/hautesorne/tests/test_2026-09-26_standalone_phase_script/.
     PHASE_JOINT = "unwrap"                        # branch-tracking; safest across dense & sparse refs
     PHASE_SMOOTH_WEIGHT = 3.0
     # Rayleigh mode synthesis
@@ -82,6 +86,15 @@ class Config:
     RAYLEIGH_RES_FACTOR = 1.0                    # envelope-widths: sep_req = max(SEP_MIN, F*U0^2*T/d)
     RAYLEIGH_SLOW_TOL = 0.10                     # [km/s] U1 < U0 - tol -> ot_flag='slow' (leakage
     #   candidate; group curves CAN cross at Airy phases, so this is a flag, not a drop)
+    # SNR (snr_nbG / snr_bb / env_ratio). Since 2026-09-26 the SNR is measured on the LINEAR stack
+    # of the same pair ('Allstack_linear' in the same file; written next to Allstack_tspws by
+    # build_tspws_stacks.py), with the noise window AFTER the signal window. Picks still come from
+    # the picked stack. Why: on the lag-trimmed ts-PWS stacks the legacy window wrapped into the
+    # signal (89-93 % overlap), and a ts-PWS trace with a proper window is nearly noise-free, so a
+    # threshold on it is inert. See extract_higher_modes/Projects/method_tests/2_pick_qc/
+    # test_2026-09-26_tspws_snr_noise_window/.
+    SNR_STACK = "linear"          # 'linear' = Allstack_linear when present; 'self' = the picked trace
+    SNR_NOISE_WINDOW = "after"    # 'after' | 'legacy' (see dispersion.nb_filt_gauss)
 
 
 # Env overrides for controlled re-pick experiments (inherited by spawned workers).
@@ -89,6 +102,12 @@ class Config:
 # slower -- see the 2026-07-26 ffscan vmin discussion before changing the default).
 if os.environ.get("DISP_VMIN"):
     Config.vmin = float(os.environ["DISP_VMIN"])
+# DISP_SNR_STACK=self + DISP_SNR_NOISE=legacy reproduce the pre-2026-09-26 SNR (on full-length
+# stacks only: on a lag-trimmed trace the legacy window now raises -> snr_nbG NaN).
+if os.environ.get("DISP_SNR_STACK"):
+    Config.SNR_STACK = os.environ["DISP_SNR_STACK"]
+if os.environ.get("DISP_SNR_NOISE"):
+    Config.SNR_NOISE_WINDOW = os.environ["DISP_SNR_NOISE"]
 
 
 # Components that must be present to synthesize the Rayleigh modes.
@@ -168,6 +187,23 @@ def load_pair(sfile, stack_method, comps):
     params, raw = read_stack_components(sfile, "Allstack_" + stack_method, comps)
     ccf = {comp: split_lags(td) for comp, td in raw.items()}
     return params, ccf
+
+
+def load_snr_ccf(sfile, stack_method, ccf, comps, cfg=Config):
+    """The folded components the SNR is measured on (see Config.SNR_STACK).
+
+    'self' -> the picked ccf itself. 'linear' -> Allstack_linear from the same file when it holds ZZ;
+    otherwise the picked ccf (then a lag-trimmed trace yields NaN SNR, which the QC snr gate rejects:
+    fail-safe, never a wrapped window)."""
+    if cfg.SNR_STACK == "self" or stack_method == "linear":
+        return ccf
+    if cfg.SNR_STACK != "linear":
+        raise ValueError("Config.SNR_STACK must be 'linear' or 'self'")
+    try:
+        _, lin = load_pair(sfile, "linear", comps)
+    except Exception:
+        return ccf
+    return lin if "ZZ" in lin else ccf
 
 
 # --------------------------------------------------------------------------- reference helpers
@@ -406,7 +442,7 @@ def rows_to_csv(rows):
 
 
 # --------------------------------------------------------------------------- main entry point
-def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
+def pick_all_modes(params, ccf, refs, stack_method, cfg=Config, ccf_snr=None):
     """Return the full 8-way pick set for one station pair / stack method as a list of row dicts.
 
     params: {'dist','dt','azi','baz'}.
@@ -414,7 +450,12 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
     refs: {(wave, mode): phase_c_ref_callable} for the four (wave,mode) combos; missing/None disables
           phase for that stream (group still emitted). Love group references for ridge labeling are
           derived internally from the Love phase references via phase_ref_to_group_ref.
+    ccf_snr: same layout as ccf, the traces every SNR is measured on (load_snr_ccf); None = ccf.
+          G_LR0/G_LR1 are synthesized from it exactly as from ccf, so the SNR describes the same
+          mode stack, only from a trace that has a noise window.
     """
+    if ccf_snr is None:
+        ccf_snr = ccf
     dist, dt, azi, baz = params["dist"], params["dt"], params["azi"], params["baz"]
     Tmax = dist / cfg.vave
     per_grid = np.arange(cfg.Tmin, Tmax, cfg.dT)
@@ -426,10 +467,19 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
     def snr_bank(sig):
         try:
             snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(
-                sig, dt, 1.0 / per_grid, dist, alpha=cfg.gauss_alpha, vmin=cfg.vmin, vmax=cfg.vmax)
+                sig, dt, 1.0 / per_grid, dist, alpha=cfg.gauss_alpha, vmin=cfg.vmin, vmax=cfg.vmax,
+                noise_window=cfg.SNR_NOISE_WINDOW)
             return (per_grid, snr_nbG), float(snr_bb)
         except Exception:
             return None, np.nan
+
+    def synth_glr(c):
+        comps0, comps1 = dispersion.phase_corrected_components(
+            c["ZZ"][cfg.GLR_LAG], c["RR"][cfg.GLR_LAG], c["RZ"][cfg.GLR_LAG],
+            c["ZR"][cfg.GLR_LAG], receiver_side_flip=cfg.GLR_RECEIVER_SIDE_FLIP)
+        if cfg.GLR_STACK == "tfpws":
+            return dispersion.ts_pws(comps0, dt), dispersion.ts_pws(comps1, dt)
+        return np.sum(comps0, axis=0), np.sum(comps1, axis=0)
 
     def image_and_cwt(sig):
         cwt = dispersion.compute_cwt(sig, dist, dt, Tmin=cfg.Tmin, vmin=cfg.vmin, vmax=cfg.vmax,
@@ -445,27 +495,30 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
     # validate_modes.py anchor test: a genuine mode is WEAK in the other stack at its (T, U)).
     ray_curves = {}          # mode -> (nper, gv) argmax curve; consumed by the Love dU_ray* columns
     if all(c in ccf for c in RAYLEIGH_COMPS):
-        comps0, comps1 = dispersion.phase_corrected_components(
-            ccf["ZZ"][cfg.GLR_LAG], ccf["RR"][cfg.GLR_LAG], ccf["RZ"][cfg.GLR_LAG],
-            ccf["ZR"][cfg.GLR_LAG], receiver_side_flip=cfg.GLR_RECEIVER_SIDE_FLIP)
-        if cfg.GLR_STACK == "tfpws":
-            g0, g1 = dispersion.tf_pws(comps0, dt), dispersion.tf_pws(comps1, dt)
+        g0, g1 = synth_glr(ccf)
+        if ccf_snr is ccf:
+            s0, s1 = g0, g1
+        elif all(c in ccf_snr for c in RAYLEIGH_COMPS):
+            s0, s1 = synth_glr(ccf_snr)
         else:
-            g0, g1 = np.sum(comps0, axis=0), np.sum(comps1, axis=0)
+            s0 = s1 = None
         glr = {}
-        for comp, sig, mode in (("G_LR0", g0, "fundamental"), ("G_LR1", g1, "overtone")):
+        for comp, sig, ssig, mode in (("G_LR0", g0, s0, "fundamental"), ("G_LR1", g1, s1, "overtone")):
             try:
                 cwt, amp, per, vel, coi = image_and_cwt(sig)
             except Exception as e:
                 print(f"  G_LR CWT failed {comp}: {e}")
                 continue
-            bank, sbb = snr_bank(sig)
+            bank, sbb = snr_bank(ssig) if ssig is not None else (None, np.nan)
             glr[comp] = dict(cwt=cwt, amp=amp, per=per, vel=vel, coi=coi, bank=bank, sbb=sbb,
                              mode=mode, norm=_norm_image(amp))
         cross_of = {"G_LR0": "G_LR1", "G_LR1": "G_LR0"}
         # fundamental group curve for the overtone flags: the pair's own G_LR0 argmax, with the
         # reference-derived curve as fallback when G_LR0 yields nothing
-        U0_ray_ref = phase_ref_to_group_ref(refs.get(("rayleigh", "fundamental")), per_grid)
+        _cf = refs.get(("rayleigh", "fundamental"))
+        # a per-pair regional phase reference (noisepy.regional_ref) carries the NETWORK curve as
+        # `.for_group_ref` so the overtone flags stay on the reference they were validated with
+        U0_ray_ref = phase_ref_to_group_ref(getattr(_cf, "for_group_ref", _cf), per_grid)
 
         def u0_at(T):
             u = _curve_at(*ray_curves.get("fundamental", (None, None)), T=T, t_tol=cfg.LOVE_RAY_T_TOL)
@@ -520,12 +573,15 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config):
             except Exception as e:
                 print(f"  TT CWT failed {lag}: {e}")
                 continue
-            bank, sbb = snr_bank(sig)
+            if "TT" in ccf_snr and lag in ccf_snr["TT"]:
+                bank, sbb = snr_bank(ccf_snr["TT"][lag])
+            else:
+                bank, sbb = None, np.nan
             # cross-term context: env_ratio = TT snr / max(cross snr), snr_bb_other = max cross bb
             other_banks, other_bbs = [], []
             for c in cfg.LOVE_CONTEXT:
-                if c in ccf and lag in ccf[c]:
-                    ob, obb = snr_bank(ccf[c][lag])
+                if c in ccf_snr and lag in ccf_snr[c]:
+                    ob, obb = snr_bank(ccf_snr[c][lag])
                     if ob is not None:
                         other_banks.append(ob)
                         other_bbs.append(obb)

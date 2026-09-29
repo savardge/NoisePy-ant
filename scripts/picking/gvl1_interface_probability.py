@@ -29,6 +29,8 @@ Requires runs made with --save-ensemble (the default npz keeps only percentiles)
 
 Usage:
   python gvl1_interface_probability.py --tag test_2026-08-07_gvl1_iso_combos_ens
+  # or against the vs_prod3 well-cell ensemble re-runs (<arm>_wq4/cells/*.npz):
+  python gvl1_interface_probability.py --wq4-root <.../vs_prod3> --arms R0g_wq4 R0p_wq4 ...
 """
 import argparse
 import glob
@@ -39,6 +41,15 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+
+def ensemble_cells_dir(arm_dir):
+    """`<arm>/cells_ensemble/` if it holds cells, else `<arm>/cells/` (layout rule 2026-09-10:
+    one directory per arm; ensemble-bearing cells live beside the lean grid cells, never in a
+    `<arm>_wq4` twin)."""
+    import glob as _g, os as _o
+    ce = _o.path.join(arm_dir, "cells_ensemble")
+    return ce if _g.glob(_o.path.join(ce, "cell_*.npz")) else _o.path.join(arm_dir, "cells")
 
 EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 STRAT = "/Users/genevievesavard/Data/hautesorne/stratigraphy/GVL-1_Stratigraphy_v2.xlsx"
@@ -98,6 +109,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tag", default="test_2026-08-07_gvl1_iso_combos_ens")
     ap.add_argument("--n-null", type=int, default=10000)
+    ap.add_argument("--wq4-root", default=None,
+                    help="vs_prod3 dir; read <arm>/cells/*.npz instead of the test tree. The "
+                         "_wq4 re-runs are the only vs_prod3 cells carrying iface_depths.")
+    ap.add_argument("--arms", nargs="+", default=None, help="arm dirs under --wq4-root")
+    ap.add_argument("--out", default=None, help="output dir (default: the input tree)")
     ap.add_argument("--zmin", type=float, default=0.5,
                     help="restrict P(z) AND the null shifts to depths below this. The "
                          "near-surface peak (0.1-0.3 km) dominates P(z) and is not one of the "
@@ -111,9 +127,16 @@ def main():
     key = S[S.Group.isin(KEY_TOPS)].top_km.values
     root = f"{EHM}/hautesorne/tomo/2_vs_depth_inversion/tests/{a.tag}"
 
+    combos = COMBOS
+    if a.wq4_root:
+        root = a.wq4_root
+        combos = a.arms or sorted(os.path.basename(d) for d in glob.glob(f"{root}/*_wq4"))
+    outdir = a.out or root
+
     rows, curves = [], {}
-    for combo in COMBOS:
-        files = sorted(glob.glob(f"{root}/GVL1_cell_*/{combo}/bayhunter_result.npz"))
+    for combo in combos:
+        files = (sorted(glob.glob(f"{ensemble_cells_dir(f'{root}/{combo}')}/*.npz")) if a.wq4_root
+                 else sorted(glob.glob(f"{root}/GVL1_cell_*/{combo}/bayhunter_result.npz")))
         ifc, nmod, ncell = [], 0, 0
         zmax = 8.0
         for f in files:
@@ -154,11 +177,14 @@ def main():
     if not rows:
         raise SystemExit("nothing to analyse")
     D = pd.DataFrame(rows)
-    D.to_csv(os.path.join(root, "interface_probability.csv"), index=False)
+    D.to_csv(os.path.join(outdir, "interface_probability.csv"), index=False)
 
-    fig, axs = plt.subplots(1, 1 + len(COMBOS), figsize=(4.2 + 3.6 * len(COMBOS), 8),
+    shown = [c for c in combos if c in curves]
+    cmap = plt.get_cmap("tab10")
+    colr = {c: CCOL.get(c, cmap(i % 10)) for i, c in enumerate(shown)}
+    fig, axs = plt.subplots(1, 1 + len(shown), figsize=(4.2 + 3.6 * len(shown), 8),
                             sharey=True,
-                            gridspec_kw={"width_ratios": [0.45] + [1] * len(COMBOS)})
+                            gridspec_kw={"width_ratios": [0.45] + [1] * len(shown)})
     ax = axs[0]
     for _, g in S.iterrows():
         ax.axhspan(g.top_km, min(g.base_km, 8.0), color=g["Hex Color"], alpha=0.85)
@@ -167,13 +193,11 @@ def main():
                     va="center", fontsize=7)
     ax.set_xticks([]); ax.set_xlim(0, 1); ax.set_ylabel("depth [km]")
     ax.set_title("GVL-1 groups", fontsize=9.5)
-    for i, combo in enumerate(COMBOS):
+    for i, combo in enumerate(shown):
         ax = axs[1 + i]
-        if combo not in curves:
-            ax.axis("off"); continue
         c, P = curves[combo]
-        ax.fill_betweenx(c, 0, P, color=CCOL[combo], alpha=0.55)
-        ax.plot(P, c, "-", color=CCOL[combo], lw=1.6)
+        ax.fill_betweenx(c, 0, P, color=colr[combo], alpha=0.55)
+        ax.plot(P, c, "-", color=colr[combo], lw=1.6)
         for t in key:
             ax.axhline(t, color="0.3", ls="--", lw=1.1)
             ax.axhspan(t - TOL, t + TOL, color="0.5", alpha=0.12)
@@ -188,10 +212,10 @@ def main():
                  "(dashed = Muschelkalk / Buntsandstein / Permo-Carb / Basement)",
                  fontsize=12.5, fontweight="bold")
     fig.tight_layout()
-    p = os.path.join(root, "interface_probability.png")
+    p = os.path.join(outdir, "interface_probability.png")
     fig.savefig(p, dpi=130, bbox_inches="tight")
     print("wrote", p)
-    print("wrote", os.path.join(root, "interface_probability.csv"))
+    print("wrote", os.path.join(outdir, "interface_probability.csv"))
 
 
 if __name__ == "__main__":

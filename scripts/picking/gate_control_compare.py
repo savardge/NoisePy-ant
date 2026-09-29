@@ -29,7 +29,7 @@ def main():
     vb = np.load(f"{B}/{a.gated}/volume_{a.waveset}.npz", allow_pickle=True)
     drops = {(int(r["ix"]), int(r["iy"])): int(r["dropped"])
              for r in csv.DictReader(
-                 open(f"{E}/Projects/_gate_eval/gatedrops_{a.net}_love.csv"))}
+                 open(f"{E}/Projects/method_tests/2_pick_qc/qc_gate_evaluation/gatedrops_{a.net}_love.csv"))}
 
     ka = {tuple(c): i for i, c in enumerate(va["cells"])}
     kb = {tuple(c): i for i, c in enumerate(vb["cells"])}

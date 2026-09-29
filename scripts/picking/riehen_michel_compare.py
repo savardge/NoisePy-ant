@@ -40,17 +40,59 @@ EHM = "/Users/genevievesavard/Codes/extract_higher_modes/Projects"
 MICHEL = ("/Volumes/T7blue/riehen-data/well-data/"
           "Vsmodel_well_Basel1_Otterbach_Michel2016.csv")
 TESTS = f"{EHM}/riehen/tomo/2_vs_depth_inversion/tests"
-# well -> (cell, known crystalline basement depth [km] from the well)
-WELLS = {"Basel-1": ("23_47", 2.426), "Otterbach-2": ("26_43", 2.650)}
+# well -> (cell, known crystalline basement depth [km], lat, lon)
+# The cell id names the OLD test-tree directories only. Volumes are selected by COORDINATE:
+# vs_prod3 grids index differently, and the nearest vs_prod3 cells are 22_46 / 25_42 -- reusing
+# the dict id there silently scored a neighbouring cell (0.2 km grid, so the numbers barely
+# moved, but the selection was wrong).
+WELLS = {"Basel-1": ("23_47", 2.426, 47.585413, 7.595614),
+         "Otterbach-2": ("26_43", 2.650, 47.577748, 7.603832)}
 COMBOS = ["R0g", "R0gR1g", "R0gL0g", "L0g", "R0gR0p", "L0gL0p", "R0pL0p", "R0gL0gR0pL0p"]
 PHASE = {"R0gR0p", "L0gL0p", "R0pL0p", "R0gL0gR0pL0p"}
 CCOL = {c: plt.cm.tab10(i / 10) for i, c in enumerate(COMBOS)}
 
 
 def michel():
-    d = pd.read_csv(MICHEL)
-    d.columns = [c.strip() for c in d.columns]
-    return d["depth"].values / 1000.0, d["Vs"].values / 1000.0     # km, km/s
+    """The Michel (2016) Vs staircase, from the T7blue CSV or -- when that drive is unmounted --
+    rebuilt from the geopsy .model that well_vs_qc already resolves across three copies. The
+    CSV *is* that model serialised as a depth staircase (verified layer-for-layer), so the two
+    routes return the same curve."""
+    if os.path.exists(MICHEL):
+        d = pd.read_csv(MICHEL)
+        d.columns = [c.strip() for c in d.columns]
+        return d["depth"].values / 1000.0, d["Vs"].values / 1000.0     # km, km/s
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from well_vs_qc import MICHEL_MODEL, _read_geopsy_model, _staircase
+    tops, _, vs = _read_geopsy_model(MICHEL_MODEL)
+    v, z = _staircase(tops, vs)
+    return z, v
+
+
+def _from_tests(combo, well, cell):
+    """Original layout: one bayhunter_result.npz per (well-cell, combo)."""
+    f = f"{TESTS}/test_2026-08-06_waveset_combos/{well}_cell_{cell}/{combo}/bayhunter_result.npz"
+    if not os.path.exists(f):
+        return None
+    z = np.load(f, allow_pickle=True)
+    zrel = float(z["z_reliable_max"]) if "z_reliable_max" in z.files else float(z["depth"].max())
+    return z["depth"], z["vs_median"], zrel
+
+
+def _from_volume(root, spec, lat, lon):
+    """vs_prod3 layout: one volume per arm holding every cell; nearest cell by coordinate."""
+    arm, vf = spec.split(":", 1)
+    f = os.path.join(root, arm, vf)
+    if not os.path.exists(f):
+        return None
+    z = np.load(f, allow_pickle=True)
+    ll = z["lonlat"]
+    d = np.hypot((ll[:, 0] - lon) * np.cos(np.deg2rad(lat)) * 111.32,
+                 (ll[:, 1] - lat) * 111.32)
+    i = int(np.argmin(d))
+    if d[i] > 1.0:
+        return None
+    return z["depth"], z["vs_median"][i], float(z["z_reliable_max"][i])
 
 
 def main():
@@ -61,25 +103,36 @@ def main():
                          "scoring there measures the prior, not the data")
     ap.add_argument("--zmax", type=float, default=None,
                     help="default: each run's own z_reliable_max, capped by the log's extent")
+    ap.add_argument("--root", default=None,
+                    help="score vs_prod3 ARMS instead of the 2026-08-06 per-cell test tree, "
+                         "e.g. Projects/riehen/tomo/2_vs_depth_inversion/vs_prod3")
+    ap.add_argument("--arms", nargs="+", default=None,
+                    help="with --root: arm:volume_file.npz, e.g. R0p:volume_fund.npz")
+    ap.add_argument("--out", default=None,
+                    help="directory for the figure + csv (default: the test tree)")
     a = ap.parse_args()
+
+    if bool(a.root) != bool(a.arms):
+        raise SystemExit("--root and --arms must be given together")
+    entries = a.arms if a.root else COMBOS
 
     zl, vl = michel()
     rows = []
     fig, axs = plt.subplots(1, len(WELLS), figsize=(7.2 * len(WELLS), 8.4), squeeze=False)
-    for k, (well, (cell, zbas)) in enumerate(WELLS.items()):
+    for k, (well, (cell, zbas, wla, wlo)) in enumerate(WELLS.items()):
         ax = axs[0][k]
         ax.step(vl, zl, where="post", color="k", lw=2.4, label="Michel (2016) log", zorder=5)
         ax.axhline(zbas, color="0.35", ls="--", lw=1.4)
         ax.text(0.62, zbas - 0.06, f"basement {zbas:.3f} km", fontsize=8, color="0.35")
         # the log's own basement velocity: median of the log below the known basement depth
         v_bas = float(np.median(vl[zl >= zbas]))
-        for combo in COMBOS:
-            f = f"{TESTS}/test_2026-08-06_waveset_combos/{well}_cell_{cell}/{combo}/bayhunter_result.npz"
-            if not os.path.exists(f):
+        for entry in entries:
+            got = (_from_volume(a.root, entry, wla, wlo) if a.root
+                   else _from_tests(entry, well, cell))
+            if got is None:
                 continue
-            z = np.load(f, allow_pickle=True)
-            d, v = z["depth"], z["vs_median"]
-            zrel = float(z["z_reliable_max"]) if "z_reliable_max" in z else d.max()
+            d, v, zrel = got
+            combo = entry.split(":", 1)[0] if a.root else entry
             zhi = a.zmax if a.zmax else min(zrel, zl.max())
             m = (d >= a.zmin) & (d <= zhi)
             if m.sum() < 5:
@@ -88,16 +141,19 @@ def main():
             dv = v[m] - vref
             i = np.argmax(v >= v_bas)
             zb = float(d[i]) if (v >= v_bas).any() else np.nan
-            rows.append(dict(well=well, combo=combo, phase=combo in PHASE,
+            # vs_prod3 arm names carry the measure in the name (R0p, L0p, L0p_vmax4.5, RLgp,
+            # R0R1p); the old test-tree combos are listed in PHASE explicitly.
+            is_phase = ("0p" in combo or combo.endswith("p")) if a.root else combo in PHASE
+            rows.append(dict(well=well, combo=combo, phase=is_phase,
                              z_used=round(zhi, 2), n=int(m.sum()),
                              rmse=round(float(np.sqrt(np.mean(dv ** 2))), 3),
                              bias=round(float(np.median(dv)), 3),
                              r=round(float(np.corrcoef(v[m], vref)[0, 1]), 3),
                              z_bas=round(zb, 2) if np.isfinite(zb) else np.nan,
                              z_bas_err=round(zb - zbas, 2) if np.isfinite(zb) else np.nan))
-            ax.plot(v, d, "-", color=CCOL[combo], lw=1.5,
-                    alpha=0.95 if combo in PHASE else 0.5,
-                    ls="-" if combo in PHASE else "--", label=combo)
+            ax.plot(v, d, "-", color=CCOL.setdefault(combo, plt.cm.tab20(len(CCOL) / 20)),
+                    lw=1.5, alpha=0.95 if is_phase else 0.5,
+                    ls="-" if is_phase else "--", label=combo)
         ax.set_ylim(min(4.5, zl.max()), 0); ax.set_xlim(0.5, 3.9)
         ax.set_xlabel("Vs [km/s]"); ax.grid(alpha=0.3)
         ax.set_title(f"{well}  (cell {cell})\nsolid = phase-bearing, dashed = group-only",
@@ -107,7 +163,8 @@ def main():
     fig.suptitle("Riehen: posterior Vs vs the Michel (2016) sonic-derived log",
                  fontsize=13, fontweight="bold")
     fig.tight_layout()
-    out = f"{TESTS}/test_2026-08-06_waveset_combos"
+    out = a.out or f"{TESTS}/test_2026-08-06_waveset_combos"
+    os.makedirs(out, exist_ok=True)
     p = os.path.join(out, "michel_log_comparison.png")
     fig.savefig(p, dpi=130, bbox_inches="tight"); plt.close(fig)
 
