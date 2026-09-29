@@ -12,10 +12,10 @@ network: aargau
 label: tspws_ffwin1.5-10_nodedup        # names qc_<label>/; change when settings change
 
 paths:
-  picker_config: /srv/beegfs/scratch/shares/cdff/savardg/NoisePy-ant/param_files/cluster/modesep_aargau_tspws.yaml
-  picks_tree: /srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau/dispersion_unified_vmin0.2_tspws
-  ref_dir: /srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau/vsg_modesep
-  export_dir: /srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau/tomo/1_velocity_maps/inputs_tspws
+  picker_config: /home/users/s/savardg/NoisePy-ant/param_files/cluster/modesep_aargau_tspws.yaml
+  picks_tree: /home/users/s/savardg/extract_higher_modes/Projects/aargau/dispersion_unified_vmin0.2_tspws
+  ref_dir: /home/users/s/savardg/extract_higher_modes/Projects/aargau/vsg_modesep
+  export_dir: /home/users/s/savardg/extract_higher_modes/Projects/aargau/tomo/1_velocity_maps/inputs_tspws
 
 picker:                            # env overrides for dispersion_unified.py
   vmin: 0.2                        # DISP_VMIN (grid floor; NOT a quality gate)
@@ -51,7 +51,7 @@ export:                            # flags for export_unified_tomo_picks.py
   # velocity bounds per wave, "lo:hi" [km/s] -- floors match the vmin=0.2 picking
   vbounds: "fund=0.2:3.6,overtone=1.5:4.5,love=0.2:3.6"
   # optional period-dependent bounds from pick_vbounds.py (applied when the file exists):
-  # bounds_file: /srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau/vbounds_aargau.json
+  # bounds_file: /home/users/s/savardg/extract_higher_modes/Projects/aargau/vbounds_aargau.json
 
 export_phase:                      # second export pass -- phase picks
   measure: phase

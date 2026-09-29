@@ -18,14 +18,14 @@ network:
   code: "SS"                # stack files are SS.<sta5>/SS.<sta5>_SS.<sta5>.h5
 
 paths:
-  vsg_dir: "/srv/beegfs/scratch/shares/cdff/savardg/data/hautesorne/phasevelocity_VSG"
-  stack_root: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/hautesorne/stacks_tspws"
-  project_dir: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/hautesorne"
+  vsg_dir: "/home/users/s/savardg/data/hautesorne/phasevelocity_VSG"
+  stack_root: "/home/users/s/savardg/extract_higher_modes/Projects/hautesorne/stacks_tspws_v2"
+  project_dir: "/home/users/s/savardg/extract_higher_modes/Projects/hautesorne"
   dispersion_dir: null      # default: {project_dir}/dispersion_V6
   ref_dir: null             # default: {project_dir}/vsg_modesep
   model_reference_csv: null
   # Schori (2021) inferred faults, WGS84; needs geopandas (base anaconda env)
-  faults_shapefile: "/srv/beegfs/scratch/shares/cdff/savardg/data/hautesorne/GIS/Schori2021_inferred_faults.shp"
+  faults_shapefile: "/home/users/s/savardg/data/hautesorne/GIS/Schori2021_inferred_faults.shp"
 
 vsg_modesep:
   sign: 1                   # rerun with -1 as sanity check: branches must swap

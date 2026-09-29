@@ -24,13 +24,13 @@ network:
 paths:
   # Output root of scripts/postprocess_stacks/phaseshift_dispersion.py:
   # per-virtual-source panels {ZZ,RR,RZ,ZR}/sources/<NET>.<STA>.npz
-  vsg_dir: "/srv/beegfs/scratch/shares/cdff/savardg/data/riehen/phasevelocity_VSG"
-                            # aargau: /srv/beegfs/scratch/shares/cdff/savardg/data/aargau/phasevelocity_VSG
+  vsg_dir: "/home/users/s/savardg/data/riehen/phasevelocity_VSG"
+                            # aargau: /home/users/s/savardg/data/aargau/phasevelocity_VSG
   # Root of the stacked station-pair H5 files (input to dispersion_batch_modesep.py)
-  stack_root: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/riehen/stacks_tspws"
+  stack_root: "/home/users/s/savardg/extract_higher_modes/Projects/riehen/stacks_tspws_v2"
                             # aargau: /srv/beegfs/scratch/shares/cdff/aargau/crosscorrelations/STACK_CHAA_normZ
   # Analysis project root; all network products are written here
-  project_dir: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/riehen"
+  project_dir: "/home/users/s/savardg/extract_higher_modes/Projects/riehen"
   dispersion_dir: null      # default: {project_dir}/dispersion_V6
   ref_dir: null             # default: {project_dir}/vsg_modesep (stacks + reference curves)
   # Optional layered-model reference CSV for figure overlays (cosmetic; null = skip
@@ -38,7 +38,7 @@ paths:
   model_reference_csv: null # aargau: {vsg_dir}/analysis/reference_curves.csv
   # Optional faults shapefile (WGS84) for lateral_structure_map.py; needs geopandas
   # (base anaconda env only). null = skip the fault-crossing analysis.
-  faults_shapefile: "/srv/beegfs/scratch/shares/cdff/savardg/data/riehen/Faults_serianex_trimmed/Faults.shp"
+  faults_shapefile: "/home/users/s/savardg/data/riehen/Faults_serianex_trimmed/Faults.shp"
                             # aargau: null
 
 vsg_modesep:                # network mode-separated stack (vsg_modesep.py)

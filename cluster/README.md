@@ -33,10 +33,15 @@ a killed task never leaves a partial `.h5`.
 Edit the top of `env.sh`:
 
 ```sh
-NOISEPY=/srv/beegfs/scratch/shares/cdff/savardg/NoisePy-ant
-PROJ=/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects
-CONDA_ENV=das-ambient-noise
+NOISEPY=/home/users/s/savardg/NoisePy-ant
+PROJ=/home/users/s/savardg/extract_higher_modes/Projects
+CONDA_ENV=noisepy
 ```
+
+(Everything lives in `$HOME` since July 2026: scratch had too few file slots. The old
+`/srv/beegfs/scratch/shares/cdff/savardg` tree no longer exists. Configs generated with that prefix
+resolved `ref_dir` to a missing directory, and the picker then silently disabled phase. Regenerate
+with `make_cluster_configs.py`; its defaults are the `$HOME` paths since 2026-09-29.)
 
 If you change them, regenerate the configs so the YAML paths agree — `preflight.sh`
 verifies that they do:

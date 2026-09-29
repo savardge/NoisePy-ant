@@ -16,12 +16,12 @@ network:
   code: "AA"
 
 paths:
-  vsg_dir: "/srv/beegfs/scratch/shares/cdff/savardg/data/aargau/phasevelocity_VSG"
-  stack_root: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau/stacks_tspws"
-  project_dir: "/srv/beegfs/scratch/shares/cdff/savardg/extract_higher_modes/Projects/aargau"
+  vsg_dir: "/home/users/s/savardg/data/aargau/phasevelocity_VSG"
+  stack_root: "/home/users/s/savardg/extract_higher_modes/Projects/aargau/stacks_tspws_v2"
+  project_dir: "/home/users/s/savardg/extract_higher_modes/Projects/aargau"
   dispersion_dir: null      # default: {project_dir}/dispersion_V6
   ref_dir: null             # default: {project_dir}/vsg_modesep
-  model_reference_csv: "/srv/beegfs/scratch/shares/cdff/savardg/data/aargau/phasevelocity_VSG/analysis/reference_curves.csv"
+  model_reference_csv: "/home/users/s/savardg/data/aargau/phasevelocity_VSG/analysis/reference_curves.csv"
   faults_shapefile: null    # no mapped faults for Aargau -> lateral map runs maps-only
 
 vsg_modesep:

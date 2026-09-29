@@ -49,7 +49,7 @@ LOCAL_STACK_ROOTS = [
 
 def rewrite(text, net, a):
     """Path-only rewrite. Order matters: stack_root before the generic prefix swap."""
-    tspws_tree = "%s/%s/stacks_tspws" % (a.proj, net)
+    tspws_tree = "%s/%s/%s" % (a.proj, net, a.stack_tree)
     for old in LOCAL_STACK_ROOTS:
         text = re.sub(r'(stack_root:\s*)"%s"' % re.escape(old),
                       r'\1"%s"' % tspws_tree, text)
@@ -69,11 +69,20 @@ def rewrite(text, net, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--noisepy", default=CDFF + "/savardg/NoisePy-ant",
+    # 2026-09-29: defaults moved from CDFF/savardg/... to $HOME. The pipeline moved to home in July
+    # (scratch file-count quota) and CDFF/savardg no longer exists; configs generated with the old
+    # defaults resolved ref_dir to a missing directory and the picker silently disabled PHASE for
+    # every stream (first stacks_tspws_v2 re-pick, 2026-09-27).
+    home = "/home/users/s/savardg"
+    ap.add_argument("--noisepy", default=home + "/NoisePy-ant",
                     help="code root on the cluster")
-    ap.add_argument("--proj", default=CDFF + "/savardg/extract_higher_modes/Projects",
+    ap.add_argument("--proj", default=home + "/extract_higher_modes/Projects",
                     help="output root on the cluster")
-    ap.add_argument("--data", default=CDFF + "/savardg/data",
+    ap.add_argument("--stack-tree", default="stacks_tspws_v2",
+                    help="ts-PWS tree under <proj>/<net>/ used as stack_root. Default stacks_tspws_v2 "
+                         "(2026-09-26 rebuild: inlined eq. 11 icwt + Allstack_linear); stacks_tspws is "
+                         "the July build with the pycwt 0.3.0a22 sqrt(f) tilt (Aargau, Haute-Sorne).")
+    ap.add_argument("--data", default=home + "/data",
                     help="auxiliary data root (vsg_dir / shapefiles; UNUSED by "
                          "pick/QC/export, kept only so the configs stay loadable)")
     ap.add_argument("--nproc", type=int, default=32,
