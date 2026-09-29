@@ -79,6 +79,24 @@ Gates (defaults; disable any with --disable g1,g2,... / tune via CLI):
                            segment ON the reference and keeps a cycle-skipped one (the side/
                            length rule cannot tell which is the artefact). See
                            Projects/method_tests/1_picking/test_2026-09-27_phase_unwrap_omega_gates_crossnet/.
+    phase_ref_crest phase: Rayleigh fundamental only, OPT-IN (--phase-ref-crest; ADDED 2026-09-27).
+                           The pair's phase values (sorted by T_scale) are split where the group
+                           arrival jumps by > --ref-crest-periods periods (the unwrap's packet
+                           rule) or c jumps by > --ref-crest-jump (25 %%). The ANCHOR is the piece
+                           (>= 2 values) with the smallest median |ln c/c_ref|, c_ref being the
+                           pair's phase reference (network curve, or the per-pair W/E mixture with
+                           --ref-crest-west/east/stations/boundary). With r = the anchor's median
+                           c/c_ref, every other piece is dropped whose median distance from
+                           r*c_ref exceeds half the crest spacing (r c_ref)^2 T/d, i.e. which sits
+                           on another 2*pi crest than the anchor. The reference is NaN outside its
+                           measured period range; a piece with < half its values covered is not
+                           judged (kept); the anchor is always kept. Unlike phase_jump/phase_ridge
+                           it decides WHICH side of a break is wrong from the reference, not from
+                           segment length or period side. Reference-free check (near-duplicate
+                           paths): 79-87 %% of the values it removes sit > half a crest from their
+                           neighbours (old gates 60 %%); cost 5.8 %% Aargau, 4.8 %% Riehen.
+                           Blind where the reference is undefined. Evidence:
+                           Projects/method_tests/1_picking/test_2026-09-27_phase_unwrap_omega_gates_crossnet/.
     group_scale_dedupe group: same principle for GROUP picks -- the FTAN image interpolates the
                            log-spaced CWT scales onto the 0.1 s nominal grid, so above ~2 s adjacent
                            nominal-period picks are the same measurement (Aargau: x1.35 duplication
@@ -152,6 +170,23 @@ ap.add_argument("--phase-jump", type=float, default=0.0,
                 help="Rayleigh-fundamental phase_jump gate: relative rise of c between "
                      "neighbouring CWT periods above which the short-period segment is dropped. "
                      "0 = off (default; 0.25 was the 2026-09-26 proposal, see the gate notes above).")
+ap.add_argument("--phase-ref-crest", action="store_true",
+                help="enable the phase_ref_crest gate (Rayleigh fundamental phase; see docstring). "
+                     "Reference: --ref-crest-ref, else <--ref-dir>/ref_fundamental_phase.txt; "
+                     "per-pair W/E mixture when --ref-crest-west/east/stations are given.")
+ap.add_argument("--ref-crest-ref", default=None, help="phase_ref_crest: network reference file")
+ap.add_argument("--ref-crest-west", default=None,
+                help="phase_ref_crest: WEST reference (file name in --ref-dir, or a path)")
+ap.add_argument("--ref-crest-east", default=None,
+                help="phase_ref_crest: EAST reference (file name in --ref-dir, or a path)")
+ap.add_argument("--ref-crest-stations", default=None,
+                help="phase_ref_crest: stations CSV (id, longitude, latitude) for the W/E fraction")
+ap.add_argument("--ref-crest-boundary", type=float, default=2616.0,
+                help="phase_ref_crest: W/E boundary, LV95 easting [km] (Riehen: 2616)")
+ap.add_argument("--ref-crest-periods", type=float, default=1.0,
+                help="phase_ref_crest: packet break when the group arrival jumps by > this many periods")
+ap.add_argument("--ref-crest-jump", type=float, default=0.25,
+                help="phase_ref_crest: also break where c changes by > this fraction between periods")
 ap.add_argument("--vave", type=float, default=3.0,
                 help="must match the picker's Config.vave (3.0); sets Tmax = distance/vave.")
 ap.add_argument("--u-bin", type=float, default=0.0,
@@ -481,6 +516,73 @@ if args.phase_ridge_periods > 0 and "phase_ridge" not in DISABLED:
     df.loc[kill, "phase_killer"] = "phase_ridge"
     df.loc[kill, "phase_ok"] = False
 
+# 12d phase ref crest (Rayleigh fundamental, opt-in): drop pieces on another 2*pi crest than the
+#     piece closest to the pair's reference (see docstring).
+def _ref_crest_keep(T, U, c, dist, cref, n_periods, jump, min_anchor=2):
+    """Keep-mask for one pair's phase values sorted by period (see docstring, phase_ref_crest)."""
+    brk = _packet_breaks(T, U, dist, n_periods) | \
+        (np.abs(np.diff(c)) / np.minimum(c[1:], c[:-1]) > jump)
+    seg = np.cumsum(np.r_[True, brk])
+    ids = np.unique(seg)
+    judged = [i for i in ids if np.isfinite(cref[seg == i]).mean() >= 0.5]
+    if not judged:
+        return np.ones(len(c), bool)
+    mis = {i: np.nanmedian(np.abs(np.log(c[seg == i] / cref[seg == i]))) for i in judged}
+    pool = [i for i in judged if (seg == i).sum() >= min_anchor] or judged
+    anchor = min(pool, key=lambda i: mis[i])
+    r = np.nanmedian(c[seg == anchor] / cref[seg == anchor])
+    keep = np.ones(len(c), bool)
+    for i in judged:
+        if i == anchor:
+            continue
+        m = seg == i
+        pred = r * cref[m]
+        keep[m] = np.nanmedian(np.abs(c[m] - pred) / (pred ** 2 * T[m] / dist)) <= 0.5
+    return keep
+
+
+if args.phase_ref_crest and "phase_ref_crest" not in DISABLED:
+    from noisepy import regional_ref as _rr
+
+    def _ref_path(x):
+        return x if (x is None or os.path.isabs(x) or not args.ref_dir) else os.path.join(args.ref_dir, x)
+    _net_ref = _rr.load_ref(_ref_path(args.ref_crest_ref) if args.ref_crest_ref
+                            else os.path.join(args.ref_dir, "ref_fundamental_phase.txt"))
+    _regional = bool(args.ref_crest_west and args.ref_crest_east and args.ref_crest_stations)
+    if _regional:
+        _rW, _rE = _rr.load_ref(_ref_path(args.ref_crest_west)), _rr.load_ref(_ref_path(args.ref_crest_east))
+        _fW = _rr.pair_west_fraction(_rr.station_eastings_km(args.ref_crest_stations),
+                                     df["pair"].unique(), args.ref_crest_boundary)
+
+    def _pair_ref(pair, T):
+        w = _fW.get(pair) if _regional else None
+        if w is None:
+            return _net_ref(T)
+        sw = w / _rW(T) if w > 0 else 0.0
+        se = (1 - w) / _rE(T) if w < 1 else 0.0
+        return 1.0 / (sw + se)
+
+    key = ["pair", "component", "lag", "mode"]
+    ph = df[df["phase_ok"] & (df["wave_type"] == "rayleigh") & (df["mode"] == "fundamental")
+            & np.isfinite(df["T_scale"])].sort_values(key + ["T_scale"])
+    kill_idx = []
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for (pair, *_), g in ph.groupby(key, sort=False):
+            if len(g) < 2:
+                continue
+            T = g["T_scale"].to_numpy(float)
+            c = g["phase_velocity"].to_numpy(float)
+            keep = _ref_crest_keep(T, g["group_velocity"].to_numpy(float), c,
+                                   float(g["distance"].iloc[0]), np.asarray(_pair_ref(pair, T), float),
+                                   args.ref_crest_periods, args.ref_crest_jump)
+            kill_idx.extend(g.index[~keep])
+    kill = df.index.isin(kill_idx)
+    n = int(kill.sum())
+    if n:
+        budget.append(("phase_ref_crest", "rayleigh", "fundamental", "phase", n))
+    df.loc[kill, "phase_killer"] = "phase_ref_crest"
+    df.loc[kill, "phase_ok"] = False
+
 # 13 group scale dedupe: same single-scale logic for group picks (see docstring). The velocity bin
 # keeps genuinely distinct branches at one scale (topology multi-ridge) as separate measurements.
 if args.group_scale_dedupe and "group_scale_dedupe" not in DISABLED:
@@ -528,7 +630,8 @@ lines = [f"QC rejection budget -- {len(files)} pairs, {len(df):,} input rows",
          f"gates disabled: {sorted(DISABLED) if DISABLED else 'none'}", ""]
 order = [g for g in ["snr", "vbounds", "farfield", "band_edge", "suppression", "ot_res", "love_env",
                      "love_overlap", "rf_leak", "ot_leak", "phase_phys", "station",
-                     "scale_dedupe", "phase_jump", "phase_ridge", "group_scale_dedupe"] if g not in DISABLED]
+                     "scale_dedupe", "phase_jump", "phase_ridge", "phase_ref_crest",
+                     "group_scale_dedupe"] if g not in DISABLED]
 for g in order:
     sub = bud[bud.gate == g]
     tot = int(sub["killed"].sum())
