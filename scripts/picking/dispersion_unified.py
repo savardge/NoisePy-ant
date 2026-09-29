@@ -138,6 +138,7 @@ def process(path):
                 refs = dict(refs)
                 refs[R["key"]] = R["reg"].picker_callable(pair, R["fallback"], for_group_ref=_G["refs"][R["key"]])
         ccf_snr = up.load_snr_ccf(path, STACK_METHOD, ccf, _G["comps"])   # Allstack_linear if present
+        ccf = up.trim_ccf(ccf, params)          # no-op unless Config.PICK_TRIM_VMIN (option A)
         rows = up.pick_all_modes(params, ccf, refs, STACK_METHOD, cfg=up.Config, ccf_snr=ccf_snr)
     except Exception as e:
         return f"err:{type(e).__name__}"
@@ -155,7 +156,8 @@ def main():
     from noisepy.unified_picking import Config as _C
     import pycwt
     print(f"[unified] {len(files)} pairs | net={NET} stack={STACK_METHOD} nproc={NPROC}\n"
-          f"          snr on {_C.SNR_STACK} stack, noise window {_C.SNR_NOISE_WINDOW} | "
+          f"          snr on {_C.SNR_STACK} stack, noise window {_C.SNR_NOISE_WINDOW}, "
+          f"{'AT THE PICK' if _C.SNR_AT_PICK else 'window max'}, pick trim vmin {_C.PICK_TRIM_VMIN} | "
           f"pycwt {pycwt.__version__} (ts_pws inverse is inlined, version-independent)\n"
           f"          refs={REF_DIR}\n          out={OUT_ROOT}", flush=True)
     from collections import Counter

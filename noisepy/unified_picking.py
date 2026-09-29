@@ -95,6 +95,17 @@ class Config:
     # test_2026-09-26_tspws_snr_noise_window/.
     SNR_STACK = "linear"          # 'linear' = Allstack_linear when present; 'self' = the picked trace
     SNR_NOISE_WINDOW = "after"    # 'after' | 'legacy' (see dispersion.nb_filt_gauss)
+    # snr_nbG AT THE PICK (2026-09-27, option "D"): max narrowband envelope within +-T/2 of t = dist/U
+    # over the 'after' noise rms, instead of the max over the whole signal window dist/vmax..dist/vmin.
+    # The window max let a fast spurious pick inherit the SNR of the real slow arrival at the same
+    # period (HS R0 0.2-0.9 s survivors: median 2.83 km/s vs 1.57 at the pick). Needs 'after'.
+    # See extract_higher_modes/Projects/method_tests/2_pick_qc/test_2026-09-26_stack_method_and_snr_gate/.
+    SNR_AT_PICK = False
+    # Trim the picked trace to +-(dist/PICK_TRIM_VMIN + 64 samples) before picking (option "A": pick on
+    # the Allstack_linear of a v2 file with the SAME compute_cwt window as the lag-trimmed ts-PWS
+    # trace). None = no trim. The SNR is still measured on the untrimmed trace.
+    PICK_TRIM_VMIN = None
+    PICK_TRIM_PAD = 64
 
 
 # Env overrides for controlled re-pick experiments (inherited by spawned workers).
@@ -108,6 +119,10 @@ if os.environ.get("DISP_SNR_STACK"):
     Config.SNR_STACK = os.environ["DISP_SNR_STACK"]
 if os.environ.get("DISP_SNR_NOISE"):
     Config.SNR_NOISE_WINDOW = os.environ["DISP_SNR_NOISE"]
+if os.environ.get("DISP_SNR_AT_PICK"):
+    Config.SNR_AT_PICK = os.environ["DISP_SNR_AT_PICK"] == "1"
+if os.environ.get("DISP_PICK_TRIM_VMIN"):
+    Config.PICK_TRIM_VMIN = float(os.environ["DISP_PICK_TRIM_VMIN"])
 
 
 # Components that must be present to synthesize the Rayleigh modes.
@@ -187,6 +202,42 @@ def load_pair(sfile, stack_method, comps):
     params, raw = read_stack_components(sfile, "Allstack_" + stack_method, comps)
     ccf = {comp: split_lags(td) for comp, td in raw.items()}
     return params, ccf
+
+
+def trim_ccf(ccf, params, cfg=Config):
+    """Folded ccf cut to the first int(dist/PICK_TRIM_VMIN/dt) + PICK_TRIM_PAD + 1 samples per lag:
+    exactly the folded length of a build_tspws_stacks.py trace, so compute_cwt sees the same window."""
+    if not cfg.PICK_TRIM_VMIN:
+        return ccf
+    n = int(params["dist"] / cfg.PICK_TRIM_VMIN / params["dt"]) + cfg.PICK_TRIM_PAD + 1
+    return {c: {lag: np.asarray(x)[:n] for lag, x in d.items()} for c, d in ccf.items()}
+
+
+def _noise_after(env, per, dt, dist, cfg=Config, gap_periods=2.0, min_noise_s=10.0):
+    """Per-period envelope rms in the 'after' noise window of dispersion.nb_filt_gauss (same rule)."""
+    sw_end = int(dist / cfg.vmin / dt)
+    sw_len = sw_end - int(dist / cfg.vmax / dt)
+    out = np.full(len(per), np.nan)
+    for i, T in enumerate(per):
+        s0 = sw_end + int(np.ceil(gap_periods * T / dt))
+        s1 = min(env.shape[1], s0 + sw_len)
+        if (s1 - s0) * dt >= max(min_noise_s, 5 * T):
+            out[i] = np.sqrt(np.mean(env[i, s0:s1].astype(float) ** 2))
+    return out
+
+
+def _bank_at_pick(bank, period, U, dist):
+    """SNR at the pick: max envelope within +-T/2 of t = dist/U over that period's noise rms."""
+    if bank is None or len(bank) < 5 or not (U > 0):
+        return np.nan
+    pers, _, env, noise, dt = bank
+    i = int(np.argmin(np.abs(pers - period)))
+    t = dist / U
+    j0 = max(0, int((t - period / 2) / dt))
+    j1 = min(env.shape[1], int(np.ceil((t + period / 2) / dt)) + 1)
+    if j1 <= j0 or not np.isfinite(noise[i]):
+        return np.nan
+    return float(env[i, j0:j1].max() / noise[i])
 
 
 def load_snr_ccf(sfile, stack_method, ccf, comps, cfg=Config):
@@ -383,7 +434,8 @@ def _emit_rows(rows, nper, gv, score, corr, *, dist, azi, baz, comp, wave, mode,
                         "ratio_d_lambda": ratio, "azimuth": azi, "backazimuth": baz, "distance": dist,
                         "component": comp, "wave_type": wave, "mode": mode, "lag": lag,
                         "stack_method": stack_method, "pick_method": pm})
-        r["snr_nbG"] = _bank_at(snr_bank, T)
+        r["snr_nbG"] = (_bank_at_pick(snr_bank, T, U, dist) if cfg.SNR_AT_PICK
+                        else _bank_at(snr_bank, T))
         r["snr_bb"] = snr_bb
         r["snr_bb_other"] = snr_bb_other
         r["snr_nbG_other"] = _bank_at(snr_other_bank, T)
@@ -418,7 +470,7 @@ def _emit_rows(rows, nper, gv, score, corr, *, dist, azi, baz, comp, wave, mode,
 def _bank_at(bank, period):
     if bank is None:
         return np.nan
-    pers, vals = bank
+    pers, vals = bank[0], bank[1]
     return float(vals[int(np.argmin(np.abs(pers - period)))])
 
 
@@ -466,9 +518,13 @@ def pick_all_modes(params, ccf, refs, stack_method, cfg=Config, ccf_snr=None):
 
     def snr_bank(sig):
         try:
-            snr_nbG, snr_bb, _, _ = dispersion.nb_filt_gauss(
+            snr_nbG, snr_bb, _, env = dispersion.nb_filt_gauss(
                 sig, dt, 1.0 / per_grid, dist, alpha=cfg.gauss_alpha, vmin=cfg.vmin, vmax=cfg.vmax,
                 noise_window=cfg.SNR_NOISE_WINDOW)
+            if cfg.SNR_AT_PICK:
+                if cfg.SNR_NOISE_WINDOW != "after":
+                    raise ValueError("SNR_AT_PICK needs SNR_NOISE_WINDOW='after'")
+                return (per_grid, snr_nbG, env, _noise_after(env, per_grid, dt, dist, cfg), dt), float(snr_bb)
             return (per_grid, snr_nbG), float(snr_bb)
         except Exception:
             return None, np.nan
