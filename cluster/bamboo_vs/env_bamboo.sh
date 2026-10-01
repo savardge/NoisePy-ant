@@ -31,6 +31,12 @@ net_paths() {           # usage: net_paths <net>  -> sets GROUP_PROD, PHASE_PROD
     esac
     GROUP_PROD=$INPUTS/$net/tspws_group_blanket_dx${dx}_prod3_k3/production
     PHASE_PROD=$INPUTS/$net/tspws_phase_blanket_dx${dx}_prod3_k3/production
+    # 2026-10-01 (vs_prod4): GROUP_TREE / PHASE_TREE name the map trees explicitly, e.g.
+    #   SCRATCH_VS=.../vs_prod4 GROUP_TREE=tspws_group_blanket_dx0.5_prod3_k3_tspwsv2_D_snrpick_topo
+    # Unset -> the vs_prod3 defaults above, so nothing changes for the old campaign.
+    [ -n "${GROUP_TREE:-}" ] && GROUP_PROD=$INPUTS/$net/$GROUP_TREE/production
+    [ -n "${PHASE_TREE:-}" ] && PHASE_PROD=$INPUTS/$net/$PHASE_TREE/production
+    return 0
 }
 
 # config -> production root + waveset + extra driver flags.
