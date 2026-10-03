@@ -46,7 +46,11 @@ COMMON=(--production "$PROD" --config "$CONFIG_YAML" --net "$NET"
         --bayhunter-python "$BH_PY" --bayhunter-runner run_bayhunter_cell.py)
 
 if [ "$STAGE" = assemble ]; then
-    srun "$BH_PY" grid_vs_inversion.py "${COMMON[@]}" $EXTRA --assemble-only
+    # 2026-10-02: the assemble branch now also takes EXTRA_FLAGS (decoded as below), so assembly-time
+    # flags such as --min-obs-rungs or an arm's --period-ranges can be delivered; before this the
+    # branch passed only the cfg's $EXTRA and silently ignored anything else (see assemble_riehen_grids).
+    AF=${EXTRA_FLAGS:-}; AF=${AF//@C@/,}
+    srun "$BH_PY" grid_vs_inversion.py "${COMMON[@]}" $EXTRA ${AF:-} --assemble-only
     exit 0
 fi
 

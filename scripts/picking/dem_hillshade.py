@@ -7,6 +7,27 @@ extent = [lon0, lon1, lat0, lat1] ready for `ax.imshow(hs, extent=extent, cmap="
 import numpy as np
 
 
+def smooth_dem(elev, extent, sigma_km):
+    """Gaussian-smoothed copy of a DEM (row 0 = north), sigma in km, NaN-aware (normalised
+    convolution). This is the HANG datum for the 1-D Vs columns: the imprint test
+    (hautesorne/.../tests/test_2026-09-25_topographic_imprint) found the data referenced to the
+    surface smoothed at sigma ~1 km, not to 30 m relief. sigma_km <= 0 returns elev unchanged."""
+    if sigma_km is None or sigma_km <= 0:
+        return elev
+    from scipy.ndimage import gaussian_filter
+    ny, nx = elev.shape
+    lon0, lon1, lat0, lat1 = extent
+    latm = 0.5 * (lat0 + lat1)
+    dy_m = abs(lat1 - lat0) / max(ny, 1) * 111_000.0
+    dx_m = abs(lon1 - lon0) / max(nx, 1) * 111_000.0 * np.cos(np.deg2rad(latm))
+    sig = (sigma_km * 1e3 / dy_m, sigma_km * 1e3 / dx_m)
+    ok = np.isfinite(elev)
+    num = gaussian_filter(np.where(ok, elev, 0.0), sig, mode="nearest")
+    den = gaussian_filter(ok.astype(float), sig, mode="nearest")
+    out = np.where(den > 1e-6, num / np.maximum(den, 1e-6), np.nan)
+    return np.where(ok, out, np.nan)
+
+
 def load_dem(path, bbox=None, pad=0.02):
     """Return (elev, extent) from a rasterio-readable DEM, optionally cropped to
     bbox=(lon0,lon1,lat0,lat1) with `pad` degrees margin. extent=[lon0,lon1,lat0,lat1]."""

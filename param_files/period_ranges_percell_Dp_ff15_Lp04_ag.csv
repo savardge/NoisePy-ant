@@ -1,0 +1,19 @@
+net,measure,wave,T_available_min,T_available_max,n_periods,T_valid_min,T_valid_max,reason
+aargau,group,fund,0.2,6.45,39,1.08,4.83,"2026-09-10 aargau D'-analogue: floor 1.08 s (R0g_wellcells: Riniken group picks -5..-6.5 sigma FAST at 0.72/0.81 s, +1.3..+2.5 at 1.02-1.21 s = the HS fast-branch tail; 1.08 chosen as at GVL-1, to be checked); cap 5.75 s = last rung with >=300 rays (6.09/6.45 s have 178/67 rays network-wide); per-cell turnover caps applied on top via --period-caps"
+aargau,group,overtone,0.2,4.06,31,1.92,4.06,
+aargau,group,love,0.2,6.45,39,2.03,4.06,unused in these arms (Love enters as phase only); HS band kept as placeholder
+aargau,phase,fund,0.2,6.45,39,0.3,4.56,2026-09-11 gated tree k3_hankel_ff1.5: last rung with >=300 rays (4.56 s: 647; 4.83 s: 255); floor 0.30 s as HS arm D
+aargau,phase,overtone,0.2,4.06,31,0.2,4.06,
+aargau,phase,love,0.2,6.09,38,0.40,4.31,"Lp04 pilot 2026-10-02 (vs_prod4): on the option-D maps the 0.30 s Love phase map gained 200 rays and +0.107 km/s (var_red 0.18); that rung sits +0.10 above the 0.40 s rung and the model misfits it -1.3 sigma, forking the free-sigma chains and masking the top 2 km along the trough (44 cells incl. Riniken). Floor 0.30 -> 0.40 s; everything else = percell_Dp_ff15"
+riehen,group,fund,0.2,4.83,34,0.72,4.83,
+riehen,group,overtone,0.2,3.23,27,1.28,3.23,
+riehen,group,love,0.2,4.83,34,0.6,4.83,
+riehen,phase,fund,0.2,4.31,32,0.3,4.31,
+riehen,phase,overtone,0.2,3.23,27,0.51,2.87,
+riehen,phase,love,0.2,4.83,34,1.02,4.83,
+hautesorne,group,fund,0.2,8.61,44,1.08,5.0,arm D' 2026-09-09: group floor 0.91 -> 1.08 s. With phase 0.30-5.75 s in the joint model (arm D) the group picks at 0.91/1.02 s sit 3.0/1.4 sigma FAST (long-path fast-branch tail reaches ~1 s; 1.08 s is -0.1 sigma); sigma_group had inflated 0.030->0.038 to absorb them
+hautesorne,group,overtone,0.2,4.83,34,2.03,4.56,
+hautesorne,group,love,0.2,8.61,44,2.03,4.06,"Love arms 2026-09-10: map U>c below 0.91 s AND at 1.28-1.81 s (fast-branch/overtone contamination), U rises toward c past 4.3 s (far-field); only 2.03-4.06 s is kinematically consistent"
+hautesorne,phase,fund,0.2,9.12,45,0.3,6.0,"arm D 2026-09-09: phase floor back to 0.30 s -- the U>=c violation below 0.91 s is a GROUP fast-branch artefact (long paths), phase is unimodal and R0p fits 0.30 s within 1 sigma; group floor stays 0.91"
+hautesorne,phase,overtone,0.2,4.56,33,1.08,4.56,
+hautesorne,phase,love,0.2,8.61,44,0.3,4.06,Love arms 2026-09-10: phase unimodal from 0.30 s near GVL-1; on the 1.5-lambda gated tree N<15k and c turns down past 4.06 s

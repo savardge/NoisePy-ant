@@ -176,6 +176,10 @@ def main():
                          "the mask hides, with the reach boundary outlined. A fully blank "
                          "masked map (e.g. riehen R0g at 4 km, where 0%% of cells reach) is "
                          "indistinguishable from a broken figure without this companion.")
+    ap.add_argument("--topo-smooth-km", type=float, default=1.0, metavar="SIGMA",
+                    help="sections: hang the columns on the DEM smoothed with a 2-D Gaussian of this sigma "
+                         "[km] (0 = raw). The top strip still draws the real ground; the hang is the dashed "
+                         "line. 1.0 per the Haute-Sorne imprint test (2026-09-25).")
     ap.add_argument("--maps-only", action="store_true",
                     help="skip the section figures (much faster when only maps changed)")
     ap.add_argument("--disagree-ref", default=None,
@@ -343,6 +347,8 @@ def main():
         raise SystemExit("no stations.csv found; tried:\n  " + "\n  ".join(_st_cands))
     st = np.genfromtxt(_st, delimiter=",", names=True)
     hs = _hillshade(elev, extent)
+    import dem_hillshade as DH
+    elev_hang = DH.smooth_dem(elev, extent, a.topo_smooth_km)     # datum for the section columns
     # optional Geo2Riehen seismic horizons (riehen; prep_fig_assets --stage geo2riehen)
     hz_path = f"{E}/{net}/tomo/2_vs_depth_inversion/fig_assets_{net}_horizons.npz"
     horizons = np.load(hz_path) if os.path.exists(hz_path) else None
@@ -706,7 +712,7 @@ def main():
         plon, plat = lonlat[sel, 0], lonlat[sel, 1]
         px, py = km_xy(plon, plat, lat0)
         along = np.concatenate([[0], np.cumsum(np.hypot(np.diff(px), np.diff(py)))])
-        surf = bilinear(elev, extent, plon, plat)                # m a.s.l. per column
+        surf = bilinear(elev_hang, extent, plon, plat)           # hang datum per column (smoothed DEM)
         # The DEM is read BOUNDLESS (see dem_hillshade.load_dem), so ground outside the SRTM
         # tile is NaN. pcolormesh rejects non-finite coordinate arrays outright, so a profile
         # crossing the uncovered strip used to abort the whole figure. Interpolate the surface
@@ -724,7 +730,7 @@ def main():
             n_f = max(int(along[-1] / (GRID["cell"] / GRID["refine"])) + 1, len(sel))
             Vs, f_lon2, f_lat2 = sample_grid(plon, plat, n_f)
             along_f = np.linspace(along[0], along[-1], n_f)
-            surf_f = bilinear(elev, extent, f_lon2, f_lat2)
+            surf_f = bilinear(elev_hang, extent, f_lon2, f_lat2)
             if not np.isfinite(surf_f).all():
                 gg = np.isfinite(surf_f)
                 surf_f = (np.interp(along_f, along_f[gg], surf_f[gg]) if gg.sum() >= 2
@@ -758,6 +764,9 @@ def main():
                       else np.full_like(f_topo, np.nanmean(surf)))
         ax_t.fill_between(f_along, f_topo, f_topo.min() - 10, color="0.75", lw=0)
         ax_t.plot(f_along, f_topo, "k-", lw=0.9)
+        if a.topo_smooth_km > 0:                                   # the hang datum, for the record
+            f_hang = bilinear(elev_hang, extent, f_lon, f_lat)
+            ax_t.plot(f_along, f_hang, "k--", lw=0.7, alpha=0.8)
         ax_t.set_ylabel("m a.s.l.", fontsize=8)
         ax_t.tick_params(labelbottom=False, labelsize=7)
         ax_t.set_title(f"{net} — {axis} section "

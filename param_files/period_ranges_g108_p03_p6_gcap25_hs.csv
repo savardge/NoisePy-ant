@@ -1,0 +1,19 @@
+net,measure,wave,T_available_min,T_available_max,n_periods,T_valid_min,T_valid_max,reason
+riehen,group,fund,0.2,4.83,34,0.72,4.83,
+riehen,group,overtone,0.2,3.23,27,1.28,3.23,
+riehen,group,love,0.2,4.83,34,0.6,4.83,
+riehen,phase,fund,0.2,4.31,32,0.3,4.31,
+riehen,phase,overtone,0.2,3.23,27,0.51,2.87,
+riehen,phase,love,0.2,4.83,34,1.02,4.83,
+aargau,group,fund,0.2,6.45,39,0.72,5.0,5 s cap applied by user decision 2026-08-31; NOT measured on aargau (no Tmax sweep run there) - inherited from the hautesorne result
+aargau,group,overtone,0.2,4.06,31,1.92,4.06,
+aargau,group,love,0.2,6.45,39,0.91,6.45,
+aargau,phase,fund,0.2,6.45,39,0.3,6.45,
+aargau,phase,overtone,0.2,4.06,31,0.2,4.06,
+aargau,phase,love,0.2,6.09,38,0.6,6.09,
+hautesorne,group,fund,0.2,8.61,44,1.08,2.5,gcap2.5 pilot 2026-10-01 (vs_prod4): on the option-D maps the group MAPS at GVL-1 run 0.17-0.36 km/s faster than their own nearby picks at 3.0-3.6 s and exceed the kinematic U from phase by 0.2-0.5; cap the group band where map and picks disagree. Everything else = g108_p03_p6
+hautesorne,group,overtone,0.2,4.83,34,2.03,4.56,
+hautesorne,group,love,0.2,8.61,44,1.02,8.61,
+hautesorne,phase,fund,0.2,9.12,45,0.30,6.0,"arm D 2026-09-09: phase floor back to 0.30 s -- the U>=c violation below 0.91 s is a GROUP fast-branch artefact (long paths), phase is unimodal and R0p fits 0.30 s within 1 sigma; group floor stays 0.91"
+hautesorne,phase,overtone,0.2,4.56,33,1.08,4.56,
+hautesorne,phase,love,0.2,8.61,44,0.72,8.61,
